@@ -244,6 +244,19 @@ function confirmAction(chatId: string, answer: string): void {
   session.status = 'thinking';
 }
 
+function typeText(chatId: string, text: string): { success?: boolean; error?: string } {
+  const session = sessions.get(chatId);
+  if (!session || session.status === 'exited') return { error: 'Session not active' };
+
+  try {
+    session.pty.write(text);
+  } catch (err) {
+    console.error(`[claude:${chatId}] typeText write error:`, err);
+    return { error: 'Failed to write to PTY' };
+  }
+  return { success: true };
+}
+
 function sendKeySequence(chatId: string, key: AllowedKey): { success?: boolean; error?: string } {
   const session = sessions.get(chatId);
   if (!session || session.status === 'exited') return { error: 'Session not active' };
@@ -305,6 +318,7 @@ export default {
   sendPrompt,
   cancelPrompt,
   confirmAction,
+  typeText,
   sendKeySequence,
   endSession,
   getSession,

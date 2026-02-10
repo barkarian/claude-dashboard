@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSocket } from '../../context/SocketContext.jsx';
 import FilePicker from './FilePicker.jsx';
 
-export default function PromptInput({ projectId, onSend, onCancel, isThinking, disabled }) {
+export default function PromptInput({ projectId, onSend, onCancel, isThinking, disabled, onTextChange }) {
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -65,7 +65,11 @@ export default function PromptInput({ projectId, onSend, onCancel, isThinking, d
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            const newVal = e.target.value;
+            if (onTextChange) onTextChange(newVal, value);
+            setValue(newVal);
+          }}
           onKeyDown={handleKeyDown}
           className="input resize-none min-h-[42px] max-h-[200px] py-2.5"
           placeholder={disabled ? 'Session not active' : isThinking ? 'Claude is thinking...' : 'Message Claude Code... (@ for files, Cmd+Enter to send)'}

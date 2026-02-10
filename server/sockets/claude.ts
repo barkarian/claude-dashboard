@@ -1,7 +1,7 @@
 import claudeManager from '../services/claudeManager.ts';
 import projectManager from '../services/projectManager.js';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
-import type { AllowedKey, StartPayload, SendPayload, ConfirmPayload, KeySequencePayload, AttachPayload } from '../../shared/types/interactive.ts';
+import type { AllowedKey, StartPayload, SendPayload, ConfirmPayload, KeySequencePayload, AttachPayload, TypePayload } from '../../shared/types/interactive.ts';
 
 const ALLOWED_KEYS: AllowedKey[] = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'ShiftTab'];
 
@@ -56,6 +56,18 @@ export default function registerClaudeEvents(socket: Socket, io: SocketIOServer)
 
   socket.on('claude:confirm', ({ chatId, answer }: ConfirmPayload) => {
     claudeManager.confirmAction(chatId, answer);
+  });
+
+  socket.on('claude:type', ({ chatId, text }: TypePayload) => {
+    try {
+      const result = claudeManager.typeText(chatId, text);
+      if (result?.error) {
+        socket.emit('claude:error', { chatId, error: result.error });
+      }
+    } catch (err: any) {
+      console.error('claude:type error:', err);
+      socket.emit('claude:error', { chatId, error: err.message });
+    }
   });
 
   socket.on('claude:key-sequence', ({ chatId, key }: KeySequencePayload) => {

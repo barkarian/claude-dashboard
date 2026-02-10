@@ -22,12 +22,14 @@ export default function ChatView({ projectId }: ChatViewProps) {
   const [showArrowPad, setShowArrowPad] = useState(false);
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
-  const { interactiveState, eventVersion, sendKeyPress, sendTextResponse } = useInteractive(socket, chatId);
+  const { interactiveState, eventVersion, sendKeyPress, sendTextResponse, writeToTerminal } = useInteractive(socket, chatId);
+
+  // When the terminal is in a text-input area, show the prompt instead of arrows/options
+  const isTextInputMode = interactiveState?.type === 'text-input';
 
   const chat = (project?.chats || []).find((c: any) => c.id === chatId);
 
-  // Every interactive event resets manual overrides — fixes the bug where
-  // navigating out and back in wouldn't return to prompt mode
+  // Every interactive event resets manual overrides
   useEffect(() => {
     setShowArrowPad(false);
   }, [eventVersion]);
@@ -84,6 +86,26 @@ export default function ChatView({ projectId }: ChatViewProps) {
 
   function handleCancel() {
     socket?.emit('claude:cancel', { chatId });
+  }
+
+  // Real-time terminal binding: send character diffs to the pty as the user types
+  function handleTextInputChange(newValue: string, oldValue: string) {
+    // Find common prefix
+    let commonLen = 0;
+    while (commonLen < oldValue.length && commonLen < newValue.length && oldValue[commonLen] === newValue[commonLen]) {
+      commonLen++;
+    }
+    // Send backspaces for removed characters
+    const backspaces = oldValue.length - commonLen;
+    if (backspaces > 0) writeToTerminal('\x7f'.repeat(backspaces));
+    // Send new characters
+    const additions = newValue.slice(commonLen);
+    if (additions) writeToTerminal(additions);
+  }
+
+  // In text-input mode, the text is already in the terminal — just send Enter
+  function handleTextInputSend(_text: string) {
+    sendTextResponse('');
   }
 
   const isActive = status !== 'disconnected' && status !== 'exited' && status !== 'starting';
@@ -156,14 +178,14 @@ export default function ChatView({ projectId }: ChatViewProps) {
             <ClaudeOutput chatId={chatId} socket={socket} />
           </div>
 
-          {/* Interactive controls (auto-detected) or manual arrow pad */}
-          {interactiveState ? (
+          {/* Interactive controls — shown for non-text-input interactive states */}
+          {interactiveState && !isTextInputMode ? (
             <InteractiveControls
               interactiveState={interactiveState}
               onKeyPress={sendKeyPress}
               onTextResponse={sendTextResponse}
             />
-          ) : showArrowPad ? (
+          ) : !interactiveState && showArrowPad ? (
             <InteractiveControls
               interactiveState={manualPadState}
               onKeyPress={sendKeyPress}
@@ -171,8 +193,8 @@ export default function ChatView({ projectId }: ChatViewProps) {
             />
           ) : null}
 
-          {/* Show/Hide controls toggle */}
-          {!interactiveState && isActive && (
+          {/* Show/Hide controls toggle (only when no interactive state and not text-input) */}
+          {!interactiveState && !isTextInputMode && isActive && (
             <div className="flex justify-center border-t border-border">
               <button
                 onClick={() => setShowArrowPad(prev => !prev)}
@@ -183,11 +205,18 @@ export default function ChatView({ projectId }: ChatViewProps) {
             </div>
           )}
 
-          {/* Prompt input — hidden via CSS when controls are active (preserves text) */}
-          <div className={(interactiveState || showArrowPad) ? 'hidden' : ''}>
+          {/* Text-input prompt label */}
+          {isTextInputMode && interactiveState?.prompt && (
+            <div className="px-4 pt-2 border-t border-border">
+              <span className="text-xs text-text-muted font-medium">{interactiveState.prompt}</span>
+            </div>
+          )}
+
+          {/* Prompt input — visible when no interactive controls (or text-input mode) */}
+          <div className={(interactiveState && !isTextInputMode) || showArrowPad ? 'hidden' : ''}>
             <div className="flex items-end">
-              {/* Swap mode button (Shift+Tab) */}
-              {isActive && (
+              {/* Swap mode button (Shift+Tab) — hidden in text-input mode */}
+              {isActive && !isTextInputMode && (
                 <button
                   onClick={() => sendKeyPress('ShiftTab')}
                   className="flex items-center justify-center w-9 h-9 mb-4 ml-1.5 rounded-lg bg-bg-surface active:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation flex-shrink-0"
@@ -200,19 +229,20 @@ export default function ChatView({ projectId }: ChatViewProps) {
                 </button>
               )}
 
-              {/* Prompt input */}
+              {/* Prompt input — bound to terminal in text-input mode */}
               <div className="flex-1 min-w-0">
                 <PromptInput
                   projectId={projectId}
-                  onSend={handleSend}
+                  onSend={isTextInputMode ? handleTextInputSend : handleSend}
                   onCancel={handleCancel}
                   isThinking={status === 'thinking'}
                   disabled={!isActive}
+                  onTextChange={isTextInputMode ? handleTextInputChange : undefined}
                 />
               </div>
 
-              {/* Up/Down arrows — also switch to full arrow pad mode */}
-              {isActive && (
+              {/* Up/Down arrows — hidden in text-input mode */}
+              {isActive && !isTextInputMode && (
                 <div className="flex flex-col gap-0.5 mb-3 mr-1.5 flex-shrink-0">
                   <button
                     onClick={() => { sendKeyPress('ArrowUp'); setShowArrowPad(true); }}

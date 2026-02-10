@@ -9,6 +9,7 @@ interface UseInteractiveReturn {
   eventVersion: number;
   sendKeyPress: (key: AllowedKey) => void;
   sendTextResponse: (text: string) => void;
+  writeToTerminal: (text: string) => void;
 }
 
 export function useInteractive(socket: Socket | null, chatId: string | undefined): UseInteractiveReturn {
@@ -61,10 +62,16 @@ export function useInteractive(socket: Socket | null, chatId: string | undefined
     socket.emit('claude:confirm', { chatId, answer: text });
   }, [socket, chatId]);
 
+  const writeToTerminal = useCallback((text: string) => {
+    if (!socket || !chatId) return;
+    socket.emit('claude:type', { chatId, text });
+  }, [socket, chatId]);
+
   return {
     interactiveState,
     eventVersion,
     sendKeyPress,
     sendTextResponse,
+    writeToTerminal,
   };
 }

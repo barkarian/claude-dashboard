@@ -22,6 +22,7 @@ export interface OutputPayload { chatId: string; data: string; promptId: string 
 export interface KeySequencePayload { chatId: string; key: AllowedKey }
 export interface SendPayload { chatId: string; prompt: string; promptId: string }
 export interface ConfirmPayload { chatId: string; answer: string }
+export interface TypePayload { chatId: string; text: string }
 export interface StartPayload { projectId: string; chatId: string }
 export interface ErrorPayload { chatId: string; error: string }
 export interface ResponseCompletePayload { chatId: string; promptId: string; response: string }
