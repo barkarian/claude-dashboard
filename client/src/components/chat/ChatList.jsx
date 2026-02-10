@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProject } from '../../context/ProjectContext.jsx';
 import api from '../../utils/api.js';
 
-export default function ChatList({ projectId, project }) {
+export default function ChatList({ projectId, project, sessionStatuses = {} }) {
   const navigate = useNavigate();
   const { refreshProject } = useProject();
   const [creating, setCreating] = useState(false);
@@ -131,6 +131,25 @@ export default function ChatList({ projectId, project }) {
                   <span>{(chat.history || []).length} messages</span>
                   <span className="text-border">·</span>
                   <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
+                  {sessionStatuses[chat.id] && (
+                    <>
+                      <span className="text-border">·</span>
+                      <span className="flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          sessionStatuses[chat.id] === 'thinking'
+                            ? 'bg-warning animate-pulse'
+                            : sessionStatuses[chat.id] === 'starting'
+                              ? 'bg-primary animate-pulse'
+                              : 'bg-success'
+                        }`} />
+                        {sessionStatuses[chat.id] === 'thinking'
+                          ? 'Thinking...'
+                          : sessionStatuses[chat.id] === 'starting'
+                            ? 'Starting...'
+                            : 'Active'}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">

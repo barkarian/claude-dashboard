@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react';
-import { useParams, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.jsx';
+import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
+import { Toaster } from '../components/ui/sonner.tsx';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.tsx';
 import Header from '../components/layout/Header.jsx';
 import ScriptList from '../components/scripts/ScriptList.jsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.jsx';
@@ -10,11 +14,56 @@ import DiffOverview from '../components/diff/DiffOverview.jsx';
 
 export default function ProjectDashboardPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { project, loading, loadProject } = useProject();
+  const sessionStatuses = useSessionStatuses(id);
+  const prevStatusesRef = useRef({});
 
   useEffect(() => {
     loadProject(id);
   }, [id, loadProject]);
+
+  // Derive current tab from pathname
+  const pathAfterProject = location.pathname.split(`/project/${id}/`)[1] || '';
+  const currentTab = pathAfterProject.split('/')[0] || 'chats';
+
+  // Toast notifications for background session changes
+  useEffect(() => {
+    const prev = prevStatusesRef.current;
+    const chats = project?.chats || [];
+
+    // Determine which chatId is currently viewed
+    const chatMatch = location.pathname.match(/\/chats\/([^/]+)/);
+    const viewedChatId = chatMatch ? chatMatch[1] : null;
+
+    for (const [chatId, status] of Object.entries(sessionStatuses)) {
+      if (chatId === viewedChatId) continue;
+
+      const prevStatus = prev[chatId];
+      if (!prevStatus) continue;
+
+      const chatLabel = chats.find((c) => c.id === chatId)?.label || 'Chat';
+
+      if (prevStatus === 'thinking' && status === 'idle') {
+        toast(`${chatLabel} finished`, {
+          action: {
+            label: 'Go to chat',
+            onClick: () => navigate(`/project/${id}/chats/${chatId}`),
+          },
+        });
+      } else if (status === 'waiting-input' && prevStatus !== 'waiting-input') {
+        toast(`${chatLabel} needs input`, {
+          action: {
+            label: 'Go to chat',
+            onClick: () => navigate(`/project/${id}/chats/${chatId}`),
+          },
+        });
+      }
+    }
+
+    prevStatusesRef.current = { ...sessionStatuses };
+  }, [sessionStatuses, project, location.pathname, id, navigate]);
 
   if (loading) {
     return (
@@ -35,48 +84,18 @@ export default function ProjectDashboardPage() {
 
   return (
     <div className="min-h-screen">
+      <Toaster />
       <Header title={project.name} backTo="/" />
 
       {/* Tab navigation */}
       <div className="border-b border-border px-4">
-        <nav className="flex gap-1 -mb-px">
-          <NavLink
-            to={`/project/${id}/scripts`}
-            className={({ isActive }) =>
-              `px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-muted hover:text-text hover:border-border-light'
-              }`
-            }
-          >
-            Scripts
-          </NavLink>
-          <NavLink
-            to={`/project/${id}/chats`}
-            className={({ isActive }) =>
-              `px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-muted hover:text-text hover:border-border-light'
-              }`
-            }
-          >
-            Chats
-          </NavLink>
-          <NavLink
-            to={`/project/${id}/diff`}
-            className={({ isActive }) =>
-              `px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-muted hover:text-text hover:border-border-light'
-              }`
-            }
-          >
-            Changes
-          </NavLink>
-        </nav>
+        <Tabs value={currentTab} onValueChange={(val) => navigate(`/project/${id}/${val}`)}>
+          <TabsList>
+            <TabsTrigger value="scripts">Scripts</TabsTrigger>
+            <TabsTrigger value="chats">Chats</TabsTrigger>
+            <TabsTrigger value="diff">Changes</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* Tab content */}
@@ -84,7 +103,7 @@ export default function ProjectDashboardPage() {
         <Route path="/" element={<Navigate to="chats" replace />} />
         <Route path="scripts" element={<ScriptList projectId={id} project={project} />} />
         <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id} />} />
-        <Route path="chats" element={<ChatList projectId={id} project={project} />} />
+        <Route path="chats" element={<ChatList projectId={id} project={project} sessionStatuses={sessionStatuses} />} />
         <Route path="chats/:chatId" element={<ChatView projectId={id} />} />
         <Route path="diff" element={<DiffOverview projectId={id} />} />
       </Routes>

@@ -171,6 +171,7 @@ function setupExitHandler(session: ClaudeSession, io: SocketIOServer | null, roo
     if (session.silenceTimer) clearTimeout(session.silenceTimer);
     if (io) {
       io.to(room).emit('claude:status', { chatId: session.chatId, status: 'exited', exitCode });
+      io.to(`project:${session.projectId}`).emit('claude:session-status', { chatId: session.chatId, status: 'exited' });
     }
     sessions.delete(session.chatId);
   });
@@ -224,6 +225,7 @@ function startSession(chatId: string, projectId: string, projectPath: string, io
 
     if (io) {
       io.to(room).emit('claude:status', { chatId, status: newStatus });
+      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: newStatus });
 
       // If transitioning from thinking to idle with an active prompt, response is complete
       if (newStatus === 'idle' && prevStatus === 'thinking' && session.currentPromptId) {
@@ -363,6 +365,14 @@ function getBuffer(chatId: string): string {
   return session ? session.buffer : '';
 }
 
+function getProjectSessions(projectId: string): Record<string, SessionStatus> {
+  const result: Record<string, SessionStatus> = {};
+  for (const [chatId, session] of sessions) {
+    if (session.projectId === projectId) result[chatId] = session.status;
+  }
+  return result;
+}
+
 function endAllSessions(): void {
   for (const [chatId] of sessions) {
     endSession(chatId);
@@ -379,5 +389,6 @@ export default {
   endSession,
   getSession,
   getBuffer,
+  getProjectSessions,
   endAllSessions,
 };

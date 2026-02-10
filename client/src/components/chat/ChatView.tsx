@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { useProject } from '../../context/ProjectContext.jsx';
 import { useInteractive } from '../../hooks/useInteractive.ts';
+import * as terminalStore from '../../lib/terminalStore.ts';
 import ClaudeOutput from './ClaudeOutput.jsx';
 import PromptInput from './PromptInput.jsx';
 import type { SessionStatus } from '../../../../shared/types/interactive.ts';
@@ -18,6 +19,7 @@ export default function ChatView({ projectId }: ChatViewProps) {
   const { project, refreshProject } = useProject();
   const [status, setStatus] = useState<SessionStatus | 'disconnected'>('disconnected');
   const [error, setError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(true);
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
   const { interactiveState, sendKeyPress, sendTextResponse, writeToTerminal } = useInteractive(socket, chatId);
@@ -26,6 +28,56 @@ export default function ChatView({ projectId }: ChatViewProps) {
   const isOptionMode = interactiveState?.type === 'selection-menu';
 
   const chat = (project?.chats || []).find((c: any) => c.id === chatId);
+
+  function startSession() {
+    if (!socket || !chatId) return;
+    setError(null);
+    setStatus('starting');
+    socket.emit('claude:start', { projectId, chatId });
+  }
+
+  function handleRestart() {
+    if (!chatId) return;
+    terminalStore.dispose(chatId);
+    startSession();
+  }
+
+  // Auto-start: check for existing session on mount, then attach or start.
+  // If a cached terminal exists, show it immediately (no spinner).
+  useEffect(() => {
+    if (!socket || !chatId) return;
+
+    const hasCached = terminalStore.has(chatId);
+
+    if (hasCached) {
+      // Cached terminal — render it instantly, check session in background
+      setConnecting(false);
+      setStatus('idle'); // temporary until check-session responds
+      setError(null);
+    } else {
+      setConnecting(true);
+      setError(null);
+    }
+
+    socket.emit('claude:check-session', { chatId }, (result: { exists: boolean; status?: SessionStatus }) => {
+      if (hasCached) {
+        if (result.exists && result.status) {
+          setStatus(result.status);
+        } else {
+          // Session died while we were away — dispose stale terminal and restart
+          terminalStore.dispose(chatId);
+          startSession();
+        }
+      } else {
+        setConnecting(false);
+        if (result.exists && result.status) {
+          setStatus(result.status);
+        } else {
+          startSession();
+        }
+      }
+    });
+  }, [socket, chatId]);
 
   // Register socket handlers
   useEffect(() => {
@@ -70,13 +122,6 @@ export default function ChatView({ projectId }: ChatViewProps) {
       socket.off('claude:chat-renamed', handleChatRenamed);
     };
   }, [socket, chatId]);
-
-  function handleStartSession() {
-    if (!socket) return;
-    setError(null);
-    setStatus('starting');
-    socket.emit('claude:start', { projectId, chatId });
-  }
 
   function handleSend(prompt: string) {
     if (!socket || status === 'thinking') return;
@@ -178,19 +223,11 @@ export default function ChatView({ projectId }: ChatViewProps) {
       </div>
 
       {/* Main content */}
-      {status === 'disconnected' && !error ? (
+      {connecting ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <div className="w-16 h-16 bg-bg-surface rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-medium text-text mb-1">Claude Code</h3>
-            <p className="text-text-muted text-sm mb-4">Start a session to interact with Claude Code in this project</p>
-            <button onClick={handleStartSession} className="btn-primary">
-              Start Session
-            </button>
+            <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="text-text-muted text-sm">Connecting...</p>
           </div>
         </div>
       ) : error ? (
@@ -200,7 +237,7 @@ export default function ChatView({ projectId }: ChatViewProps) {
               {error}
             </div>
             <br />
-            <button onClick={handleStartSession} className="btn-primary mt-2">
+            <button onClick={handleRestart} className="btn-primary mt-2">
               Retry
             </button>
           </div>
@@ -218,6 +255,16 @@ export default function ChatView({ projectId }: ChatViewProps) {
           <div className="flex-1 overflow-hidden">
             <ClaudeOutput chatId={chatId} socket={socket} />
           </div>
+
+          {/* Session ended bar */}
+          {status === 'exited' && (
+            <div className="px-4 py-2 border-t border-border flex items-center justify-between">
+              <span className="text-xs text-text-muted">Session ended</span>
+              <button onClick={handleRestart} className="text-xs text-primary hover:text-primary-hover font-medium">
+                Restart
+              </button>
+            </div>
+          )}
 
           {/* Text-input prompt label (from buffer analyzer) */}
           {isTerminalBound && interactiveState?.prompt && (

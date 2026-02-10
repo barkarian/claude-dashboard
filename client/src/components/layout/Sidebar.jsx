@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.js';
 
 export default function Sidebar() {
@@ -65,27 +66,29 @@ export default function Sidebar() {
           </NavLink>
         ))}
 
-        <button
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 mt-1"
           onClick={() => navigate('/new')}
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-text-dim hover:text-primary hover:bg-bg-hover transition-colors w-full mt-1"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           New Project
-        </button>
+        </Button>
       </nav>
 
       <div className="p-3 border-t border-border">
-        <button
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 text-danger"
           onClick={logout}
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-text-dim hover:text-danger hover:bg-bg-hover transition-colors w-full"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
           </svg>
           Logout
-        </button>
+        </Button>
       </div>
     </aside>
   );

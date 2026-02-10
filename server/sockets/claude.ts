@@ -133,6 +133,21 @@ export default function registerClaudeEvents(socket: Socket, io: SocketIOServer)
     claudeManager.endSession(chatId);
   });
 
+  socket.on('project:join', ({ projectId }: { projectId: string }, callback?: Function) => {
+    socket.join(`project:${projectId}`);
+    const statuses = claudeManager.getProjectSessions(projectId);
+    callback?.(statuses);
+  });
+
+  socket.on('project:leave', ({ projectId }: { projectId: string }) => {
+    socket.leave(`project:${projectId}`);
+  });
+
+  socket.on('claude:check-session', ({ chatId }: { chatId: string }, callback: Function) => {
+    const session = claudeManager.getSession(chatId);
+    callback(session ? { exists: true, status: session.status } : { exists: false });
+  });
+
   socket.on('claude:attach', ({ chatId }: AttachPayload) => {
     const room = `claude:${chatId}`;
     socket.join(room);
