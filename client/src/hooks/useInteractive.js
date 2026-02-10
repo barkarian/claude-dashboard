@@ -4,6 +4,9 @@ const STALENESS_TIMEOUT = 30000; // 30 seconds
 
 export function useInteractive(socket, chatId) {
   const [interactiveState, setInteractiveState] = useState(null);
+  // Increments on every claude:interactive event so consumers can react
+  // even when state goes null → null (same value, different emission).
+  const [eventVersion, setEventVersion] = useState(0);
   const stalenessTimer = useRef(null);
 
   useEffect(() => {
@@ -12,6 +15,7 @@ export function useInteractive(socket, chatId) {
     function handleInteractive({ chatId: cid, interactive }) {
       if (cid !== chatId) return;
       setInteractiveState(interactive);
+      setEventVersion(v => v + 1);
 
       // Reset staleness timer
       clearTimeout(stalenessTimer.current);
@@ -56,6 +60,7 @@ export function useInteractive(socket, chatId) {
 
   return {
     interactiveState,
+    eventVersion,
     sendKeyPress,
     sendTextResponse,
   };

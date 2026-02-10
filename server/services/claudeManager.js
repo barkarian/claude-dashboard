@@ -325,6 +325,7 @@ const KEY_MAP = {
   Enter: '\r',
   Escape: '\x1b',
   Tab: '\t',
+  ShiftTab: '\x1b[Z',
 };
 
 function sendKeySequence(chatId, key) {

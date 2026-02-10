@@ -54,7 +54,7 @@ export default function registerClaudeEvents(socket, io) {
     claudeManager.confirmAction(chatId, answer);
   });
 
-  const ALLOWED_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab'];
+  const ALLOWED_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'ShiftTab'];
 
   socket.on('claude:key-sequence', ({ chatId, key }) => {
     try {

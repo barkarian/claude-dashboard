@@ -18,16 +18,18 @@ export default function ChatView({ projectId }) {
   const [showArrowPad, setShowArrowPad] = useState(false);
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
-  const { interactiveState, sendKeyPress, sendTextResponse } = useInteractive(socket, chatId);
+  const { interactiveState, eventVersion, sendKeyPress, sendTextResponse } = useInteractive(socket, chatId);
 
   const chat = (project?.chats || []).find(c => c.id === chatId);
 
-  // When interactive controls are active, suppress the old confirmation bar
+  // Fires on every claude:interactive event (even null → null).
+  // Resets manual overrides so the UI matches the detected state.
   useEffect(() => {
     if (interactiveState) {
       setConfirmation(null);
     }
-  }, [interactiveState]);
+    setShowArrowPad(false);
+  }, [eventVersion]);
 
   // Register socket handlers
   useEffect(() => {
@@ -191,11 +193,14 @@ export default function ChatView({ projectId }) {
             />
           ) : null}
 
-          {/* Show controls toggle (when no interactive state or confirmation) */}
-          {!interactiveState && !confirmation && isActive && (
+          {/* Show/Hide controls toggle */}
+          {!interactiveState && isActive && (!confirmation || showArrowPad) && (
             <div className="flex justify-center border-t border-border">
               <button
-                onClick={() => setShowArrowPad(prev => !prev)}
+                onClick={() => {
+                  setShowArrowPad(prev => !prev);
+                  setConfirmation(null);
+                }}
                 className="px-3 py-1 text-xs text-text-muted hover:text-text transition-colors select-none"
               >
                 {showArrowPad ? 'Hide controls' : 'Show controls'}
@@ -203,21 +208,25 @@ export default function ChatView({ projectId }) {
             </div>
           )}
 
-          {/* Prompt input — hidden when interactive controls are active */}
-          {!interactiveState && (
-            <div className="flex items-end gap-1">
+          {/* Prompt input — hidden via CSS when controls are active (preserves text) */}
+          <div className={(interactiveState || showArrowPad) ? 'hidden' : ''}>
+            <div className="flex items-end">
+              {/* Swap mode button (Shift+Tab) */}
               {isActive && (
                 <button
-                  onClick={() => sendKeyPress('ArrowUp')}
-                  className="flex items-center justify-center w-10 h-10 mb-1 ml-1 rounded-lg bg-bg-surface active:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation flex-shrink-0"
-                  aria-label="Arrow Up"
+                  onClick={() => sendKeyPress('ShiftTab')}
+                  className="flex items-center justify-center w-9 h-9 mb-4 ml-1.5 rounded-lg bg-bg-surface active:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation flex-shrink-0"
+                  aria-label="Switch mode"
+                  title="Switch mode (Shift+Tab)"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                   </svg>
                 </button>
               )}
-              <div className="flex-1">
+
+              {/* Prompt input */}
+              <div className="flex-1 min-w-0">
                 <PromptInput
                   projectId={projectId}
                   onSend={handleSend}
@@ -226,8 +235,32 @@ export default function ChatView({ projectId }) {
                   disabled={!isActive}
                 />
               </div>
+
+              {/* Up/Down arrows — also switch to full arrow pad mode */}
+              {isActive && (
+                <div className="flex flex-col gap-0.5 mb-3 mr-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => { sendKeyPress('ArrowUp'); setShowArrowPad(true); setConfirmation(null); }}
+                    className="flex items-center justify-center w-9 h-9 rounded-lg bg-bg-surface active:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation"
+                    aria-label="Arrow Up"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => { sendKeyPress('ArrowDown'); setShowArrowPad(true); setConfirmation(null); }}
+                    className="flex items-center justify-center w-9 h-9 rounded-lg bg-bg-surface active:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation"
+                    aria-label="Arrow Down"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </>
       )}
     </div>
