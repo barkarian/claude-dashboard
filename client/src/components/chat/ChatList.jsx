@@ -135,18 +135,14 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }) {
                     <>
                       <span className="text-border">·</span>
                       <span className="flex items-center gap-1">
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          sessionStatuses[chat.id] === 'thinking'
-                            ? 'bg-warning animate-pulse'
-                            : sessionStatuses[chat.id] === 'starting'
-                              ? 'bg-primary animate-pulse'
-                              : 'bg-success'
-                        }`} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-success" />
                         {sessionStatuses[chat.id] === 'thinking'
                           ? 'Thinking...'
-                          : sessionStatuses[chat.id] === 'starting'
-                            ? 'Starting...'
-                            : 'Active'}
+                          : sessionStatuses[chat.id] === 'waiting-input'
+                            ? 'Waiting input'
+                            : sessionStatuses[chat.id] === 'starting'
+                              ? 'Starting...'
+                              : 'Active'}
                       </span>
                     </>
                   )}
