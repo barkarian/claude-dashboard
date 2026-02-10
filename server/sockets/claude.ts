@@ -129,6 +129,16 @@ export default function registerClaudeEvents(socket: Socket, io: SocketIOServer)
     }
   });
 
+  socket.on('claude:kill-session', ({ chatId }: { chatId: string }) => {
+    claudeManager.cancelPrompt(chatId); // First Ctrl+C + cleanup prompt state
+    setTimeout(() => {
+      const session = claudeManager.getSession(chatId);
+      if (session) {
+        try { session.pty.write('\x03'); } catch {} // Second Ctrl+C to force exit
+      }
+    }, 200);
+  });
+
   socket.on('claude:end', ({ chatId }: { chatId: string }) => {
     claudeManager.endSession(chatId);
   });
