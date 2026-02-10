@@ -23,7 +23,7 @@ export default function SetupTerminal({ projectId, sessionId }) {
         </div>
         <span className="text-xs text-text-muted">Setup</span>
       </div>
-      <div ref={containerRef} className="h-64" />
+      <div ref={containerRef} className="h-64 overflow-hidden" />
     </div>
   );
 }

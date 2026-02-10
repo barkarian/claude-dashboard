@@ -3,13 +3,18 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-export function useTerminal(containerRef, { socket, projectId, scriptId, readOnly = false }) {
+// Width in px that fits ~120 cols at fontSize 14
+const WIDE_WIDTH = 1024;
+
+export function useTerminal(containerRef, { socket, projectId, scriptId, readOnly = false, wrapperRef = null }) {
   const termRef = useRef(null);
   const fitAddonRef = useRef(null);
   const [status, setStatus] = useState('disconnected');
 
   useEffect(() => {
     if (!containerRef.current || !socket) return;
+
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
 
     const term = new Terminal({
       cursorBlink: !readOnly,
@@ -47,14 +52,39 @@ export function useTerminal(containerRef, { socket, projectId, scriptId, readOnl
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
 
-    try {
-      fitAddon.fit();
-    } catch {
-      // Container might not be visible yet
-    }
-
     termRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    function doFit() {
+      try {
+        fitAddon.fit();
+      } catch {}
+    }
+
+    // On mobile: stretch container so FitAddon computes ~120 cols, then scale down
+    const scaleTarget = wrapperRef?.current || containerRef.current.parentElement;
+    function applyMobileScale() {
+      const container = containerRef.current;
+      if (!container || !scaleTarget) return;
+
+      const parentW = scaleTarget.offsetWidth;
+      const parentH = scaleTarget.offsetHeight;
+      const scale = Math.min(1, parentW / WIDE_WIDTH);
+
+      container.style.width = `${WIDE_WIDTH}px`;
+      container.style.height = `${parentH / scale}px`;
+      container.style.transform = `scale(${scale})`;
+      container.style.transformOrigin = 'top left';
+
+      doFit();
+    }
+
+    if (isMobile) {
+      requestAnimationFrame(applyMobileScale);
+      setTimeout(applyMobileScale, 100);
+    } else {
+      doFit();
+    }
 
     // Attach to existing terminal session
     socket.emit('terminal:attach', { projectId, scriptId });
@@ -93,7 +123,11 @@ export function useTerminal(containerRef, { socket, projectId, scriptId, readOnl
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       try {
-        fitAddon.fit();
+        if (isMobile) {
+          applyMobileScale();
+        } else {
+          fitAddon.fit();
+        }
         if (!readOnly) {
           socket.emit('terminal:resize', {
             projectId,
@@ -107,7 +141,7 @@ export function useTerminal(containerRef, { socket, projectId, scriptId, readOnl
       }
     });
 
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(scaleTarget || containerRef.current);
 
     setStatus('connected');
 
@@ -121,7 +155,7 @@ export function useTerminal(containerRef, { socket, projectId, scriptId, readOnl
       termRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [containerRef, socket, projectId, scriptId, readOnly]);
+  }, [containerRef, socket, projectId, scriptId, readOnly, wrapperRef]);
 
   return { terminal: termRef, fitAddon: fitAddonRef, status };
 }

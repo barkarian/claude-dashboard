@@ -3,6 +3,9 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
+// Width in px that comfortably fits ~120 cols at fontSize 14
+const WIDE_WIDTH = 1024;
+
 export default function ClaudeOutput({ chatId, socket }) {
   const wrapperRef = useRef(null);
   const containerRef = useRef(null);
@@ -11,6 +14,8 @@ export default function ClaudeOutput({ chatId, socket }) {
 
   useEffect(() => {
     if (!containerRef.current || !socket) return;
+
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -59,10 +64,35 @@ export default function ClaudeOutput({ chatId, socket }) {
       } catch {}
     }
 
-    // Fit after DOM settles
-    requestAnimationFrame(doFit);
-    setTimeout(doFit, 100);
-    setTimeout(doFit, 300);
+    // On mobile: stretch the container to WIDE_WIDTH so FitAddon computes ~120 cols,
+    // then CSS-scale it back down to fit the visible wrapper.
+    function applyMobileScale() {
+      const wrapper = wrapperRef.current;
+      const container = containerRef.current;
+      if (!wrapper || !container) return;
+
+      const wrapperW = wrapper.offsetWidth;
+      const wrapperH = wrapper.offsetHeight;
+      const scale = Math.min(1, wrapperW / WIDE_WIDTH);
+
+      container.style.width = `${WIDE_WIDTH}px`;
+      container.style.height = `${wrapperH / scale}px`;
+      container.style.transform = `scale(${scale})`;
+      container.style.transformOrigin = 'top left';
+
+      // FitAddon now sees the large un-scaled container → ~120 cols
+      doFit();
+    }
+
+    if (isMobile) {
+      requestAnimationFrame(applyMobileScale);
+      setTimeout(applyMobileScale, 100);
+      setTimeout(applyMobileScale, 300);
+    } else {
+      requestAnimationFrame(doFit);
+      setTimeout(doFit, 100);
+      setTimeout(doFit, 300);
+    }
 
     // Attach to get buffer replay + live output
     socket.emit('claude:attach', { chatId });
@@ -75,7 +105,7 @@ export default function ClaudeOutput({ chatId, socket }) {
     socket.on('claude:output', handleOutput);
 
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(doFit);
+      requestAnimationFrame(isMobile ? applyMobileScale : doFit);
     });
     if (wrapperRef.current) {
       resizeObserver.observe(wrapperRef.current);
@@ -91,10 +121,10 @@ export default function ClaudeOutput({ chatId, socket }) {
   }, [socket, chatId]);
 
   return (
-    <div ref={wrapperRef} className="h-full w-full relative">
+    <div ref={wrapperRef} className="h-full w-full relative overflow-hidden">
       <div
         ref={containerRef}
-        className="absolute inset-0"
+        className="absolute top-0 left-0 right-0 bottom-0"
         style={{ padding: '4px' }}
       />
     </div>

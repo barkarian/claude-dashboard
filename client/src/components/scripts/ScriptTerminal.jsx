@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { useTerminal } from '../../hooks/useTerminal.js';
@@ -9,13 +9,11 @@ export default function ScriptTerminal({ projectId }) {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const containerRef = useRef(null);
-  const [isMobile] = useState(window.innerWidth < 768);
 
   const { status } = useTerminal(containerRef, {
     socket,
     projectId,
     scriptId,
-    readOnly: isMobile,
   });
 
   return (
@@ -36,11 +34,7 @@ export default function ScriptTerminal({ projectId }) {
         </div>
       </div>
 
-      {isMobile ? (
-        <div ref={containerRef} className="flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed bg-bg" />
-      ) : (
-        <div ref={containerRef} className="flex-1" />
-      )}
+      <div ref={containerRef} className="flex-1 overflow-hidden" />
     </div>
   );
 }
