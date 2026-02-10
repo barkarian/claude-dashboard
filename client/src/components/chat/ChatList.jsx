@@ -1,11 +1,20 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useProject } from '../../context/ProjectContext.jsx';
 import api from '../../utils/api.js';
 
 export default function ChatList({ projectId, project }) {
   const navigate = useNavigate();
+  const { refreshProject } = useProject();
   const [creating, setCreating] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editLabel, setEditLabel] = useState('');
   const chats = project?.chats || [];
+
+  const filteredChats = chats
+    .filter((c) => c.label.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   async function handleNewChat() {
     setCreating(true);
@@ -19,8 +28,56 @@ export default function ChatList({ projectId, project }) {
     }
   }
 
+  function startEditing(chat, e) {
+    e.stopPropagation();
+    setEditingId(chat.id);
+    setEditLabel(chat.label);
+  }
+
+  async function saveLabel(chatId) {
+    const trimmed = editLabel.trim();
+    if (!trimmed) return;
+    try {
+      await api.patch(`/api/projects/${projectId}/chats/${chatId}`, { label: trimmed });
+      await refreshProject();
+    } catch (err) {
+      console.error('Failed to rename chat:', err);
+    }
+    setEditingId(null);
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setEditLabel('');
+  }
+
+  function handleEditKeyDown(e, chatId) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveLabel(chatId);
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  }
+
   return (
     <div className="p-4 space-y-3">
+      {/* Search input — hidden when no chats */}
+      {chats.length > 0 && (
+        <div className="relative">
+          <svg className="w-4 h-4 text-text-dim absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search chats..."
+            className="w-full pl-9 pr-3 py-2 text-sm bg-bg-surface border border-border rounded-lg text-text placeholder:text-text-dim focus:outline-none focus:border-primary transition-colors"
+          />
+        </div>
+      )}
+
       {chats.length === 0 ? (
         <div className="text-center py-12">
           <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -29,27 +86,69 @@ export default function ChatList({ projectId, project }) {
           <h3 className="text-text font-medium mb-1">No chats yet</h3>
           <p className="text-text-muted text-sm mb-4">Start a conversation with Claude Code</p>
         </div>
+      ) : filteredChats.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-text-muted text-sm">No matching chats</p>
+        </div>
       ) : (
-        chats.map((chat) => (
+        filteredChats.map((chat) => (
           <button
             key={chat.id}
-            onClick={() => navigate(`/project/${projectId}/chats/${chat.id}`)}
+            onClick={() => editingId !== chat.id && navigate(`/project/${projectId}/chats/${chat.id}`)}
             className="card text-left w-full hover:border-border-light transition-all group"
           >
             <div className="flex items-center justify-between">
               <div className="min-w-0 flex-1">
-                <h4 className="font-medium text-text group-hover:text-primary transition-colors truncate">
-                  {chat.label}
-                </h4>
+                {editingId === chat.id ? (
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="text"
+                      value={editLabel}
+                      onChange={(e) => setEditLabel(e.target.value)}
+                      onKeyDown={(e) => handleEditKeyDown(e, chat.id)}
+                      autoFocus
+                      className="flex-1 min-w-0 px-2 py-1 text-sm bg-bg-surface border border-primary rounded text-text focus:outline-none"
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); saveLabel(chat.id); }}
+                      className="text-xs text-primary hover:text-primary/80 font-medium"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); cancelEditing(); }}
+                      className="text-xs text-text-muted hover:text-text font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <h4 className="font-medium text-text group-hover:text-primary transition-colors truncate">
+                    {chat.label}
+                  </h4>
+                )}
                 <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
                   <span>{(chat.history || []).length} messages</span>
                   <span className="text-border">·</span>
                   <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
-              <svg className="w-5 h-5 text-text-dim group-hover:text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {editingId !== chat.id && (
+                  <button
+                    onClick={(e) => startEditing(chat, e)}
+                    className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-text-muted hover:bg-bg-hover opacity-0 group-hover:opacity-100 transition-all"
+                    aria-label="Rename chat"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+                    </svg>
+                  </button>
+                )}
+                <svg className="w-5 h-5 text-text-dim group-hover:text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+              </div>
             </div>
           </button>
         ))

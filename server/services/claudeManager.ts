@@ -82,7 +82,7 @@ function readRenderedLines(term: TerminalInstance): string[] {
 
 // --- Extracted helpers for startSession ---
 
-function createPtyProcess(projectPath: string): pty.IPty {
+function createPtyProcess(projectPath: string, args: string[] = []): pty.IPty {
   const extraPaths = [
     path.join(os.homedir(), '.local', 'bin'),
     path.join(os.homedir(), '.npm-global', 'bin'),
@@ -91,7 +91,7 @@ function createPtyProcess(projectPath: string): pty.IPty {
   ];
   const fullPath = [...extraPaths, process.env.PATH].join(':');
 
-  return pty.spawn(CLAUDE_BINARY, [], {
+  return pty.spawn(CLAUDE_BINARY, args, {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
@@ -178,10 +178,24 @@ function setupExitHandler(session: ClaudeSession, io: SocketIOServer | null, roo
 
 // --- Main API ---
 
-function startSession(chatId: string, projectId: string, projectPath: string, io: SocketIOServer | null): ClaudeSession {
+interface StartSessionOptions {
+  /** Pass --resume <id> to resume a specific CLI session */
+  resumeSessionId?: string;
+  /** Pass --session-id <id> to start a new CLI session with a known ID */
+  sessionId?: string;
+}
+
+function startSession(chatId: string, projectId: string, projectPath: string, io: SocketIOServer | null, options?: StartSessionOptions): ClaudeSession {
   endSession(chatId);
 
-  const ptyProcess = createPtyProcess(projectPath);
+  const args: string[] = [];
+  if (options?.resumeSessionId) {
+    args.push('--resume', options.resumeSessionId);
+  } else if (options?.sessionId) {
+    args.push('--session-id', options.sessionId);
+  }
+
+  const ptyProcess = createPtyProcess(projectPath, args);
   const headlessTerminal = new Terminal({ cols: 120, rows: 30, allowProposedApi: true });
 
   const session: ClaudeSession = {

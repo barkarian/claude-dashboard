@@ -1,7 +1,22 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import claudeManager from '../services/claudeManager.ts';
 import projectManager from '../services/projectManager.js';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type { AllowedKey, StartPayload, SendPayload, ConfirmPayload, KeySequencePayload, AttachPayload, TypePayload } from '../../shared/types/interactive.ts';
+
+/** Check whether a Claude CLI session file exists for the given project + session ID. */
+function cliSessionExists(projectPath: string, sessionId: string): boolean {
+  const encoded = projectPath.replace(/\//g, '-');
+  const sessionFile = path.join(os.homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`);
+  try {
+    fs.accessSync(sessionFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const ALLOWED_KEYS: AllowedKey[] = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'ShiftTab'];
 
@@ -12,7 +27,28 @@ export default function registerClaudeEvents(socket: Socket, io: SocketIOServer)
       const room = `claude:${chatId}`;
       socket.join(room);
 
-      claudeManager.startSession(chatId, projectId, projectPath, io);
+      // Determine whether to resume or start a new CLI session
+      const project = await projectManager.getProject(projectId);
+      const chat = (project?.chats || []).find((c: any) => c.id === chatId);
+      const hasHistory = !!(chat && chat.history && chat.history.length > 0);
+
+      // Ensure chat has a claudeSessionId (backfill for chats created before this feature)
+      if (chat && !chat.claudeSessionId) {
+        const { v4: uuidv4 } = await import('uuid');
+        chat.claudeSessionId = uuidv4();
+        await projectManager.updateProject(projectId, { chats: project.chats });
+      }
+
+      const sessionOpts: { resumeSessionId?: string; sessionId?: string } = {};
+      if (hasHistory && chat?.claudeSessionId && cliSessionExists(projectPath, chat.claudeSessionId)) {
+        // Chat has a matching CLI session file → resume it directly
+        sessionOpts.resumeSessionId = chat.claudeSessionId;
+      } else if (chat?.claudeSessionId) {
+        // New chat or backfilled UUID with no CLI session → start fresh with known ID
+        sessionOpts.sessionId = chat.claudeSessionId;
+      }
+
+      claudeManager.startSession(chatId, projectId, projectPath, io, sessionOpts);
       socket.emit('claude:status', { chatId, status: 'starting' });
     } catch (err: any) {
       console.error('claude:start error:', err);
@@ -41,6 +77,13 @@ export default function registerClaudeEvents(socket: Socket, io: SocketIOServer)
               timestamp: new Date().toISOString(),
             });
             await projectManager.updateProject(session.projectId, { chats: project.chats });
+
+            // Auto-title: rename "New Chat" after first user message
+            if (chat.label === 'New Chat' && chat.history.filter((m: any) => m.role === 'user').length === 1) {
+              chat.label = prompt.trim().slice(0, 50) + (prompt.trim().length > 50 ? '...' : '');
+              await projectManager.updateProject(session.projectId, { chats: project.chats });
+              io.to(`claude:${chatId}`).emit('claude:chat-renamed', { chatId, label: chat.label });
+            }
           }
         }
       }

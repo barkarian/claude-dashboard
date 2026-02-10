@@ -81,7 +81,7 @@ export default function ProjectDashboardPage() {
 
       {/* Tab content */}
       <Routes>
-        <Route path="/" element={<Navigate to="scripts" replace />} />
+        <Route path="/" element={<Navigate to="chats" replace />} />
         <Route path="scripts" element={<ScriptList projectId={id} project={project} />} />
         <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id} />} />
         <Route path="chats" element={<ChatList projectId={id} project={project} />} />

@@ -53,14 +53,21 @@ export default function ChatView({ projectId }: ChatViewProps) {
       refreshRef.current();
     }
 
+    function handleChatRenamed({ chatId: cid }: { chatId: string; label: string }) {
+      if (cid !== chatId) return;
+      refreshRef.current();
+    }
+
     socket.on('claude:status', handleStatus);
     socket.on('claude:error', handleError);
     socket.on('claude:response-complete', handleResponseComplete);
+    socket.on('claude:chat-renamed', handleChatRenamed);
 
     return () => {
       socket.off('claude:status', handleStatus);
       socket.off('claude:error', handleError);
       socket.off('claude:response-complete', handleResponseComplete);
+      socket.off('claude:chat-renamed', handleChatRenamed);
     };
   }, [socket, chatId]);
 
