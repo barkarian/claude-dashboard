@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { useProject } from '../../context/ProjectContext.jsx';
+import { useInteractive } from '../../hooks/useInteractive.js';
 import ClaudeOutput from './ClaudeOutput.jsx';
 import PromptInput from './PromptInput.jsx';
+import InteractiveControls from './InteractiveControls.jsx';
 
 export default function ChatView({ projectId }) {
   const { chatId } = useParams();
@@ -13,8 +15,10 @@ export default function ChatView({ projectId }) {
   const [status, setStatus] = useState('disconnected');
   const [error, setError] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
+  const [showArrowPad, setShowArrowPad] = useState(false);
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
+  const { interactiveState, sendKeyPress, sendTextResponse } = useInteractive(socket, chatId);
 
   const chat = (project?.chats || []).find(c => c.id === chatId);
 
@@ -29,8 +33,17 @@ export default function ChatView({ projectId }) {
 
     function handleError({ chatId: cid, error: err }) {
       if (cid !== chatId) return;
-      setError(err);
-      setStatus('disconnected');
+      // Only tear down the view for errors during startup/connection.
+      // For errors during an active session (e.g. failed key sequence),
+      // just log — don't destroy the session view.
+      setStatus((prev) => {
+        if (prev === 'starting' || prev === 'disconnected') {
+          setError(err);
+          return 'disconnected';
+        }
+        console.warn('[claude:error]', err);
+        return prev;
+      });
     }
 
     function handleResponseComplete({ chatId: cid }) {
@@ -146,14 +159,40 @@ export default function ChatView({ projectId }) {
             <ClaudeOutput chatId={chatId} socket={socket} />
           </div>
 
-          {/* Confirmation bar */}
-          {confirmation && (
+          {/* Interactive controls (auto-detected) */}
+          {interactiveState ? (
+            <InteractiveControls
+              interactiveState={interactiveState}
+              onKeyPress={sendKeyPress}
+              onTextResponse={sendTextResponse}
+            />
+          ) : confirmation ? (
+            /* Legacy confirmation bar as fallback */
             <div className="px-4 py-3 bg-warning/10 border-t border-warning/20">
               <p className="text-sm text-warning mb-2">{confirmation}</p>
               <div className="flex gap-2">
                 <button onClick={() => handleConfirm('y')} className="btn-primary text-sm py-1">Yes</button>
                 <button onClick={() => handleConfirm('n')} className="btn-ghost text-sm py-1">No</button>
               </div>
+            </div>
+          ) : showArrowPad ? (
+            /* Manual arrow pad */
+            <InteractiveControls
+              interactiveState={{ type: 'manual', options: [], selectedIndex: -1, navigation: 'manual' }}
+              onKeyPress={sendKeyPress}
+              onTextResponse={sendTextResponse}
+            />
+          ) : null}
+
+          {/* Show controls toggle (when no interactive state or confirmation) */}
+          {!interactiveState && !confirmation && isActive && (
+            <div className="flex justify-center border-t border-border">
+              <button
+                onClick={() => setShowArrowPad(prev => !prev)}
+                className="px-3 py-1 text-xs text-text-muted hover:text-text transition-colors select-none"
+              >
+                {showArrowPad ? 'Hide controls' : 'Show controls'}
+              </button>
             </div>
           )}
 

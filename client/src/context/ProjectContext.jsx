@@ -22,9 +22,17 @@ export function ProjectProvider({ children }) {
 
   const refreshProject = useCallback(async () => {
     if (project?.id) {
-      await loadProject(project.id);
+      // Refresh silently — do NOT set loading to true.
+      // Setting loading=true causes ProjectDashboardPage to unmount all children
+      // (including active ChatView sessions) and show a spinner.
+      try {
+        const data = await api.get(`/api/projects/${project.id}`);
+        setProject(data.project);
+      } catch (err) {
+        console.error('Error refreshing project:', err);
+      }
     }
-  }, [project?.id, loadProject]);
+  }, [project?.id]);
 
   return (
     <ProjectContext.Provider value={{ project, loading, loadProject, refreshProject, setProject }}>

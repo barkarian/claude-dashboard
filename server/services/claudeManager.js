@@ -2,6 +2,7 @@ import pty from 'node-pty';
 import { execSync } from 'child_process';
 import path from 'path';
 import os from 'os';
+import { detectInteractiveState } from './interactiveDetector.js';
 
 const MAX_BUFFER_SIZE = 50000;
 
@@ -64,10 +65,45 @@ function detectState(rawBuffer) {
     }
   }
 
+  // Check if an interactive element (selection menu, permission prompt) is active.
+  // These also use ❯ / > markers and box-drawing characters, so we must detect
+  // them BEFORE the idle-prompt check to avoid false positives.
+  const recentText = lastLines.slice(-10).join(' ');
+  const hasBoxDrawing = /[│┌┐└┘─╭╮╯╰┃┏┓┗┛━]/.test(recentText);
+  const hasPermissionKeyword = /\b(allow|deny|permission|approve|bash|edit|write|read)\b/i.test(recentText);
+  if (hasBoxDrawing && hasPermissionKeyword) {
+    return 'waiting-confirmation';
+  }
+
+  // Check for selection menu markers: multiple lines with one ❯-prefixed item
+  // among other plain items (this is a menu, not the idle prompt)
+  const menuLines = lastLines.slice(-15);
+  const markerLine = menuLines.findIndex(l => /^\s*[❯›>]\s+\S/.test(l));
+  if (markerLine !== -1) {
+    // Count contiguous option-like lines around the marker
+    let count = 1;
+    for (let i = markerLine - 1; i >= 0; i--) {
+      if (menuLines[i].trim() && menuLines[i].trim().length < 100) count++;
+      else break;
+    }
+    for (let i = markerLine + 1; i < menuLines.length; i++) {
+      if (menuLines[i].trim() && menuLines[i].trim().length < 100) count++;
+      else break;
+    }
+    if (count >= 2) {
+      return 'waiting-confirmation';
+    }
+  }
+
   // Prompt patterns - Claude Code shows ❯ when ready for input
-  // Check multiple recent lines since the prompt may not be the very last line
-  const recentText = lastLines.slice(-5).join(' ');
-  if (recentText.includes('❯') || recentText.includes('> ') || /[❯›»]\s*$/.test(lastLine)) {
+  // Only match the idle prompt: a lone ❯ on the last line (not part of a menu)
+  if (/^[❯›»]\s*$/.test(lastLine)) {
+    return 'idle';
+  }
+
+  // Also check for the "> " prompt style but only on the very last line
+  // and only if it looks like a standalone prompt (short, no other content)
+  if (/^>\s*$/.test(lastLine)) {
     return 'idle';
   }
 
@@ -103,6 +139,7 @@ function startSession(chatId, projectId, projectPath, io) {
     currentPromptId: null,
     silenceTimer: null,
     startupComplete: false,
+    lastInteractiveState: null,
   };
 
   sessions.set(chatId, session);
@@ -162,6 +199,12 @@ function startSession(chatId, projectId, projectPath, io) {
     // Use silence-based detection
     clearTimeout(session.silenceTimer);
     session.silenceTimer = setTimeout(() => {
+      // Run interactive detection first — if an interactive element is active
+      // we must NOT falsely transition to 'idle' (which triggers response-complete)
+      const interactive = session.startupComplete
+        ? detectInteractiveState(session.buffer)
+        : null;
+
       const detected = detectState(session.buffer);
 
       if (!session.startupComplete) {
@@ -172,11 +215,25 @@ function startSession(chatId, projectId, projectPath, io) {
         }
         // Otherwise stay in 'starting'
       } else if (session.currentPromptId) {
-        // Only run state detection when there's an active prompt
-        // This prevents false 'thinking' transitions from background pty output
-        emitStatus(detected);
+        // If an interactive element is detected, Claude is waiting for user input
+        // — treat this as waiting-confirmation, never as 'idle'
+        if (interactive && detected === 'idle') {
+          emitStatus('waiting-confirmation');
+        } else {
+          emitStatus(detected);
+        }
       }
       // If no active prompt, stay in current state (idle)
+
+      // Emit interactive state changes to client
+      if (io && session.startupComplete) {
+        const prevJson = JSON.stringify(session.lastInteractiveState);
+        const newJson = JSON.stringify(interactive);
+        if (prevJson !== newJson) {
+          session.lastInteractiveState = interactive;
+          io.to(room).emit('claude:interactive', { chatId, interactive });
+        }
+      }
     }, 500);
   });
 
@@ -251,6 +308,32 @@ function confirmAction(chatId, answer) {
   session.status = 'thinking';
 }
 
+const KEY_MAP = {
+  ArrowUp: '\x1b[A',
+  ArrowDown: '\x1b[B',
+  ArrowRight: '\x1b[C',
+  ArrowLeft: '\x1b[D',
+  Enter: '\r',
+  Escape: '\x1b',
+  Tab: '\t',
+};
+
+function sendKeySequence(chatId, key) {
+  const session = sessions.get(chatId);
+  if (!session || session.status === 'exited') return { error: 'Session not active' };
+
+  const sequence = KEY_MAP[key];
+  if (!sequence) return { error: 'Invalid key' };
+
+  try {
+    session.pty.write(sequence);
+  } catch (err) {
+    console.error(`[claude:${chatId}] sendKeySequence write error:`, err);
+    return { error: 'Failed to write to PTY' };
+  }
+  return { success: true };
+}
+
 function endSession(chatId) {
   const session = sessions.get(chatId);
   if (!session) return;
@@ -296,6 +379,7 @@ export default {
   sendPrompt,
   cancelPrompt,
   confirmAction,
+  sendKeySequence,
   endSession,
   getSession,
   getBuffer,

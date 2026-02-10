@@ -54,6 +54,24 @@ export default function registerClaudeEvents(socket, io) {
     claudeManager.confirmAction(chatId, answer);
   });
 
+  const ALLOWED_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab'];
+
+  socket.on('claude:key-sequence', ({ chatId, key }) => {
+    try {
+      if (!ALLOWED_KEYS.includes(key)) {
+        socket.emit('claude:error', { chatId, error: `Invalid key: ${key}` });
+        return;
+      }
+      const result = claudeManager.sendKeySequence(chatId, key);
+      if (result?.error) {
+        socket.emit('claude:error', { chatId, error: result.error });
+      }
+    } catch (err) {
+      console.error('claude:key-sequence error:', err);
+      socket.emit('claude:error', { chatId, error: err.message });
+    }
+  });
+
   socket.on('claude:end', ({ chatId }) => {
     claudeManager.endSession(chatId);
   });
