@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSocket } from '../../context/SocketContext.jsx';
 import FilePicker from './FilePicker.jsx';
 
-export default function PromptInput({ projectId, onSend, onCancel, isThinking, disabled, onTextChange }) {
+export default function PromptInput({ projectId, onSend, onCancel, onSelect, isThinking, disabled, onTextChange, onTerminalKey }) {
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -18,20 +18,55 @@ export default function PromptInput({ projectId, onSend, onCancel, isThinking, d
   function handleKeyDown(e) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleSend();
+      handleAction();
+      return;
     }
     if (e.key === '@') {
       setTimeout(() => {
         setShowFilePicker(true);
         setCursorPosition(textareaRef.current?.selectionStart || 0);
       }, 0);
+      return;
     }
-    if (e.key === 'Escape') {
+
+    // Forward keyboard shortcuts to the terminal
+    if (onTerminalKey) {
+      if (e.key === 'Escape') {
+        if (showFilePicker) {
+          setShowFilePicker(false);
+        } else {
+          e.preventDefault();
+          onTerminalKey('Escape');
+        }
+        return;
+      }
+      if (e.key === 'Tab' && e.shiftKey) {
+        e.preventDefault();
+        onTerminalKey('ShiftTab');
+        return;
+      }
+      if (e.key === 'ArrowUp' && !value) {
+        e.preventDefault();
+        onTerminalKey('ArrowUp');
+        return;
+      }
+      if (e.key === 'ArrowDown' && !value) {
+        e.preventDefault();
+        onTerminalKey('ArrowDown');
+        return;
+      }
+    } else if (e.key === 'Escape') {
       setShowFilePicker(false);
     }
   }
 
-  function handleSend() {
+  function handleAction() {
+    // If in option mode and textarea is empty, confirm the selection
+    if (onSelect && !value.trim()) {
+      onSelect();
+      return;
+    }
+    // Otherwise send the text
     const trimmed = value.trim();
     if (!trimmed || disabled || isThinking) return;
     onSend(trimmed);
@@ -41,13 +76,18 @@ export default function PromptInput({ projectId, onSend, onCancel, isThinking, d
   function handleFileSelect(filePath) {
     const before = value.slice(0, cursorPosition);
     const after = value.slice(cursorPosition);
-    // Find the @ character position before cursor
     const atIndex = before.lastIndexOf('@');
     const newValue = before.slice(0, atIndex) + '@' + filePath + ' ' + after;
     setValue(newValue);
     setShowFilePicker(false);
     textareaRef.current?.focus();
   }
+
+  // Button label: "Select" when option mode and textarea empty, otherwise "Send"
+  const showSelect = onSelect && !value.trim();
+  const actionDisabled = showSelect ? disabled : (!value.trim() || disabled);
+
+  const arrowBtnClass = 'flex items-center justify-center w-8 h-8 rounded-lg bg-bg-surface active:bg-bg-hover hover:bg-bg-hover text-text-muted transition-colors select-none touch-manipulation flex-shrink-0';
 
   return (
     <div className="relative border-t border-border p-3">
@@ -77,6 +117,31 @@ export default function PromptInput({ projectId, onSend, onCancel, isThinking, d
           disabled={disabled}
         />
 
+        {/* Up/Down arrows — always visible */}
+        <div className="flex flex-col gap-0.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => onTerminalKey?.('ArrowUp')}
+            className={arrowBtnClass}
+            aria-label="Arrow Up"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => onTerminalKey?.('ArrowDown')}
+            className={arrowBtnClass}
+            aria-label="Arrow Down"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Action button */}
         {isThinking ? (
           <button onClick={onCancel} className="btn-danger flex-shrink-0 py-2.5">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -86,14 +151,25 @@ export default function PromptInput({ projectId, onSend, onCancel, isThinking, d
           </button>
         ) : (
           <button
-            onClick={handleSend}
-            disabled={!value.trim() || disabled}
+            onClick={handleAction}
+            disabled={actionDisabled}
             className="btn-primary flex-shrink-0 py-2.5 disabled:opacity-50"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-            Send
+            {showSelect ? (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+                Select
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+                Send
+              </>
+            )}
           </button>
         )}
       </div>
