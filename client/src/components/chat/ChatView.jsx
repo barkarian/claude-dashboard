@@ -22,6 +22,13 @@ export default function ChatView({ projectId }) {
 
   const chat = (project?.chats || []).find(c => c.id === chatId);
 
+  // When interactive controls are active, suppress the old confirmation bar
+  useEffect(() => {
+    if (interactiveState) {
+      setConfirmation(null);
+    }
+  }, [interactiveState]);
+
   // Register socket handlers
   useEffect(() => {
     if (!socket || !chatId) return;
@@ -196,14 +203,16 @@ export default function ChatView({ projectId }) {
             </div>
           )}
 
-          {/* Prompt input */}
-          <PromptInput
-            projectId={projectId}
-            onSend={handleSend}
-            onCancel={handleCancel}
-            isThinking={status === 'thinking'}
-            disabled={!isActive}
-          />
+          {/* Prompt input — hidden when interactive controls are active */}
+          {!interactiveState && (
+            <PromptInput
+              projectId={projectId}
+              onSend={handleSend}
+              onCancel={handleCancel}
+              isThinking={status === 'thinking'}
+              disabled={!isActive}
+            />
+          )}
         </>
       )}
     </div>
