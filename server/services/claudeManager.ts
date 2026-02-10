@@ -1,4 +1,5 @@
 import pty from 'node-pty';
+import { createRequire } from 'module';
 import { execSync } from 'child_process';
 import path from 'path';
 import os from 'os';
@@ -6,10 +7,16 @@ import { analyzeBuffer } from './bufferAnalyzer.ts';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { SessionStatus, InteractiveState, AllowedKey } from '../../shared/types/interactive.ts';
 
+// @xterm/headless is CJS-only; use createRequire for ESM compat
+import type { Terminal as TerminalInstance } from '@xterm/headless';
+const require = createRequire(import.meta.url);
+const { Terminal } = require('@xterm/headless') as typeof import('@xterm/headless');
+
 const MAX_BUFFER_SIZE = 50000;
 
 interface ClaudeSession {
   pty: pty.IPty;
+  headlessTerminal: TerminalInstance;
   status: SessionStatus;
   projectId: string;
   chatId: string;
@@ -60,6 +67,19 @@ const KEY_MAP: Record<AllowedKey, string> = {
   ShiftTab: '\x1b[Z',
 };
 
+/** Read all non-empty lines from the headless terminal's active buffer. */
+function readRenderedLines(term: TerminalInstance): string[] {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+    const line = buf.getLine(i);
+    if (line) {
+      lines.push(line.translateToString(true));
+    }
+  }
+  return lines;
+}
+
 // --- Extracted helpers for startSession ---
 
 function createPtyProcess(projectPath: string): pty.IPty {
@@ -82,6 +102,10 @@ function createPtyProcess(projectPath: string): pty.IPty {
 
 function setupDataHandler(session: ClaudeSession, io: SocketIOServer | null, room: string, emitStatus: (s: SessionStatus) => void): void {
   session.pty.onData((data: string) => {
+    // Feed raw data to headless terminal for proper screen emulation
+    session.headlessTerminal.write(data);
+
+    // Keep raw buffer for client replay
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER_SIZE) {
       session.buffer = session.buffer.slice(-MAX_BUFFER_SIZE);
@@ -102,7 +126,8 @@ function setupDataHandler(session: ClaudeSession, io: SocketIOServer | null, roo
     // Silence-based detection
     if (session.silenceTimer) clearTimeout(session.silenceTimer);
     session.silenceTimer = setTimeout(() => {
-      const { sessionStatus, interactive } = analyzeBuffer(session.buffer, session.startupComplete);
+      const renderedLines = readRenderedLines(session.headlessTerminal);
+      const { sessionStatus, interactive } = analyzeBuffer(renderedLines, session.startupComplete);
 
       if (!session.startupComplete) {
         if (sessionStatus === 'idle') {
@@ -110,7 +135,13 @@ function setupDataHandler(session: ClaudeSession, io: SocketIOServer | null, roo
           emitStatus('idle');
         }
       } else if (session.currentPromptId) {
-        emitStatus(sessionStatus);
+        // Don't let the buffer analyzer revert waiting-input back to thinking.
+        // During user interaction the buffer can be messy from cursor navigation,
+        // causing detectSessionStatus to fall back to 'thinking' incorrectly.
+        // Only explicit user actions (confirmAction, sendPrompt) should set thinking.
+        if (!(session.status === 'waiting-input' && sessionStatus === 'thinking')) {
+          emitStatus(sessionStatus);
+        }
       }
 
       // Emit interactive state changes to client
@@ -118,8 +149,16 @@ function setupDataHandler(session: ClaudeSession, io: SocketIOServer | null, roo
         const prevJson = JSON.stringify(session.lastInteractiveState);
         const newJson = JSON.stringify(interactive);
         if (prevJson !== newJson) {
-          session.lastInteractiveState = interactive;
-          io.to(room).emit('claude:interactive', { chatId: session.chatId, interactive });
+          // During waiting-input, don't clear the interactive state to null.
+          // The detector can be unreliable during cursor navigation in menus —
+          // keep the last known state until a concrete new state is detected
+          // or the status changes (which clears it on the client).
+          if (session.status === 'waiting-input' && session.lastInteractiveState && !interactive) {
+            // Keep the last interactive state — detection probably just failed
+          } else {
+            session.lastInteractiveState = interactive;
+            io.to(room).emit('claude:interactive', { chatId: session.chatId, interactive });
+          }
         }
       }
     }, 500);
@@ -143,9 +182,11 @@ function startSession(chatId: string, projectId: string, projectPath: string, io
   endSession(chatId);
 
   const ptyProcess = createPtyProcess(projectPath);
+  const headlessTerminal = new Terminal({ cols: 120, rows: 30, allowProposedApi: true });
 
   const session: ClaudeSession = {
     pty: ptyProcess,
+    headlessTerminal,
     status: 'starting',
     projectId,
     chatId,
@@ -278,6 +319,7 @@ function endSession(chatId: string): void {
   if (!session) return;
 
   if (session.silenceTimer) clearTimeout(session.silenceTimer);
+  session.headlessTerminal.dispose();
 
   try {
     session.pty.write('/exit');

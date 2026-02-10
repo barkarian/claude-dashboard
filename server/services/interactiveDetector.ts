@@ -1,4 +1,3 @@
-import { stripAnsi } from '../../shared/utils/stripAnsi.ts';
 import type { InteractiveState } from '../../shared/types/interactive.ts';
 
 /**
@@ -193,10 +192,9 @@ function detectNavigationHint(lines: string[]): InteractiveState | null {
  * Main export: run all detectors in priority order and return first match.
  * Wrapped in try-catch so a detection error never crashes the silence timer.
  */
-export function detectInteractiveState(rawBuffer: string): InteractiveState | null {
+export function detectInteractiveState(renderedLines: string[]): InteractiveState | null {
   try {
-    const clean = stripAnsi(rawBuffer.slice(-4000));
-    const lines = clean.split('\n').filter(l => l.trim());
+    const lines = renderedLines.filter(l => l.trim());
 
     if (lines.length === 0) return null;
 
