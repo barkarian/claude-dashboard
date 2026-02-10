@@ -12,7 +12,7 @@ import scriptRoutes from './routes/scripts.js';
 import githubRoutes from './routes/github.js';
 import registerSocketHandlers from './sockets/index.js';
 import processManager from './services/processManager.js';
-import claudeManager from './services/claudeManager.js';
+import claudeManager from './services/claudeManager.ts';
 import fileService from './services/fileService.js';
 import projectManager from './services/projectManager.js';
 import fs from 'fs/promises';

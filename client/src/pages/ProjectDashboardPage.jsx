@@ -5,7 +5,7 @@ import Header from '../components/layout/Header.jsx';
 import ScriptList from '../components/scripts/ScriptList.jsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.jsx';
 import ChatList from '../components/chat/ChatList.jsx';
-import ChatView from '../components/chat/ChatView.jsx';
+import ChatView from '../components/chat/ChatView.tsx';
 import DiffOverview from '../components/diff/DiffOverview.jsx';
 
 export default function ProjectDashboardPage() {
