@@ -84,11 +84,13 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
+      io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
     }
   });
 
   if (io) {
     io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
+    io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'running' });
   }
 
   return entry;

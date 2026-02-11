@@ -60,6 +60,16 @@ export function useSDKMessages(
   const [lastResult, setLastResult] = useState<SDKResult | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
 
+  // Reset all state when chatId changes (prevents stale history from previous chat)
+  useEffect(() => {
+    setMessages([]);
+    setStatus('disconnected');
+    setPendingPermission(null);
+    setPendingQuestion(null);
+    setLastResult(null);
+    setLastError(null);
+  }, [chatId]);
+
   useEffect(() => {
     if (!socket || !chatId) return;
 

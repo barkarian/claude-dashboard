@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import type { ScriptWithStatus, ProcessStatus } from '../../../../shared/types/models.ts';
@@ -14,6 +14,18 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
   const navigate = useNavigate();
   const { socket } = useSocket();
   const [status, setStatus] = useState<ProcessStatus>(script.status || 'stopped');
+
+  // Listen for terminal:status events broadcast to the project room
+  useEffect(() => {
+    if (!socket) return;
+    function handleStatus({ projectId: pid, scriptId: sid, status: s }: { projectId: string; scriptId: string; status: string }) {
+      if (pid === projectId && sid === script.id) {
+        setStatus(s as ProcessStatus);
+      }
+    }
+    socket.on('terminal:status', handleStatus);
+    return () => { socket.off('terminal:status', handleStatus); };
+  }, [socket, projectId, script.id]);
 
   function handleStart() {
     if (!socket) return;

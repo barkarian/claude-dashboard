@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
+import api from '../../utils/api.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
@@ -17,9 +18,10 @@ interface SDKChatViewProps {
 export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
-  const { refreshProject, setActiveChatStatus } = useProject();
+  const { project, refreshProject, setActiveChatStatus } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
+  const hasUserMessageRef = useRef(false);
 
   const {
     messages,
@@ -35,6 +37,36 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   } = useSDKMessages(socket, chatId);
 
   const [connecting, setConnecting] = useState(true);
+
+  // Track whether any user message was sent
+  useEffect(() => {
+    if (messages.some((m) => m.role === 'user')) {
+      hasUserMessageRef.current = true;
+    }
+  }, [messages]);
+
+  // Reset tracking ref when chatId changes
+  useEffect(() => {
+    hasUserMessageRef.current = false;
+  }, [chatId]);
+
+  // Auto-delete empty chat on unmount
+  useEffect(() => {
+    const cid = chatId;
+    const pid = projectId;
+    return () => {
+      if (!cid) return;
+      if (hasUserMessageRef.current) return;
+      // Check if chat label is still "New Chat"
+      const chat = project?.chats?.find((c) => c.id === cid);
+      if (!chat || chat.label !== 'New Chat') return;
+      // Fire-and-forget cleanup
+      if (socket) socket.emit('sdk:end', { chatId: cid });
+      api.delete(`/api/projects/${pid}/chats/${cid}`).then(() => {
+        refreshRef.current();
+      }).catch(() => {});
+    };
+  }, [chatId, projectId, socket, project]);
 
   // Publish status to ProjectContext for the header
   useEffect(() => {

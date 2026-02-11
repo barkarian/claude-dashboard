@@ -101,9 +101,21 @@ async function createProjectWithId(id: string, name: string, repoUrl?: string): 
 
   if (repoUrl) {
     await gitService.clone(repoUrl, projectPath);
+    // Append .claude-dashboard to existing .gitignore (or create one)
+    const gitignorePath = path.join(projectPath, '.gitignore');
+    try {
+      const existing = await fs.readFile(gitignorePath, 'utf-8');
+      if (!existing.split('\n').some(line => line.trim() === '.claude-dashboard')) {
+        await fs.writeFile(gitignorePath, existing.trimEnd() + '\n.claude-dashboard\n');
+      }
+    } catch {
+      await fs.writeFile(gitignorePath, '.claude-dashboard\n');
+    }
   } else {
     await fs.mkdir(projectPath, { recursive: true });
     await gitService.init(projectPath);
+    // Create .gitignore with .claude-dashboard
+    await fs.writeFile(path.join(projectPath, '.gitignore'), '.claude-dashboard\n');
   }
 
   const projectConfig: Project = {

@@ -44,11 +44,9 @@ export default function ProjectDashboardPage() {
     function fetchRunningCount(): void {
       api.get<{ runningCount: number }>(`/api/projects/${id}/scripts/processes`)
         .then((data) => {
-          console.log('[Dashboard] runningCount response:', data.runningCount);
           setRunningCount(data.runningCount || 0);
         })
-        .catch((err) => {
-          console.error('[Dashboard] Failed to fetch runningCount:', err);
+        .catch(() => {
           setRunningCount(0);
         });
     }
