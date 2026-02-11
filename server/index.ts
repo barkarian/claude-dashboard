@@ -12,6 +12,7 @@ import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
+import tunnelManager from './services/tunnelManager.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
@@ -98,11 +99,12 @@ async function autostartScripts(): Promise<void> {
 }
 
 // Graceful shutdown
-function shutdown(): void {
+async function shutdown(): Promise<void> {
   console.log('Shutting down...');
   processManager.killAll();
   sdkSessionManager.endAllSessions();
   fileService.stopAllWatching();
+  await tunnelManager.closeAll();
   io.close();
   server.close(() => {
     console.log('Server stopped.');
@@ -115,9 +117,15 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 // Start server
-server.listen(config.port, () => {
+server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
   console.log(`Projects directory: ${config.projectsBasePath}`);
+  if (tunnelManager.isEnabled()) {
+    const url = await tunnelManager.startDashboardTunnel(config.port);
+    if (url) {
+      console.log(`Dashboard tunnel: ${url}`);
+    }
+  }
   autostartScripts();
 });

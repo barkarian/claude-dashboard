@@ -78,4 +78,5 @@ export interface RunningProcess {
   label?: string;
   isShell?: boolean;
   detectedPorts?: number[];
+  tunnelUrls?: Record<number, string>;
 }

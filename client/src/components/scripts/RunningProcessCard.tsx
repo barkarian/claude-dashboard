@@ -19,7 +19,8 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
   }
 
   function openPort(port: number) {
-    window.open(`http://${window.location.hostname}:${port}`, '_blank');
+    const url = process.tunnelUrls?.[port];
+    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
   }
 
   const statusColor: Record<string, string> = {

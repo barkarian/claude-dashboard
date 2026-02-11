@@ -15,6 +15,7 @@ const config: ServerConfig = {
   sessionSecret: process.env.SESSION_SECRET || 'dev-secret-change-me',
   passwordHash: process.env.DASHBOARD_PASSWORD_HASH || null,
   publicPath: path.join(__dirname, 'public'),
+  tunnelMode: (process.env.TUNNEL_MODE === 'ngrok' ? 'ngrok' : 'none') as 'ngrok' | 'none',
 };
 
 export default config;

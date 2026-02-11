@@ -29,8 +29,9 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showPortsPopover]);
 
-  function openPort(port: number) {
-    window.open(`http://${window.location.hostname}:${port}`, '_blank');
+  function openPort(port: number, proc?: RunningProcess) {
+    const url = proc?.tunnelUrls?.[port];
+    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
   }
 
   // Non-project mode: just show Projects link (rendered from App.tsx for non-project pages)
@@ -177,7 +178,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
                                 key={port}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openPort(port);
+                                  openPort(port, proc);
                                 }}
                                 className="flex items-center gap-1 px-2 py-0.5 text-xs font-mono text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors"
                                 title={`Open :${port} in new tab`}

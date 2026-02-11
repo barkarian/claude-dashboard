@@ -16,6 +16,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const { socket } = useSocket();
   const containerRef = useRef<HTMLDivElement>(null);
   const [detectedPorts, setDetectedPorts] = useState<number[]>([]);
+  const [tunnelUrls, setTunnelUrls] = useState<Record<number, string>>({});
 
   const { status } = useTerminal(containerRef, {
     socket,
@@ -38,6 +39,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
         const proc = (data.processes || []).find(p => p.scriptId === scriptId);
         if (proc?.detectedPorts?.length) {
           setDetectedPorts(proc.detectedPorts);
+          setTunnelUrls(proc.tunnelUrls || {});
         }
       } catch {
         // ignore polling errors
@@ -56,7 +58,8 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   }, [socket, projectId, scriptId]);
 
   function openPort(port: number) {
-    window.open(`http://${window.location.hostname}:${port}`, '_blank');
+    const url = tunnelUrls[port];
+    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
   }
 
   const statusLabel = isShell ? 'Terminal' : status;

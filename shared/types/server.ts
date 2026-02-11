@@ -8,6 +8,7 @@ export interface ServerConfig {
   sessionSecret: string;
   passwordHash: string | null;
   publicPath: string;
+  tunnelMode: 'ngrok' | 'none';
 }
 
 // Augment express-session to include our custom session data

@@ -2,11 +2,12 @@ import pty, { type IPty } from 'node-pty';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { ProcessStatus } from '../../shared/types/models.ts';
 import { detectPorts } from './portDetector.ts';
+import tunnelManager from './tunnelManager.ts';
 
 const MAX_BUFFER_LINES = 5000;
 
 // Env vars set by the dashboard that should NOT leak into child processes
-const DASHBOARD_ENV_KEYS = ['PORT', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'PROJECTS_PATH'];
+const DASHBOARD_ENV_KEYS = ['PORT', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'PROJECTS_PATH', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN'];
 
 function getChildEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
@@ -94,6 +95,7 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
+    tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
@@ -157,6 +159,7 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
+    tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
@@ -175,6 +178,8 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
 function killProcess(projectId: string, scriptId: string): ProcessEntry | undefined {
   const entry = getProcess(projectId, scriptId);
   if (!entry || entry.status !== 'running') return;
+
+  tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
 
   try {
     entry.pty.kill('SIGTERM');

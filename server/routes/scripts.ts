@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
+import tunnelManager from '../services/tunnelManager.ts';
 import type { Script, RunningProcess } from '../../shared/types/models.ts';
 
 const router = Router({ mergeParams: true });
@@ -22,6 +23,9 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
       const detectedPorts = entry.status === 'running'
         ? processManager.getDetectedPorts(projectId, scriptId)
         : [];
+      const tunnelUrls = (entry.status === 'running' && detectedPorts.length > 0)
+        ? await tunnelManager.getTunnelUrls(detectedPorts, `${projectId}:${scriptId}`)
+        : {};
       processes.push({
         scriptId,
         command: entry.command,
@@ -31,6 +35,7 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
         label: isShell ? 'Terminal' : matchedScript?.label,
         isShell,
         detectedPorts,
+        tunnelUrls,
       });
     }
 
