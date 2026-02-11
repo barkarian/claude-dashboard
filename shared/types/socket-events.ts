@@ -58,6 +58,15 @@ export interface TerminalErrorPayload {
   error: string;
 }
 
+export interface TerminalSpawnShellPayload {
+  projectId: string;
+}
+
+export interface TerminalShellSpawnedPayload {
+  projectId: string;
+  scriptId: string;
+}
+
 // === File Socket Event Payloads ===
 
 export interface FilesListPayload {

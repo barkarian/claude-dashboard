@@ -8,6 +8,7 @@ import type {
   TerminalResizePayload,
   TerminalAttachPayload,
   TerminalDetachPayload,
+  TerminalSpawnShellPayload,
 } from '../../shared/types/socket-events.ts';
 
 export default function registerTerminalEvents(socket: Socket, io: SocketIOServer): void {
@@ -33,6 +34,21 @@ export default function registerTerminalEvents(socket: Socket, io: SocketIOServe
     } catch (err: any) {
       console.error('terminal:start error:', err);
       socket.emit('terminal:error', { projectId, scriptId, error: err.message });
+    }
+  });
+
+  socket.on('terminal:spawn-shell', async ({ projectId }: TerminalSpawnShellPayload) => {
+    try {
+      const cwd = projectManager.getProjectPath(projectId);
+      const scriptId = `shell-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const room = `terminal:${projectId}:${scriptId}`;
+      socket.join(room);
+
+      processManager.spawnShell(projectId, scriptId, cwd, io);
+      socket.emit('terminal:shell-spawned', { projectId, scriptId });
+    } catch (err: any) {
+      console.error('terminal:spawn-shell error:', err);
+      socket.emit('terminal:error', { projectId, scriptId: '', error: err.message });
     }
   });
 

@@ -76,4 +76,6 @@ export interface RunningProcess {
   startedAt: string;
   exitCode: number | null;
   label?: string;
+  isShell?: boolean;
+  detectedPorts?: number[];
 }

@@ -18,13 +18,19 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
     const processes: RunningProcess[] = [];
     for (const [scriptId, entry] of projectProcesses) {
       const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
+      const isShell = scriptId.startsWith('shell-');
+      const detectedPorts = entry.status === 'running'
+        ? processManager.getDetectedPorts(projectId, scriptId)
+        : [];
       processes.push({
         scriptId,
         command: entry.command,
         status: entry.status,
         startedAt: entry.startedAt,
         exitCode: entry.exitCode,
-        label: matchedScript?.label,
+        label: isShell ? 'Terminal' : matchedScript?.label,
+        isShell,
+        detectedPorts,
       });
     }
 

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api.ts';
+import { useSocket } from '../../context/SocketContext.tsx';
 import ScriptCard from './ScriptCard.tsx';
 import RunningProcessCard from './RunningProcessCard.tsx';
 import AddScriptModal from './AddScriptModal.tsx';
@@ -15,6 +17,9 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [runningProcesses, setRunningProcesses] = useState<RunningProcess[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [spawningShell, setSpawningShell] = useState(false);
+  const navigate = useNavigate();
+  const { socket } = useSocket();
 
   useEffect(() => {
     loadAll();
@@ -59,6 +64,28 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
     } catch (err) {
       console.error('Failed to delete script:', err);
     }
+  }
+
+  function handleNewTerminal() {
+    if (!socket || spawningShell) return;
+    setSpawningShell(true);
+
+    function onShellSpawned({ projectId: pid, scriptId }: { projectId: string; scriptId: string }) {
+      if (pid === projectId) {
+        socket!.off('terminal:shell-spawned', onShellSpawned);
+        setSpawningShell(false);
+        navigate(`/project/${projectId}/scripts/${scriptId}`);
+      }
+    }
+
+    socket.on('terminal:shell-spawned', onShellSpawned);
+    socket.emit('terminal:spawn-shell', { projectId });
+
+    // Timeout fallback
+    setTimeout(() => {
+      socket.off('terminal:shell-spawned', onShellSpawned);
+      setSpawningShell(false);
+    }, 5000);
   }
 
   if (loading) {
@@ -115,15 +142,32 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
         ))
       )}
 
-      <button
-        onClick={() => setShowModal(true)}
-        className="btn-outline w-full"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-        </svg>
-        Add Script
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => setShowModal(true)}
+          className="btn-outline flex-1"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Add Script
+        </button>
+
+        <button
+          onClick={handleNewTerminal}
+          disabled={spawningShell}
+          className="btn-outline flex-1"
+        >
+          {spawningShell ? (
+            <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          )}
+          New Terminal
+        </button>
+      </div>
 
       {showModal && (
         <AddScriptModal

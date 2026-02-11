@@ -1,6 +1,7 @@
 import pty, { type IPty } from 'node-pty';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { ProcessStatus } from '../../shared/types/models.ts';
+import { detectPorts } from './portDetector.ts';
 
 const MAX_BUFFER_LINES = 5000;
 
@@ -96,6 +97,69 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
   return entry;
 }
 
+function spawnShell(projectId: string, scriptId: string, cwd: string, io: SocketIOServer): ProcessEntry {
+  // Kill existing process if any
+  killProcess(projectId, scriptId);
+
+  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+  // Use -i (interactive) instead of --login to avoid profile scripts overriding cwd
+  const args = process.platform === 'win32' ? [] : ['-i'];
+
+  const ptyProcess = pty.spawn(shell, args, {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd,
+    env: { ...process.env, TERM: 'xterm-256color', HOME: process.env.HOME || '' } as Record<string, string>,
+  });
+
+  const buffer: string[] = [];
+  const entry: ProcessEntry = {
+    pty: ptyProcess,
+    buffer,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    exitCode: null,
+    command: 'bash',
+    projectId,
+    scriptId,
+  };
+
+  if (!processes.has(projectId)) {
+    processes.set(projectId, new Map());
+  }
+  processes.get(projectId)!.set(scriptId, entry);
+
+  const room = `terminal:${projectId}:${scriptId}`;
+
+  ptyProcess.onData((data: string) => {
+    buffer.push(data);
+    if (buffer.length > MAX_BUFFER_LINES) {
+      buffer.splice(0, buffer.length - MAX_BUFFER_LINES);
+    }
+    if (io) {
+      io.to(room).emit('terminal:output', { projectId, scriptId, data });
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+    entry.status = 'exited';
+    entry.exitCode = exitCode;
+    if (io) {
+      io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
+      io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
+      io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
+    }
+  });
+
+  if (io) {
+    io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
+    io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'running' });
+  }
+
+  return entry;
+}
+
 function killProcess(projectId: string, scriptId: string): ProcessEntry | undefined {
   const entry = getProcess(projectId, scriptId);
   if (!entry || entry.status !== 'running') return;
@@ -143,6 +207,12 @@ function getBuffer(projectId: string, scriptId: string): string {
   return entry.buffer.join('');
 }
 
+function getDetectedPorts(projectId: string, scriptId: string): number[] {
+  const entry = getProcess(projectId, scriptId);
+  if (!entry) return [];
+  return detectPorts(entry.buffer.join(''));
+}
+
 function killAllForProject(projectId: string): void {
   const projectMap = processes.get(projectId);
   if (!projectMap) return;
@@ -160,12 +230,14 @@ function killAll(): void {
 
 export default {
   spawnProcess,
+  spawnShell,
   killProcess,
   writeToProcess,
   resizeProcess,
   getProcess,
   getProjectProcesses,
   getBuffer,
+  getDetectedPorts,
   killAllForProject,
   killAll,
 };

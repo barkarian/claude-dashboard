@@ -1,7 +1,10 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useTerminal } from '../../hooks/useTerminal.ts';
+import TerminalInputBar from './TerminalInputBar.tsx';
+import api from '../../utils/api.ts';
+import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface ScriptTerminalProps {
   projectId: string;
@@ -12,12 +15,51 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [detectedPorts, setDetectedPorts] = useState<number[]>([]);
 
   const { status } = useTerminal(containerRef, {
     socket,
     projectId,
     scriptId: scriptId!,
   });
+
+  const isShell = scriptId?.startsWith('shell-') ?? false;
+  const isRunning = status === 'running' || status === 'connected';
+
+  // Poll for detected ports every 5s
+  useEffect(() => {
+    if (!isRunning) return;
+
+    async function pollPorts() {
+      try {
+        const data = await api.get<{ processes: RunningProcess[] }>(
+          `/api/projects/${projectId}/scripts/processes`
+        );
+        const proc = (data.processes || []).find(p => p.scriptId === scriptId);
+        if (proc?.detectedPorts?.length) {
+          setDetectedPorts(proc.detectedPorts);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    pollPorts();
+    const interval = setInterval(pollPorts, 5000);
+    return () => clearInterval(interval);
+  }, [projectId, scriptId, isRunning]);
+
+  const handleInputSend = useCallback((data: string) => {
+    if (socket && scriptId) {
+      socket.emit('terminal:input', { projectId, scriptId, data });
+    }
+  }, [socket, projectId, scriptId]);
+
+  function openPort(port: number) {
+    window.open(`http://${window.location.hostname}:${port}`, '_blank');
+  }
+
+  const statusLabel = isShell ? 'Terminal' : status;
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)]">
@@ -32,12 +74,26 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
           Back to Scripts
         </button>
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${status === 'running' || status === 'connected' ? 'bg-success' : 'bg-text-dim'}`} />
-          <span className="text-xs text-text-muted capitalize">{status}</span>
+          {detectedPorts.map((port) => (
+            <button
+              key={port}
+              onClick={() => openPort(port)}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+              :{port}
+            </button>
+          ))}
+          <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-success' : 'bg-text-dim'}`} />
+          <span className="text-xs text-text-muted capitalize">{statusLabel}</span>
         </div>
       </div>
 
       <div ref={containerRef} className="flex-1 overflow-hidden" />
+
+      <TerminalInputBar onSend={handleInputSend} disabled={!isRunning} />
     </div>
   );
 }
