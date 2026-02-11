@@ -2,6 +2,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import registerTerminalEvents from './terminal.ts';
 import registerSDKClaudeEvents from './claude-sdk.ts';
 import registerFileEvents from './files.ts';
+import registerAIGenerateEvents from './ai-generate.ts';
 
 export default function registerSocketHandlers(io: SocketIOServer): void {
   io.on('connection', (socket: Socket) => {
@@ -10,6 +11,7 @@ export default function registerSocketHandlers(io: SocketIOServer): void {
     registerTerminalEvents(socket, io);
     registerSDKClaudeEvents(socket, io);
     registerFileEvents(socket, io);
+    registerAIGenerateEvents(socket, io);
 
     socket.on('disconnect', (reason: string) => {
       console.log(`Client disconnected: ${socket.id} (${reason})`);

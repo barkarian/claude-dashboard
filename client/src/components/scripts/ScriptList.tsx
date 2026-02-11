@@ -5,6 +5,7 @@ import { useSocket } from '../../context/SocketContext.tsx';
 import ScriptCard from './ScriptCard.tsx';
 import RunningProcessCard from './RunningProcessCard.tsx';
 import AddScriptModal from './AddScriptModal.tsx';
+import AIScriptGenerator from './AIScriptGenerator.tsx';
 import type { Project, ScriptWithStatus, RunningProcess } from '../../../../shared/types/models.ts';
 
 interface ScriptListProps {
@@ -17,6 +18,7 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [runningProcesses, setRunningProcesses] = useState<RunningProcess[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showAIGenerator, setShowAIGenerator] = useState(false);
   const [spawningShell, setSpawningShell] = useState(false);
   const navigate = useNavigate();
   const { socket } = useSocket();
@@ -142,6 +144,15 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
         ))
       )}
 
+      {/* AI Script Generator */}
+      {showAIGenerator && (
+        <AIScriptGenerator
+          projectId={projectId}
+          onClose={() => setShowAIGenerator(false)}
+          onScriptsAdded={() => { setShowAIGenerator(false); handleRefresh(); }}
+        />
+      )}
+
       <div className="flex gap-2">
         <button
           onClick={() => setShowModal(true)}
@@ -153,21 +164,33 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
           Add Script
         </button>
 
-        <button
-          onClick={handleNewTerminal}
-          disabled={spawningShell}
-          className="btn-outline flex-1"
-        >
-          {spawningShell ? (
-            <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-          ) : (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+        {!showAIGenerator && (
+          <button
+            onClick={() => setShowAIGenerator(true)}
+            className="btn-outline flex-1 border-primary/30 text-primary hover:bg-primary/10"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
             </svg>
-          )}
-          New Terminal
-        </button>
+            Generate with AI
+          </button>
+        )}
       </div>
+
+      <button
+        onClick={handleNewTerminal}
+        disabled={spawningShell}
+        className="btn-outline w-full"
+      >
+        {spawningShell ? (
+          <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+        ) : (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+        )}
+        New Terminal
+      </button>
 
       {showModal && (
         <AddScriptModal
