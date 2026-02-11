@@ -5,6 +5,18 @@ import { detectPorts } from './portDetector.ts';
 
 const MAX_BUFFER_LINES = 5000;
 
+// Env vars set by the dashboard that should NOT leak into child processes
+const DASHBOARD_ENV_KEYS = ['PORT', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'PROJECTS_PATH'];
+
+function getChildEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  for (const key of DASHBOARD_ENV_KEYS) {
+    delete env[key];
+  }
+  env.TERM = 'xterm-256color';
+  return env;
+}
+
 interface ProcessEntry {
   pty: IPty;
   buffer: string[];
@@ -47,7 +59,7 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     cols: 120,
     rows: 30,
     cwd,
-    env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
+    env: getChildEnv(),
   });
 
   const buffer: string[] = [];
@@ -110,7 +122,7 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     cols: 120,
     rows: 30,
     cwd,
-    env: { ...process.env, TERM: 'xterm-256color', HOME: process.env.HOME || '' } as Record<string, string>,
+    env: getChildEnv(),
   });
 
   const buffer: string[] = [];
