@@ -240,6 +240,10 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
       const stream = query({ prompt, options: queryOptions });
       let resultData: any = null;
 
+      // Track unsupported tool blocks so we can filter them and their results
+      let skippingBlock = false;
+      const skippedToolIds = new Set<string>();
+
       for await (const event of stream) {
         if (session.abortController?.signal.aborted) break;
 
@@ -259,6 +263,15 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
           // Handle different stream event types from Anthropic SDK
           if (rawEvent.type === 'content_block_start') {
             const block = rawEvent.content_block;
+
+            // Skip unsupported tool blocks entirely
+            if (block?.type === 'tool_use' && UNSUPPORTED_TOOLS.has(block.name)) {
+              skippingBlock = true;
+              skippedToolIds.add(block.id || '');
+              continue;
+            }
+
+            skippingBlock = false;
             if (block?.type === 'text') {
               currentContent.push({ type: 'text', text: '' } as TextBlock);
             } else if (block?.type === 'tool_use') {
@@ -273,6 +286,8 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
               currentContent.push({ type: 'thinking', thinking: '' } as ThinkingBlock);
             }
           } else if (rawEvent.type === 'content_block_delta') {
+            if (skippingBlock) continue; // Skip deltas for unsupported tools
+
             const delta = rawEvent.delta;
             const lastBlock = currentContent[currentContent.length - 1];
             if (delta?.type === 'text_delta' && lastBlock?.type === 'text') {
@@ -285,6 +300,11 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
               (lastBlock as any)._rawInput += delta.partial_json || '';
             }
           } else if (rawEvent.type === 'content_block_stop') {
+            if (skippingBlock) {
+              skippingBlock = false;
+              continue; // Skip stop for unsupported tools
+            }
+
             // Try to parse accumulated tool input JSON
             const lastBlock = currentContent[currentContent.length - 1];
             if (lastBlock?.type === 'tool_use' && (lastBlock as any)._rawInput) {
@@ -296,6 +316,8 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
               delete (lastBlock as any)._rawInput;
             }
           }
+
+          if (skippingBlock) continue; // Don't emit updates while skipping
 
           // Emit partial update
           partialMessage.content = [...currentContent];
@@ -333,6 +355,9 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
             // Append tool results to the current message content
             for (const block of msg.content) {
               if (block.type === 'tool_result') {
+                // Skip results for unsupported tools (e.g. AskUserQuestion denial)
+                if (skippedToolIds.has(block.tool_use_id || '')) continue;
+
                 const content = typeof block.content === 'string'
                   ? block.content
                   : Array.isArray(block.content)
