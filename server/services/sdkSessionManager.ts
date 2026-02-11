@@ -12,6 +12,20 @@ import type {
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+// Tools that Claude Code uses internally but can't be executed through the Agent SDK.
+// When Claude tries these, we auto-deny with a message so it falls back to text.
+const UNSUPPORTED_TOOLS = new Set([
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'TaskCreate',
+  'TaskUpdate',
+  'TaskList',
+  'TaskGet',
+  'Skill',
+  'NotebookEdit',
+]);
+
 interface PermissionResolver {
   resolve: (result: { behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -142,6 +156,15 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
     toolInput: Record<string, unknown>,
     _options: { signal: AbortSignal },
   ) => {
+    // Auto-deny tools that can't be executed in this environment
+    if (UNSUPPORTED_TOOLS.has(toolName)) {
+      console.log(`[sdk:${chatId}] Auto-denied unsupported tool: ${toolName}`);
+      return {
+        behavior: 'deny' as const,
+        message: `${toolName} is not available. Please communicate directly with the user in your response text instead.`,
+      };
+    }
+
     emitStatus(session, 'waiting-permission');
 
     const requestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -200,6 +223,10 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
       canUseTool,
       stderr: (data: string) => {
         console.error(`[sdk:${chatId}:stderr] ${data}`);
+        // Emit significant errors to the client so they appear in chat
+        if (data.includes('Error') || data.includes('error') || data.includes('ZodError')) {
+          session.io.to(room).emit('sdk:error', { chatId, error: data.trim() });
+        }
       },
     };
 
@@ -284,19 +311,18 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
           continue;
         }
 
-        // SDKAssistantMessage — final assistant message with full content
+        // SDKAssistantMessage — final assistant message for current turn.
+        // Don't replace accumulated content — streaming already built it up
+        // across turns (tool use → tool result → text). Replacing would discard
+        // previous turns' content, causing them to flash and disappear.
         if (event.type === 'assistant') {
-          const msg = (event as any).message;
-          if (msg?.content && Array.isArray(msg.content)) {
-            currentContent = convertSDKContent(msg.content);
-            partialMessage.content = currentContent;
-            partialMessage.isPartial = false;
+          partialMessage.content = [...currentContent];
+          partialMessage.isPartial = false;
 
-            session.io.to(room).emit('sdk:message', {
-              chatId,
-              message: partialMessage,
-            });
-          }
+          session.io.to(room).emit('sdk:message', {
+            chatId,
+            message: partialMessage,
+          });
           continue;
         }
 
