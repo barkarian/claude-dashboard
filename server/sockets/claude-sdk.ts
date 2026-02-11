@@ -1,6 +1,6 @@
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import { migrateHistoryMessage } from '../services/sdkSessionManager.ts';
-import projectManager from '../services/projectManager.js';
+import projectManager from '../services/projectManager.ts';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type {
   SDKStartPayload,

@@ -10,8 +10,7 @@
     "noEmit": true,
     "outDir": "./dist",
     "rootDir": "..",
-    "paths": { "shared/*": ["../shared/*"] },
-    "allowJs": true
+    "paths": { "shared/*": ["../shared/*"] }
   },
   "include": ["**/*.ts", "../shared/**/*.ts"]
 }

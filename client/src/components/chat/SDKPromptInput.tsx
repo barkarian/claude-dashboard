@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import FilePicker from './FilePicker.jsx';
+import FilePicker from './FilePicker.tsx';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
 interface SDKPromptInputProps {

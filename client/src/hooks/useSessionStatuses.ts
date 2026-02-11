@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSocket } from '../context/SocketContext.jsx';
+import { useSocket } from '../context/SocketContext.tsx';
 import type { SessionStatus } from '../../../shared/types/interactive.ts';
 
 export function useSessionStatuses(projectId: string | undefined): Record<string, SessionStatus> {

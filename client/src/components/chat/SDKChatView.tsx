@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useSocket } from '../../context/SocketContext.jsx';
-import { useProject } from '../../context/ProjectContext.jsx';
+import { useSocket } from '../../context/SocketContext.tsx';
+import { useProject } from '../../context/ProjectContext.tsx';
 import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
