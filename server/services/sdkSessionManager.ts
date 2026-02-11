@@ -265,6 +265,14 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
       abortController: session.abortController,
       includePartialMessages: true,
       canUseTool,
+      // Load project-level settings (CLAUDE.md, .claude/settings.json) from the project directory
+      settingSources: ['project'],
+      // Tell Claude explicitly where the project root is so it doesn't write outside it
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: `\n\nIMPORTANT: Your project root directory is ${session.projectPath}. All files you create, read, or modify MUST be within this directory. When the user refers to "root directory", "project root", or "here", they mean ${session.projectPath}. Never create files outside this directory.`,
+      },
       stderr: (data: string) => {
         console.error(`[sdk:${chatId}:stderr] ${data}`);
         // Emit significant errors to the client so they appear in chat
