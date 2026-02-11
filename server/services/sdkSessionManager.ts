@@ -538,9 +538,20 @@ function resolveQuestion(chatId: string, requestId: string, answers: Record<numb
 
   clearTimeout(resolver.timer);
 
+  // Empty answers means the user chose "Chat about these questions instead"
+  const entries = Object.entries(answers);
+  if (entries.length === 0) {
+    resolver.resolve({
+      behavior: 'deny',
+      message: 'The user would prefer to discuss these questions conversationally in the chat rather than selecting from predefined options. Please ask them directly in your response text.',
+    });
+    session.questionResolvers.delete(requestId);
+    return;
+  }
+
   // Format answers as human-readable text for Claude to consume
   const lines: string[] = [];
-  for (const [idx, selected] of Object.entries(answers)) {
+  for (const [idx, selected] of entries) {
     lines.push(`Question ${Number(idx) + 1}: ${selected.join(', ')}`);
   }
   const formatted = lines.join('\n');

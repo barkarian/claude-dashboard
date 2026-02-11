@@ -31,6 +31,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     sendPrompt,
     respondToPermission,
     respondToQuestion,
+    dismissQuestion,
     interrupt,
   } = useSDKMessages(socket, chatId);
 
@@ -170,6 +171,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             <QuestionPrompt
               question={pendingQuestion}
               onRespond={respondToQuestion}
+              onDismiss={dismissQuestion}
             />
           )}
 

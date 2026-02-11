@@ -45,6 +45,7 @@ interface UseSDKMessagesReturn {
   sendPrompt: (prompt: string) => void;
   respondToPermission: (requestId: string, granted: boolean) => void;
   respondToQuestion: (requestId: string, answers: Record<number, string[]>) => void;
+  dismissQuestion: (requestId: string) => void;
   interrupt: () => void;
 }
 
@@ -188,6 +189,16 @@ export function useSDKMessages(
     [socket, chatId],
   );
 
+  const dismissQuestion = useCallback(
+    (requestId: string) => {
+      if (!socket || !chatId) return;
+      // Send empty answers — server interprets as "chat about these instead"
+      socket.emit('sdk:question-response', { chatId, requestId, answers: {} });
+      setPendingQuestion(null);
+    },
+    [socket, chatId],
+  );
+
   const interrupt = useCallback(() => {
     if (!socket || !chatId) return;
     socket.emit('sdk:interrupt', { chatId });
@@ -203,6 +214,7 @@ export function useSDKMessages(
     sendPrompt,
     respondToPermission,
     respondToQuestion,
+    dismissQuestion,
     interrupt,
   };
 }
