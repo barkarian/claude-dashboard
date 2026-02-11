@@ -87,7 +87,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
   if (selectedFile) {
     const file = files.find(f => f.path === selectedFile);
     return (
-      <div className="flex flex-col h-[calc(100vh-10rem)]">
+      <div className="flex-1 flex flex-col">
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
           <button
             onClick={() => setSelectedFile(null)}

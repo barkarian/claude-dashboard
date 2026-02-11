@@ -7,7 +7,6 @@ import ProjectListPage from './pages/ProjectListPage.tsx';
 import NewProjectPage from './pages/NewProjectPage.tsx';
 import ProjectDashboardPage from './pages/ProjectDashboardPage.tsx';
 import Sidebar from './components/layout/Sidebar.tsx';
-import MobileNav from './components/layout/MobileNav.tsx';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -50,16 +49,15 @@ export default function App() {
       <Route path="/*" element={
         <ProtectedRoute>
           <ProjectProvider>
-            <div className="min-h-screen flex flex-col md:flex-row">
+            <div className="h-[100dvh] flex flex-col md:flex-row overflow-hidden">
               <Sidebar />
-              <main className="flex-1 pb-16 md:pb-0 overflow-auto">
+              <main className="flex-1 flex flex-col overflow-hidden">
                 <Routes>
                   <Route path="/" element={<ProjectListPage />} />
                   <Route path="/new" element={<NewProjectPage />} />
                   <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
                 </Routes>
               </main>
-              <MobileNav />
             </div>
           </ProjectProvider>
         </ProtectedRoute>

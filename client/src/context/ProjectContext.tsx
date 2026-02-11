@@ -8,6 +8,8 @@ interface ProjectContextValue {
   loadProject: (projectId: string) => Promise<void>;
   refreshProject: () => Promise<void>;
   setProject: React.Dispatch<React.SetStateAction<Project | null>>;
+  activeChatStatus: string | null;
+  setActiveChatStatus: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -15,6 +17,7 @@ const ProjectContext = createContext<ProjectContextValue | null>(null);
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeChatStatus, setActiveChatStatus] = useState<string | null>(null);
 
   const loadProject = useCallback(async (projectId: string) => {
     setLoading(true);
@@ -44,7 +47,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [project?.id]);
 
   return (
-    <ProjectContext.Provider value={{ project, loading, loadProject, refreshProject, setProject }}>
+    <ProjectContext.Provider value={{ project, loading, loadProject, refreshProject, setProject, activeChatStatus, setActiveChatStatus }}>
       {children}
     </ProjectContext.Provider>
   );

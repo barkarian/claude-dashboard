@@ -63,7 +63,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
   }
 
   return (
-    <div className="relative border-t border-border p-3">
+    <div className="flex-shrink-0 relative border-t border-border p-3">
       {showFilePicker && (
         <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
           <FilePicker

@@ -1,41 +1,79 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
 import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
+import { useSocket } from '../context/SocketContext.tsx';
 import { Toaster } from '../components/ui/sonner.tsx';
-import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.tsx';
 import Header from '../components/layout/Header.tsx';
+import MobileNav from '../components/layout/MobileNav.tsx';
 import ScriptList from '../components/scripts/ScriptList.tsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import DiffOverview from '../components/diff/DiffOverview.tsx';
+import api from '../utils/api.ts';
+import type { Chat } from '../../../shared/types/models.ts';
 
 export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { project, loading, loadProject } = useProject();
+  const { project, loading, loadProject, refreshProject, activeChatStatus } = useProject();
+  const { socket } = useSocket();
   const sessionStatuses = useSessionStatuses(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
+  const [diffCount, setDiffCount] = useState(0);
 
   useEffect(() => {
     loadProject(id!);
   }, [id, loadProject]);
 
-  // Derive current tab from pathname
+  // Fetch diff count for badge
+  useEffect(() => {
+    if (!id) return;
+    api.get<{ files?: any[] }>(`/api/projects/${id}/diff`)
+      .then((data) => setDiffCount(data.files?.length || 0))
+      .catch(() => setDiffCount(0));
+  }, [id]);
+
+  // Derive current tab and active chat from pathname
   const pathAfterProject = location.pathname.split(`/project/${id}/`)[1] || '';
   const currentTab = pathAfterProject.split('/')[0] || 'chats';
+  const chatMatch = location.pathname.match(/\/chats\/([^/]+)/);
+  const activeChatId = chatMatch ? chatMatch[1] : null;
+  const activeChat = activeChatId ? (project?.chats || []).find((c) => c.id === activeChatId) : null;
+
+  // Compute status display from activeChatStatus context
+  const statusLabel = (() => {
+    if (!activeChatStatus) return undefined;
+    switch (activeChatStatus) {
+      case 'streaming': return 'thinking';
+      case 'tool-use': return 'working';
+      case 'waiting-permission': return 'permission';
+      default: return activeChatStatus;
+    }
+  })();
+
+  const statusDotClass = (() => {
+    if (!activeChatStatus) return undefined;
+    switch (activeChatStatus) {
+      case 'idle': return 'bg-success';
+      case 'streaming':
+      case 'tool-use': return 'bg-warning animate-pulse';
+      case 'waiting-permission': return 'bg-primary animate-pulse';
+      case 'starting': return 'bg-primary animate-pulse';
+      default: return 'bg-text-dim';
+    }
+  })();
+
+  const isActive = activeChatStatus && activeChatStatus !== 'disconnected' && activeChatStatus !== 'exited' && activeChatStatus !== 'error';
 
   // Toast notifications for background session changes
   useEffect(() => {
     const prev = prevStatusesRef.current;
     const chats = project?.chats || [];
-
-    // Determine which chatId is currently viewed
-    const chatMatch = location.pathname.match(/\/chats\/([^/]+)/);
-    const viewedChatId = chatMatch ? chatMatch[1] : null;
+    const viewedChatId = activeChatId;
 
     for (const [chatId, status] of Object.entries(sessionStatuses)) {
       if (chatId === viewedChatId) continue;
@@ -63,7 +101,35 @@ export default function ProjectDashboardPage() {
     }
 
     prevStatusesRef.current = { ...sessionStatuses };
-  }, [sessionStatuses, project, location.pathname, id, navigate]);
+  }, [sessionStatuses, project, activeChatId, id, navigate]);
+
+  async function handleNewChat() {
+    try {
+      const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat' });
+      navigate(`/project/${id}/chats/${data.chat.id}`);
+    } catch (err) {
+      console.error('Failed to create chat:', err);
+    }
+  }
+
+  async function handleEditChatName(newName: string) {
+    if (!activeChatId) return;
+    try {
+      await api.patch(`/api/projects/${id}/chats/${activeChatId}`, { label: newName });
+      await refreshProject();
+    } catch (err) {
+      console.error('Failed to rename chat:', err);
+    }
+  }
+
+  function handlePowerOff() {
+    if (socket && activeChatId) {
+      socket.emit('sdk:end', { chatId: activeChatId });
+    }
+  }
+
+  // Count active script sessions
+  const scriptCount = (project?.scripts || []).length;
 
   if (loading) {
     return (
@@ -83,30 +149,46 @@ export default function ProjectDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="flex-1 flex flex-col overflow-hidden">
       <Toaster />
-      <Header title={project.name} backTo="/" />
-
-      {/* Tab navigation */}
-      <div className="border-b border-border px-4">
-        <Tabs value={currentTab} onValueChange={(val) => navigate(`/project/${id}/${val}`)}>
-          <TabsList>
-            <TabsTrigger value="scripts">Scripts</TabsTrigger>
-            <TabsTrigger value="chats">Chats</TabsTrigger>
-            <TabsTrigger value="diff">Changes</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+      <Header
+        projectName={project.name}
+        projectId={id}
+        chatName={activeChat?.label}
+        chatId={activeChatId || undefined}
+        onNewChat={handleNewChat}
+        onEditChatName={activeChatId ? handleEditChatName : undefined}
+        onPowerOff={activeChatId ? handlePowerOff : undefined}
+        showPowerOff={!!isActive}
+        statusDot={statusDotClass}
+        statusLabel={statusLabel}
+      />
 
       {/* Tab content */}
       <Routes>
         <Route path="/" element={<Navigate to="chats" replace />} />
-        <Route path="scripts" element={<ScriptList projectId={id!} project={project} />} />
+        <Route path="scripts" element={
+          <div className="flex-1 overflow-y-auto">
+            <ScriptList projectId={id!} project={project} />
+          </div>
+        } />
         <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id!} />} />
-        <Route path="chats" element={<ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />} />
+        <Route path="chats" element={
+          <div className="flex-1 overflow-y-auto">
+            <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />
+          </div>
+        } />
         <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
         <Route path="diff" element={<DiffOverview projectId={id!} />} />
       </Routes>
+
+      {/* Mobile bottom nav */}
+      <MobileNav
+        projectId={id}
+        currentTab={currentTab}
+        scriptCount={scriptCount}
+        changeCount={diffCount}
+      />
     </div>
   );
 }

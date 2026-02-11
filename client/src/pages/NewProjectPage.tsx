@@ -48,10 +48,10 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="flex-1 flex flex-col overflow-hidden">
       <Header title="New Project" backTo="/" />
 
-      <div className="p-4 max-w-2xl mx-auto">
+      <div className="flex-1 overflow-y-auto p-4 max-w-2xl mx-auto w-full">
         {step === 1 && (
           <div className="space-y-6">
             <div>

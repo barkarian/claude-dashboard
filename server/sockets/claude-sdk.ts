@@ -121,7 +121,7 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
     sdkSessionManager.endSession(chatId);
   });
 
-  socket.on('sdk:attach', ({ chatId }: SDKAttachPayload) => {
+  socket.on('sdk:attach', async ({ chatId }: SDKAttachPayload) => {
     const room = `claude:${chatId}`;
     socket.join(room);
 
@@ -132,6 +132,18 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
       const messages = sdkSessionManager.getMessageHistory(chatId);
       if (messages.length > 0) {
         socket.emit('sdk:history', { chatId, messages });
+      } else {
+        // Runtime buffer empty — load persisted history from project file
+        try {
+          const project = await projectManager.getProject(session.projectId);
+          const chat = (project?.chats || []).find((c: any) => c.id === chatId);
+          if (chat?.history && chat.history.length > 0) {
+            const persistedMessages: SDKChatMessage[] = chat.history.map(migrateHistoryMessage);
+            socket.emit('sdk:history', { chatId, messages: persistedMessages });
+          }
+        } catch (err: any) {
+          console.error('sdk:attach history load error:', err);
+        }
       }
     }
   });
