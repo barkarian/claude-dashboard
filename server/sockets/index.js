@@ -1,5 +1,5 @@
 import registerTerminalEvents from './terminal.js';
-import registerClaudeEvents from './claude.ts';
+import registerSDKClaudeEvents from './claude-sdk.ts';
 import registerFileEvents from './files.js';
 
 export default function registerSocketHandlers(io) {
@@ -7,7 +7,7 @@ export default function registerSocketHandlers(io) {
     console.log(`Client connected: ${socket.id}`);
 
     registerTerminalEvents(socket, io);
-    registerClaudeEvents(socket, io);
+    registerSDKClaudeEvents(socket, io);
     registerFileEvents(socket, io);
 
     socket.on('disconnect', (reason) => {

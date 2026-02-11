@@ -12,7 +12,7 @@ import scriptRoutes from './routes/scripts.js';
 import githubRoutes from './routes/github.js';
 import registerSocketHandlers from './sockets/index.js';
 import processManager from './services/processManager.js';
-import claudeManager from './services/claudeManager.ts';
+import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.js';
 import projectManager from './services/projectManager.js';
 import fs from 'fs/promises';
@@ -100,7 +100,7 @@ async function autostartScripts() {
 function shutdown() {
   console.log('Shutting down...');
   processManager.killAll();
-  claudeManager.endAllSessions();
+  sdkSessionManager.endAllSessions();
   fileService.stopAllWatching();
   io.close();
   server.close(() => {

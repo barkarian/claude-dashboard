@@ -9,7 +9,7 @@ import Header from '../components/layout/Header.jsx';
 import ScriptList from '../components/scripts/ScriptList.jsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.jsx';
 import ChatList from '../components/chat/ChatList.jsx';
-import ChatView from '../components/chat/ChatView.tsx';
+import SDKChatView from '../components/chat/SDKChatView.tsx';
 import DiffOverview from '../components/diff/DiffOverview.jsx';
 
 export default function ProjectDashboardPage() {
@@ -104,7 +104,7 @@ export default function ProjectDashboardPage() {
         <Route path="scripts" element={<ScriptList projectId={id} project={project} />} />
         <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id} />} />
         <Route path="chats" element={<ChatList projectId={id} project={project} sessionStatuses={sessionStatuses} />} />
-        <Route path="chats/:chatId" element={<ChatView projectId={id} />} />
+        <Route path="chats/:chatId" element={<SDKChatView projectId={id} />} />
         <Route path="diff" element={<DiffOverview projectId={id} />} />
       </Routes>
     </div>

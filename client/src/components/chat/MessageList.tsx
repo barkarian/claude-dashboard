@@ -1,0 +1,32 @@
+import { useEffect, useRef } from 'react';
+import type { SDKChatMessage } from '../../../../shared/types/sdk.ts';
+import SDKMessageBubble from './SDKMessageBubble.tsx';
+
+interface MessageListProps {
+  messages: SDKChatMessage[];
+}
+
+export default function MessageList({ messages }: MessageListProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-text-muted text-sm">Send a message to start the conversation</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {messages.map((message) => (
+        <SDKMessageBubble key={message.id} message={message} />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+}

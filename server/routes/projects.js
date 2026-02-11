@@ -130,7 +130,7 @@ router.post('/:id/chats', async (req, res) => {
       label: label || 'New Chat',
       createdAt: new Date().toISOString(),
       history: [],
-      claudeSessionId: uuidv4(),
+      sdkSessionId: null, // Set by SDK after first successful query
     };
     project.chats = project.chats || [];
     project.chats.push(chat);
