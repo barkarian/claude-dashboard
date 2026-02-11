@@ -13,7 +13,7 @@ import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import DiffOverview from '../components/diff/DiffOverview.tsx';
 import api from '../utils/api.ts';
-import type { Chat } from '../../../shared/types/models.ts';
+import type { Chat, RunningProcess } from '../../../shared/types/models.ts';
 
 export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,6 +25,7 @@ export default function ProjectDashboardPage() {
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
   const [runningCount, setRunningCount] = useState(0);
+  const [processesWithPorts, setProcessesWithPorts] = useState<RunningProcess[]>([]);
 
   useEffect(() => {
     loadProject(id!);
@@ -42,12 +43,17 @@ export default function ProjectDashboardPage() {
   useEffect(() => {
     if (!id) return;
     function fetchRunningCount(): void {
-      api.get<{ runningCount: number }>(`/api/projects/${id}/scripts/processes`)
+      api.get<{ processes: RunningProcess[]; runningCount: number }>(`/api/projects/${id}/scripts/processes`)
         .then((data) => {
           setRunningCount(data.runningCount || 0);
+          const withPorts = (data.processes || []).filter(
+            (p) => p.status === 'running' && p.detectedPorts && p.detectedPorts.length > 0
+          );
+          setProcessesWithPorts(withPorts);
         })
         .catch(() => {
           setRunningCount(0);
+          setProcessesWithPorts([]);
         });
     }
     fetchRunningCount();
@@ -197,7 +203,11 @@ export default function ProjectDashboardPage() {
           </div>
         } />
         <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
-        <Route path="diff" element={<DiffOverview projectId={id!} />} />
+        <Route path="diff" element={
+          <div className="flex-1 overflow-y-auto">
+            <DiffOverview projectId={id!} />
+          </div>
+        } />
       </Routes>
 
       {/* Mobile bottom nav */}
@@ -206,6 +216,7 @@ export default function ProjectDashboardPage() {
         currentTab={currentTab}
         scriptCount={scriptCount}
         changeCount={diffCount}
+        processesWithPorts={processesWithPorts}
       />
     </div>
   );
