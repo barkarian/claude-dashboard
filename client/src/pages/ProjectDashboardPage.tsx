@@ -172,7 +172,7 @@ export default function ProjectDashboardPage() {
       <Header
         projectName={project.name}
         projectId={id}
-        chatName={activeChat?.label}
+        chatName={activeChat?.label || (activeChatId ? 'New Chat' : undefined)}
         chatId={activeChatId || undefined}
         onNewChat={handleNewChat}
         onEditChatName={activeChatId ? handleEditChatName : undefined}

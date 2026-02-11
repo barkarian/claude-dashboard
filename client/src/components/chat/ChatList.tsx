@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type KeyboardEvent } from 'react';
+import { useState, useEffect, type MouseEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
@@ -20,6 +20,13 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const chats = project?.chats || [];
+
+  // On mount, hit the chats endpoint which cleans up empty "New Chat" entries server-side
+  useEffect(() => {
+    api.get(`/api/projects/${projectId}/chats`).then(() => {
+      refreshProject();
+    }).catch(() => {});
+  }, [projectId]);
 
   const filteredChats = chats
     .filter((c) => c.label.toLowerCase().includes(searchQuery.toLowerCase()))

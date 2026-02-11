@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
+import sdkSessionManager from '../services/sdkSessionManager.ts';
 import type { Chat } from '../../shared/types/models.ts';
 
 const router = Router();
@@ -111,6 +112,19 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
+
+    // Clean up empty chats (label still "New Chat" and no history)
+    const chats = project.chats || [];
+    const emptyChats = chats.filter(c => c.label === 'New Chat' && (!c.history || c.history.length === 0));
+    if (emptyChats.length > 0) {
+      for (const chat of emptyChats) {
+        sdkSessionManager.endSession(chat.id);
+      }
+      const emptyIds = new Set(emptyChats.map(c => c.id));
+      project.chats = chats.filter(c => !emptyIds.has(c.id));
+      await projectManager.updateProject(req.params.id, { chats: project.chats });
+    }
+
     res.json({ chats: project.chats || [] });
   } catch (err) {
     console.error('Error listing chats:', err);
