@@ -68,3 +68,12 @@ export type ProcessStatus = 'running' | 'exited' | 'stopped';
 export interface ScriptWithStatus extends Script {
   status: ProcessStatus;
 }
+
+export interface RunningProcess {
+  scriptId: string;
+  command: string;
+  status: ProcessStatus;
+  startedAt: string;
+  exitCode: number | null;
+  label?: string;
+}

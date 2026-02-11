@@ -24,6 +24,7 @@ export default function ProjectDashboardPage() {
   const sessionStatuses = useSessionStatuses(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
+  const [runningCount, setRunningCount] = useState(0);
 
   useEffect(() => {
     loadProject(id!);
@@ -35,6 +36,19 @@ export default function ProjectDashboardPage() {
     api.get<{ files?: any[] }>(`/api/projects/${id}/diff`)
       .then((data) => setDiffCount(data.files?.length || 0))
       .catch(() => setDiffCount(0));
+  }, [id]);
+
+  // Poll running process count for badge
+  useEffect(() => {
+    if (!id) return;
+    function fetchRunningCount() {
+      api.get<{ runningCount: number }>(`/api/projects/${id}/scripts/processes`)
+        .then((data) => setRunningCount(data.runningCount || 0))
+        .catch(() => setRunningCount(0));
+    }
+    fetchRunningCount();
+    const interval = setInterval(fetchRunningCount, 5000);
+    return () => clearInterval(interval);
   }, [id]);
 
   // Derive current tab and active chat from pathname
@@ -128,8 +142,8 @@ export default function ProjectDashboardPage() {
     }
   }
 
-  // Count active script sessions
-  const scriptCount = (project?.scripts || []).length;
+  // Use running process count for badge
+  const scriptCount = runningCount;
 
   if (loading) {
     return (

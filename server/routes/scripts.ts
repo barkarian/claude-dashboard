@@ -2,9 +2,36 @@ import { Router, type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
-import type { Script } from '../../shared/types/models.ts';
+import type { Script, RunningProcess } from '../../shared/types/models.ts';
 
 const router = Router({ mergeParams: true });
+
+router.get('/processes', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const project = await projectManager.getProject(req.params.id);
+    const scripts = project?.scripts || [];
+    const projectProcesses = processManager.getProjectProcesses(req.params.id);
+
+    const processes: RunningProcess[] = [];
+    for (const [scriptId, entry] of projectProcesses) {
+      const matchedScript = scripts.find(s => s.id === scriptId);
+      processes.push({
+        scriptId,
+        command: entry.command,
+        status: entry.status,
+        startedAt: entry.startedAt,
+        exitCode: entry.exitCode,
+        label: matchedScript?.label,
+      });
+    }
+
+    const runningCount = processes.filter(p => p.status === 'running').length;
+    res.json({ processes, runningCount });
+  } catch (err) {
+    console.error('Error listing processes:', err);
+    res.status(500).json({ error: 'Failed to list processes' });
+  }
+});
 
 router.get('/', async (req: Request<{ id: string }>, res: Response) => {
   try {
