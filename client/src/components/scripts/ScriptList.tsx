@@ -18,6 +18,8 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
 
   useEffect(() => {
     loadAll();
+    const interval = setInterval(loadProcesses, 5000);
+    return () => clearInterval(interval);
   }, [projectId]);
 
   async function loadAll() {
@@ -35,12 +37,16 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
     }
   }
 
-  async function loadProcesses() {
+  async function loadProcesses(): Promise<void> {
     try {
-      const data = await api.get<{ processes: RunningProcess[] }>(`/api/projects/${projectId}/scripts/processes`);
-      setRunningProcesses((data.processes || []).filter(p => p.status === 'running'));
+      console.log('[ScriptList] fetching processes for project:', projectId);
+      const data = await api.get<{ processes: RunningProcess[]; runningCount: number }>(`/api/projects/${projectId}/scripts/processes`);
+      console.log('[ScriptList] processes response:', JSON.stringify(data));
+      const running = (data.processes || []).filter((p: RunningProcess) => p.status === 'running');
+      console.log('[ScriptList] running processes:', running.length);
+      setRunningProcesses(running);
     } catch (err) {
-      console.error('Failed to load processes:', err);
+      console.error('[ScriptList] Failed to load processes:', err);
     }
   }
 

@@ -8,13 +8,20 @@ const router = Router({ mergeParams: true });
 
 router.get('/processes', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const project = await projectManager.getProject(req.params.id);
+    const projectId = req.params.id;
+    console.log('[/processes] projectId:', projectId);
+
+    const project = await projectManager.getProject(projectId);
     const scripts = project?.scripts || [];
-    const projectProcesses = processManager.getProjectProcesses(req.params.id);
+    console.log('[/processes] defined scripts:', scripts.length);
+
+    const projectProcesses = processManager.getProjectProcesses(projectId);
+    console.log('[/processes] tracked processes:', projectProcesses.size);
 
     const processes: RunningProcess[] = [];
     for (const [scriptId, entry] of projectProcesses) {
-      const matchedScript = scripts.find(s => s.id === scriptId);
+      console.log('[/processes] process:', scriptId, 'status:', entry.status, 'command:', entry.command);
+      const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
       processes.push({
         scriptId,
         command: entry.command,
@@ -25,7 +32,8 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
       });
     }
 
-    const runningCount = processes.filter(p => p.status === 'running').length;
+    const runningCount = processes.filter((p: RunningProcess) => p.status === 'running').length;
+    console.log('[/processes] returning:', { processCount: processes.length, runningCount });
     res.json({ processes, runningCount });
   } catch (err) {
     console.error('Error listing processes:', err);

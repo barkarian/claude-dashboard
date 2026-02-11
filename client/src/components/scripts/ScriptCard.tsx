@@ -19,12 +19,14 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
     if (!socket) return;
     socket.emit('terminal:start', { projectId, scriptId: script.id });
     setStatus('running');
+    setTimeout(onRefresh, 500);
   }
 
   function handleStop() {
     if (!socket) return;
     socket.emit('terminal:stop', { projectId, scriptId: script.id });
     setStatus('stopped');
+    setTimeout(onRefresh, 500);
   }
 
   const statusColor: Record<string, string> = {

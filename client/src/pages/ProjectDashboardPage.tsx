@@ -41,10 +41,16 @@ export default function ProjectDashboardPage() {
   // Poll running process count for badge
   useEffect(() => {
     if (!id) return;
-    function fetchRunningCount() {
+    function fetchRunningCount(): void {
       api.get<{ runningCount: number }>(`/api/projects/${id}/scripts/processes`)
-        .then((data) => setRunningCount(data.runningCount || 0))
-        .catch(() => setRunningCount(0));
+        .then((data) => {
+          console.log('[Dashboard] runningCount response:', data.runningCount);
+          setRunningCount(data.runningCount || 0);
+        })
+        .catch((err) => {
+          console.error('[Dashboard] Failed to fetch runningCount:', err);
+          setRunningCount(0);
+        });
     }
     fetchRunningCount();
     const interval = setInterval(fetchRunningCount, 5000);
