@@ -6,6 +6,7 @@ import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
+import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
@@ -25,9 +26,11 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     messages,
     status,
     pendingPermission,
+    pendingQuestion,
     lastResult,
     sendPrompt,
     respondToPermission,
+    respondToQuestion,
     interrupt,
   } = useSDKMessages(socket, chatId);
 
@@ -159,6 +162,14 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             <PermissionPrompt
               permission={pendingPermission}
               onRespond={respondToPermission}
+            />
+          )}
+
+          {/* Question prompt (AskUserQuestion) */}
+          {pendingQuestion && (
+            <QuestionPrompt
+              question={pendingQuestion}
+              onRespond={respondToQuestion}
             />
           )}
 

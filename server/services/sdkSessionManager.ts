@@ -15,7 +15,6 @@ const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 // Tools that Claude Code uses internally but can't be executed through the Agent SDK.
 // When Claude tries these, we auto-deny with a message so it falls back to text.
 const UNSUPPORTED_TOOLS = new Set([
-  'AskUserQuestion',
   'EnterPlanMode',
   'ExitPlanMode',
   'TaskCreate',
@@ -26,7 +25,20 @@ const UNSUPPORTED_TOOLS = new Set([
   'NotebookEdit',
 ]);
 
+// Tools we handle interactively (show UI to the user instead of auto-denying)
+const INTERACTIVE_TOOLS = new Set([
+  'AskUserQuestion',
+]);
+
+// Union of unsupported + interactive — used to filter these tool blocks from the chat stream
+const FILTERED_TOOLS = new Set([...UNSUPPORTED_TOOLS, ...INTERACTIVE_TOOLS]);
+
 interface PermissionResolver {
+  resolve: (result: { behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface QuestionResolver {
   resolve: (result: { behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -42,6 +54,7 @@ interface SDKSession {
   abortController: AbortController | null;
   messages: SDKChatMessage[];
   permissionResolvers: Map<string, PermissionResolver>;
+  questionResolvers: Map<string, QuestionResolver>;
   queryStartTime: number | null;
 }
 
@@ -96,6 +109,7 @@ function initSession(
     abortController: null,
     messages: [],
     permissionResolvers: new Map(),
+    questionResolvers: new Map(),
     queryStartTime: null,
   };
 
@@ -156,6 +170,36 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
     toolInput: Record<string, unknown>,
     _options: { signal: AbortSignal },
   ) => {
+    // Handle AskUserQuestion interactively — show UI to the user
+    if (toolName === 'AskUserQuestion' && INTERACTIVE_TOOLS.has(toolName)) {
+      const questions = (toolInput as any).questions;
+      if (!Array.isArray(questions) || questions.length === 0) {
+        return {
+          behavior: 'deny' as const,
+          message: 'AskUserQuestion requires a non-empty questions array.',
+        };
+      }
+
+      emitStatus(session, 'waiting-permission');
+
+      const requestId = `question-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      session.io.to(room).emit('sdk:question-request', {
+        chatId,
+        requestId,
+        questions,
+      });
+
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          session.questionResolvers.delete(requestId);
+          resolve({ behavior: 'deny', message: 'Question timed out — user did not respond.' });
+        }, PERMISSION_TIMEOUT_MS);
+
+        session.questionResolvers.set(requestId, { resolve, timer });
+      });
+    }
+
     // Auto-deny tools that can't be executed in this environment
     if (UNSUPPORTED_TOOLS.has(toolName)) {
       console.log(`[sdk:${chatId}] Auto-denied unsupported tool: ${toolName}`);
@@ -264,8 +308,8 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
           if (rawEvent.type === 'content_block_start') {
             const block = rawEvent.content_block;
 
-            // Skip unsupported tool blocks entirely
-            if (block?.type === 'tool_use' && UNSUPPORTED_TOOLS.has(block.name)) {
+            // Skip unsupported/interactive tool blocks entirely
+            if (block?.type === 'tool_use' && FILTERED_TOOLS.has(block.name)) {
               skippingBlock = true;
               skippedToolIds.add(block.id || '');
               continue;
@@ -485,6 +529,26 @@ function convertSDKContent(sdkContent: any[]): ContentBlock[] {
   return blocks;
 }
 
+function resolveQuestion(chatId: string, requestId: string, answers: Record<number, string[]>): void {
+  const session = sessions.get(chatId);
+  if (!session) return;
+
+  const resolver = session.questionResolvers.get(requestId);
+  if (!resolver) return;
+
+  clearTimeout(resolver.timer);
+
+  // Format answers as human-readable text for Claude to consume
+  const lines: string[] = [];
+  for (const [idx, selected] of Object.entries(answers)) {
+    lines.push(`Question ${Number(idx) + 1}: ${selected.join(', ')}`);
+  }
+  const formatted = lines.join('\n');
+
+  resolver.resolve({ behavior: 'deny', message: `User answered:\n${formatted}` });
+  session.questionResolvers.delete(requestId);
+}
+
 function resolvePermission(chatId: string, requestId: string, granted: boolean): void {
   const session = sessions.get(chatId);
   if (!session) return;
@@ -520,6 +584,13 @@ function interrupt(chatId: string): void {
     resolver.resolve({ behavior: 'deny', message: 'Interrupted' });
   }
   session.permissionResolvers.clear();
+
+  // Clean up pending question requests
+  for (const [, resolver] of session.questionResolvers) {
+    clearTimeout(resolver.timer);
+    resolver.resolve({ behavior: 'deny', message: 'Interrupted' });
+  }
+  session.questionResolvers.clear();
 }
 
 function endSession(chatId: string): void {
@@ -562,6 +633,7 @@ export default {
   initSession,
   sendPrompt,
   resolvePermission,
+  resolveQuestion,
   interrupt,
   endSession,
   getSession,

@@ -7,10 +7,12 @@ import type {
   SDKPartialUpdatePayload,
   SDKStatusPayload,
   SDKPermissionRequestPayload,
+  SDKQuestionRequestPayload,
   SDKResultPayload,
   SDKErrorPayload,
   SDKHistoryPayload,
   ContentBlock,
+  Question,
 } from '../../../shared/types/sdk.ts';
 
 export interface SDKResult {
@@ -28,14 +30,21 @@ export interface PendingPermission {
   description?: string;
 }
 
+export interface PendingQuestion {
+  requestId: string;
+  questions: Question[];
+}
+
 interface UseSDKMessagesReturn {
   messages: SDKChatMessage[];
   status: SDKSessionStatus | 'disconnected';
   pendingPermission: PendingPermission | null;
+  pendingQuestion: PendingQuestion | null;
   lastResult: SDKResult | null;
   lastError: string | null;
   sendPrompt: (prompt: string) => void;
   respondToPermission: (requestId: string, granted: boolean) => void;
+  respondToQuestion: (requestId: string, answers: Record<number, string[]>) => void;
   interrupt: () => void;
 }
 
@@ -46,6 +55,7 @@ export function useSDKMessages(
   const [messages, setMessages] = useState<SDKChatMessage[]>([]);
   const [status, setStatus] = useState<SDKSessionStatus | 'disconnected'>('disconnected');
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [lastResult, setLastResult] = useState<SDKResult | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
 
@@ -84,9 +94,10 @@ export function useSDKMessages(
     function handleStatus({ chatId: cid, status: s }: SDKStatusPayload) {
       if (cid !== chatId) return;
       setStatus(s);
-      // Clear pending permission when status changes away from waiting-permission
+      // Clear pending permission/question when status changes away from waiting-permission
       if (s !== 'waiting-permission') {
         setPendingPermission(null);
+        setPendingQuestion(null);
       }
     }
 
@@ -99,6 +110,15 @@ export function useSDKMessages(
     }: SDKPermissionRequestPayload) {
       if (cid !== chatId) return;
       setPendingPermission({ requestId, toolName, toolInput, description });
+    }
+
+    function handleQuestionRequest({
+      chatId: cid,
+      requestId,
+      questions,
+    }: SDKQuestionRequestPayload) {
+      if (cid !== chatId) return;
+      setPendingQuestion({ requestId, questions });
     }
 
     function handleResult({ chatId: cid, ...result }: SDKResultPayload) {
@@ -125,6 +145,7 @@ export function useSDKMessages(
     socket.on('sdk:partial-update', handlePartialUpdate);
     socket.on('sdk:status', handleStatus);
     socket.on('sdk:permission-request', handlePermissionRequest);
+    socket.on('sdk:question-request', handleQuestionRequest);
     socket.on('sdk:result', handleResult);
     socket.on('sdk:error', handleError);
 
@@ -134,6 +155,7 @@ export function useSDKMessages(
       socket.off('sdk:partial-update', handlePartialUpdate);
       socket.off('sdk:status', handleStatus);
       socket.off('sdk:permission-request', handlePermissionRequest);
+      socket.off('sdk:question-request', handleQuestionRequest);
       socket.off('sdk:result', handleResult);
       socket.off('sdk:error', handleError);
     };
@@ -157,6 +179,15 @@ export function useSDKMessages(
     [socket, chatId],
   );
 
+  const respondToQuestion = useCallback(
+    (requestId: string, answers: Record<number, string[]>) => {
+      if (!socket || !chatId) return;
+      socket.emit('sdk:question-response', { chatId, requestId, answers });
+      setPendingQuestion(null);
+    },
+    [socket, chatId],
+  );
+
   const interrupt = useCallback(() => {
     if (!socket || !chatId) return;
     socket.emit('sdk:interrupt', { chatId });
@@ -166,10 +197,12 @@ export function useSDKMessages(
     messages,
     status,
     pendingPermission,
+    pendingQuestion,
     lastResult,
     lastError,
     sendPrompt,
     respondToPermission,
+    respondToQuestion,
     interrupt,
   };
 }

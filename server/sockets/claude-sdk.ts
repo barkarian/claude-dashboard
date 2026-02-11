@@ -10,6 +10,7 @@ import type {
   SDKEndPayload,
   SDKAttachPayload,
   SDKCheckSessionPayload,
+  SDKQuestionResponsePayload,
   SDKChatMessage,
 } from '../../shared/types/sdk.ts';
 
@@ -106,6 +107,10 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
   socket.on('sdk:permission-response', ({ chatId, requestId, granted }: SDKPermissionResponsePayload) => {
     sdkSessionManager.resolvePermission(chatId, requestId, granted);
+  });
+
+  socket.on('sdk:question-response', ({ chatId, requestId, answers }: SDKQuestionResponsePayload) => {
+    sdkSessionManager.resolveQuestion(chatId, requestId, answers);
   });
 
   socket.on('sdk:interrupt', ({ chatId }: SDKInterruptPayload) => {

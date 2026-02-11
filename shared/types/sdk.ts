@@ -70,6 +70,31 @@ export interface SDKPermissionRequestPayload {
   description?: string;
 }
 
+// === Question (AskUserQuestion) Types ===
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface Question {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect: boolean;
+}
+
+export interface SDKQuestionRequestPayload {
+  chatId: string;
+  requestId: string;
+  questions: Question[];
+}
+
+export interface SDKQuestionResponsePayload {
+  chatId: string;
+  requestId: string;
+  answers: Record<number, string[]>;
+}
+
 export interface SDKResultPayload {
   chatId: string;
   costUSD: number;
