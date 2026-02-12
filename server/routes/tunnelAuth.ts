@@ -63,9 +63,13 @@ router.get('/callback', async (req: Request, res: Response) => {
     // Also set credentials on the tunnel manager for immediate use
     tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
 
-    // Redirect back to the dashboard frontend
-    const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
-    res.redirect(frontendUrl);
+    // Redirect to the user's public tunnel URL if available, otherwise localhost
+    if (config.tunnelDomain) {
+      res.redirect(`https://${data.user.userSubdomain}.${config.tunnelDomain}`);
+    } else {
+      const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
+      res.redirect(frontendUrl);
+    }
   } catch (err) {
     console.error('[tunnel-auth] OAuth callback error:', err);
     res.status(500).send('Failed to complete OAuth flow');

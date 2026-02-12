@@ -10,6 +10,7 @@ export interface ServerConfig {
   publicPath: string;
   tunnelMode: 'ngrok' | 'tunnel-service' | 'none';
   tunnelServiceUrl: string | null;
+  tunnelDomain: string | null;
 }
 
 // Augment express-session to include our custom session data
