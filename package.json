@@ -4,10 +4,10 @@
   "workspaces": ["server", "client"],
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "cd server && npx tsx watch index.ts",
+    "dev:server": "cd server && NODE_ENV=development npx tsx watch index.ts",
     "dev:client": "cd client && npx vite",
     "build": "cd client && npx vite build",
-    "start": "cd server && npx tsx index.ts",
+    "start": "cd server && NODE_ENV=production npx tsx index.ts",
     "install:all": "npm install"
   },
   "devDependencies": {
