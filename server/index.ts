@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.ts';
 import projectRoutes from './routes/projects.ts';
 import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
+import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
@@ -49,6 +50,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/projects/:id/scripts', scriptRoutes);
 app.use('/api/github', githubRoutes);
+app.use('/api/tunnel-auth', tunnelAuthRoutes);
 
 // Socket.IO setup
 const io = new SocketIOServer(server, {

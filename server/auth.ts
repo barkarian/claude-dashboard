@@ -11,6 +11,13 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
+  // Tunnel auth callback must be accessible without session auth
+  // (user is redirected here from tunnel-service OAuth flow)
+  if (req.path === '/api/tunnel-auth/callback') {
+    next();
+    return;
+  }
+
   if (!req.path.startsWith('/api/')) {
     next();
     return;

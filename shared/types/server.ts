@@ -8,12 +8,20 @@ export interface ServerConfig {
   sessionSecret: string;
   passwordHash: string | null;
   publicPath: string;
-  tunnelMode: 'ngrok' | 'none';
+  tunnelMode: 'ngrok' | 'tunnel-service' | 'none';
+  tunnelServiceUrl: string | null;
 }
 
 // Augment express-session to include our custom session data
 declare module 'express-session' {
   interface SessionData {
     authenticated?: boolean;
+    tunnelService?: {
+      apiKey: string;
+      userSubdomain: string;
+      userId: string;
+      email: string;
+      username: string;
+    };
   }
 }

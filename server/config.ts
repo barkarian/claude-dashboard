@@ -15,7 +15,10 @@ const config: ServerConfig = {
   sessionSecret: process.env.SESSION_SECRET || 'dev-secret-change-me',
   passwordHash: process.env.DASHBOARD_PASSWORD_HASH || null,
   publicPath: path.join(__dirname, 'public'),
-  tunnelMode: (process.env.TUNNEL_MODE === 'ngrok' ? 'ngrok' : 'none') as 'ngrok' | 'none',
+  tunnelMode: (['ngrok', 'tunnel-service'].includes(process.env.TUNNEL_MODE || '')
+    ? process.env.TUNNEL_MODE as 'ngrok' | 'tunnel-service'
+    : 'none') as 'ngrok' | 'tunnel-service' | 'none',
+  tunnelServiceUrl: process.env.TUNNEL_SERVICE_URL || null,
 };
 
 export default config;
