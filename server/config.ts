@@ -13,7 +13,8 @@ const config: ServerConfig = {
   projectsBasePath: process.env.PROJECTS_PATH || path.join(os.homedir(), 'claude-projects'),
   githubToken: process.env.GITHUB_TOKEN || null,
   sessionSecret: process.env.SESSION_SECRET || 'dev-secret-change-me',
-  passwordHash: process.env.DASHBOARD_PASSWORD_HASH || null,
+  tunnelApiKey: process.env.TUNNEL_API_KEY || null,
+  tunnelUserSubdomain: process.env.TUNNEL_USER_SUBDOMAIN || null,
   publicPath: path.join(__dirname, 'public'),
   tunnelMode: (['ngrok', 'tunnel-service'].includes(process.env.TUNNEL_MODE || '')
     ? process.env.TUNNEL_MODE as 'ngrok' | 'tunnel-service'

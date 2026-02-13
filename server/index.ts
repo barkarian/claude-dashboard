@@ -123,11 +123,17 @@ server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
   console.log(`Projects directory: ${config.projectsBasePath}`);
-  if (tunnelManager.isEnabled()) {
+  if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
+    // Auto-connect using env vars — tunnel is immediately available
+    tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);
+  } else if (config.tunnelMode === 'ngrok') {
+    // ngrok mode unchanged
     const url = await tunnelManager.startDashboardTunnel(config.port);
     if (url) {
       console.log(`Dashboard tunnel: ${url}`);
     }
+  } else if (config.tunnelMode === 'tunnel-service') {
+    console.log('[tunnel] TUNNEL_API_KEY not set. Tunnel activates after first user OAuth.');
   }
   autostartScripts();
 });

@@ -1,4 +1,3 @@
-import bcrypt from 'bcrypt';
 import type { Request, Response, NextFunction } from 'express';
 import type { Socket } from 'socket.io';
 import type { IncomingMessage } from 'http';
@@ -6,45 +5,60 @@ import config from './config.ts';
 import '../shared/types/server.ts'; // session augmentation
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-  if (req.path === '/api/auth/login' || req.path === '/api/auth/status') {
+  // Dev escape hatch
+  if (config.nodeEnv === 'development' && process.env.DEV_SKIP_AUTH === 'true') {
     next();
     return;
   }
 
-  // Tunnel auth callback must be accessible without session auth
-  // (user is redirected here from tunnel-service OAuth flow)
-  if (req.path === '/api/tunnel-auth/callback') {
+  // Whitelisted paths (accessible without OAuth)
+  const whitelistedPaths = [
+    '/api/auth/status',
+    '/api/auth/logout',
+    '/api/tunnel-auth/callback',
+    '/api/tunnel-auth/connect',
+  ];
+
+  if (whitelistedPaths.includes(req.path)) {
     next();
     return;
   }
 
-  if (!req.path.startsWith('/api/')) {
+  // Check OAuth session
+  if (req.session && req.session.tunnelService) {
     next();
     return;
   }
 
-  if (req.session && req.session.authenticated) {
-    next();
+  // Build OAuth URL for redirect
+  const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
+    ? '/api/tunnel-auth/connect'
+    : null;
+
+  // API routes: return 401 JSON
+  if (req.path.startsWith('/api/')) {
+    res.status(401).json({ error: 'Unauthorized — OAuth required', oauthUrl });
     return;
   }
 
-  res.status(401).json({ error: 'Unauthorized' });
-}
-
-export async function verifyPassword(password: string): Promise<boolean> {
-  if (!config.passwordHash) {
-    return true;
+  // Non-API routes (production static files): redirect to OAuth
+  if (oauthUrl) {
+    res.redirect(oauthUrl);
+    return;
   }
-  return bcrypt.compare(password, config.passwordHash);
+
+  res.status(401).send('Unauthorized — tunnel service not configured');
 }
 
 export function socketAuthMiddleware(socket: Socket, next: (err?: Error) => void): void {
-  const session = (socket.request as IncomingMessage & { session?: { authenticated?: boolean } }).session;
-  if (session && session.authenticated) {
+  // Dev escape hatch
+  if (config.nodeEnv === 'development' && process.env.DEV_SKIP_AUTH === 'true') {
     next();
     return;
   }
-  if (!config.passwordHash) {
+
+  const session = (socket.request as IncomingMessage & { session?: { tunnelService?: unknown } }).session;
+  if (session && session.tunnelService) {
     next();
     return;
   }

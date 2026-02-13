@@ -7,7 +7,7 @@ import tunnelManager from './tunnelManager.ts';
 const MAX_BUFFER_LINES = 5000;
 
 // Env vars set by the dashboard that should NOT leak into child processes
-const DASHBOARD_ENV_KEYS = ['PORT', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET', 'PROJECTS_PATH', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
+const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'PROJECTS_PATH', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
 
 function getChildEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;

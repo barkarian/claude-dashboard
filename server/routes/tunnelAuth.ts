@@ -11,7 +11,12 @@ router.get('/connect', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Tunnel service not configured' });
   }
 
-  const callbackUrl = `http://localhost:${config.port}/api/tunnel-auth/callback`;
+  // Use forwarded host (tunnel) or request host (localhost) for dynamic callback
+  const forwardedHost = req.get('X-Forwarded-Host');
+  const protocol = req.get('X-Forwarded-Proto') || req.protocol;
+  const host = forwardedHost || req.get('host') || `localhost:${config.port}`;
+  const callbackUrl = `${protocol}://${host}/api/tunnel-auth/callback`;
+
   const authorizeUrl = `${config.tunnelServiceUrl}/oauth/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&client_id=claude-dashboard`;
 
   res.redirect(authorizeUrl);
@@ -60,8 +65,10 @@ router.get('/callback', async (req: Request, res: Response) => {
       username: data.user.username,
     };
 
-    // Also set credentials on the tunnel manager for immediate use
-    tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
+    // Only bootstrap tunnel if not already set (env-bootstrapped tunnel takes priority)
+    if (!tunnelManager.getCredentials()) {
+      tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
+    }
 
     // Redirect to the user's public tunnel URL if available, otherwise localhost
     if (config.tunnelDomain) {
@@ -92,11 +99,15 @@ router.get('/status', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/tunnel-auth/disconnect — clear tunnel credentials
+// POST /api/tunnel-auth/disconnect — destroy user session (tunnel is server-level)
 router.post('/disconnect', (req: Request, res: Response) => {
-  delete req.session.tunnelService;
-  tunnelManager.clearCredentials();
-  res.json({ success: true });
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to disconnect' });
+    }
+    res.clearCookie('connect.sid');
+    return res.json({ success: true });
+  });
 });
 
 export default router;

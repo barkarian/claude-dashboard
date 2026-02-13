@@ -5,50 +5,19 @@ import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 
-interface TunnelAuthStatus {
-  connected: boolean;
-  tunnelMode: string;
-  tunnelServiceUrl: string | null;
-  user: {
-    username: string;
-    email: string;
-    userSubdomain: string;
-  } | null;
-}
-
 export default function Sidebar() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [tunnelStatus, setTunnelStatus] = useState<TunnelAuthStatus | null>(null);
 
   useEffect(() => {
     loadProjects();
-    loadTunnelStatus();
   }, []);
 
   async function loadProjects() {
     try {
       const data = await api.get<{ projects: ProjectSummary[] }>('/api/projects');
       setProjects(data.projects || []);
-    } catch {
-      // ignore
-    }
-  }
-
-  async function loadTunnelStatus() {
-    try {
-      const data = await api.get<TunnelAuthStatus>('/api/tunnel-auth/status');
-      setTunnelStatus(data);
-    } catch {
-      // ignore
-    }
-  }
-
-  async function handleTunnelDisconnect() {
-    try {
-      await api.post('/api/tunnel-auth/disconnect');
-      setTunnelStatus((prev) => prev ? { ...prev, connected: false, user: null } : null);
     } catch {
       // ignore
     }
@@ -110,37 +79,14 @@ export default function Sidebar() {
         </Button>
       </nav>
 
-      {tunnelStatus?.tunnelMode === 'tunnel-service' && (
+      {user && (
         <div className="px-3 py-2 border-t border-border">
-          {tunnelStatus.connected && tunnelStatus.user ? (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
-                <span className="text-xs font-medium text-text truncate">
-                  {tunnelStatus.user.username}
-                </span>
-              </div>
-              <div className="text-[10px] text-text-dim font-mono truncate pl-4">
-                *.{tunnelStatus.user.userSubdomain}.tunnels
-              </div>
-              <button
-                onClick={handleTunnelDisconnect}
-                className="text-xs text-text-dim hover:text-danger transition-colors pl-4"
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <a
-              href="/api/tunnel-auth/connect"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.54a4.5 4.5 0 00-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
-              </svg>
-              Connect Tunnel Service
-            </a>
-          )}
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+            <span className="text-xs font-medium text-text truncate">
+              {user.username}
+            </span>
+          </div>
         </div>
       )}
 

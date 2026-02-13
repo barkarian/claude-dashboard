@@ -1,25 +1,8 @@
 import { Router, type Request, type Response } from 'express';
-import { verifyPassword } from '../auth.ts';
+import config from '../config.ts';
 import '../../shared/types/server.ts'; // session augmentation
 
 const router = Router();
-
-router.post('/login', async (req: Request, res: Response) => {
-  try {
-    const { password } = req.body;
-    const valid = await verifyPassword(password);
-
-    if (valid) {
-      req.session.authenticated = true;
-      return res.json({ success: true });
-    }
-
-    return res.status(401).json({ error: 'Invalid password' });
-  } catch (err) {
-    console.error('Login error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
 
 router.post('/logout', (req: Request, res: Response) => {
   req.session.destroy((err) => {
@@ -32,8 +15,22 @@ router.post('/logout', (req: Request, res: Response) => {
 });
 
 router.get('/status', (req: Request, res: Response) => {
-  const authenticated = !!(req.session && req.session.authenticated);
-  return res.json({ authenticated });
+  const tunnelService = req.session?.tunnelService;
+  const authenticated = !!tunnelService;
+
+  const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
+    ? '/api/tunnel-auth/connect'
+    : null;
+
+  return res.json({
+    authenticated,
+    user: tunnelService ? {
+      username: tunnelService.username,
+      email: tunnelService.email,
+      userSubdomain: tunnelService.userSubdomain,
+    } : null,
+    oauthUrl,
+  });
 });
 
 export default router;
