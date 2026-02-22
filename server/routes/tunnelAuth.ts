@@ -70,13 +70,16 @@ router.get('/callback', async (req: Request, res: Response) => {
       tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
     }
 
-    // Redirect to the user's public tunnel URL if available, otherwise localhost
-    if (config.tunnelDomain) {
-      res.redirect(`https://${data.user.userSubdomain}.${config.tunnelDomain}`);
-    } else {
-      const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
-      res.redirect(frontendUrl);
-    }
+    // Wait for the tunnel to connect (so it's ready for proxying)
+    await tunnelManager.waitForConnection(10_000);
+
+    // Redirect back to the SAME origin the callback was received on.
+    // This keeps the session cookie on the correct domain.
+    // The tunnel is now connected — the user can access the tunnel URL directly
+    // (and if they do, the frontend will trigger OAuth from that domain,
+    // setting the session cookie there too).
+    const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
+    res.redirect(frontendUrl);
   } catch (err) {
     console.error('[tunnel-auth] OAuth callback error:', err);
     res.status(500).send('Failed to complete OAuth flow');
@@ -96,7 +99,37 @@ router.get('/status', (req: Request, res: Response) => {
       email: tunnelService.email,
       userSubdomain: tunnelService.userSubdomain,
     } : null,
+    // Include apiKey so the frontend can persist it in localStorage
+    apiKey: tunnelService?.apiKey || null,
   });
+});
+
+// POST /api/tunnel-auth/restore — restore session from localStorage credentials
+router.post('/restore', async (req: Request, res: Response) => {
+  const { apiKey, userSubdomain, email, username } = req.body;
+
+  if (!apiKey || !userSubdomain) {
+    return res.status(400).json({ error: 'Missing apiKey or userSubdomain' });
+  }
+
+  // Store credentials in session
+  req.session.tunnelService = {
+    apiKey,
+    userSubdomain,
+    userId: '',
+    email: email || '',
+    username: username || '',
+  };
+
+  // Bootstrap tunnel if not already connected
+  if (!tunnelManager.getCredentials()) {
+    tunnelManager.setCredentials(apiKey, userSubdomain);
+  }
+
+  // Wait for the tunnel to connect before responding
+  const connected = await tunnelManager.waitForConnection(5_000);
+
+  return res.json({ success: true, tunnelConnected: connected });
 });
 
 // POST /api/tunnel-auth/disconnect — destroy user session (tunnel is server-level)

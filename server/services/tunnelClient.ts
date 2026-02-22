@@ -247,3 +247,19 @@ export function disconnect(): void {
 export function isConnected(): boolean {
   return connected;
 }
+
+export function waitForConnection(timeoutMs = 10_000): Promise<boolean> {
+  if (connected) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (connected) {
+        clearInterval(interval);
+        resolve(true);
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 200);
+  });
+}

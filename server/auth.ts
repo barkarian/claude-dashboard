@@ -17,6 +17,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     '/api/auth/logout',
     '/api/tunnel-auth/callback',
     '/api/tunnel-auth/connect',
+    '/api/tunnel-auth/restore',
   ];
 
   if (whitelistedPaths.includes(req.path)) {

@@ -42,6 +42,13 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Serve static assets BEFORE auth middleware so manifest.json, sw.js, CSS/JS
+// are publicly accessible (the SPA handles its own auth via API calls)
+if (config.nodeEnv === 'production') {
+  app.use(express.static(config.publicPath));
+}
+
 app.use(sessionMiddleware);
 app.use(authMiddleware);
 
@@ -67,9 +74,8 @@ io.use(socketAuthMiddleware);
 // Register socket handlers
 registerSocketHandlers(io);
 
-// Serve static files in production
+// SPA fallback — serve index.html for non-API routes (static assets already served above)
 if (config.nodeEnv === 'production') {
-  app.use(express.static(config.publicPath));
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api/')) {
       res.sendFile(path.join(config.publicPath, 'index.html'));

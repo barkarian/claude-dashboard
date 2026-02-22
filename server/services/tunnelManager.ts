@@ -121,7 +121,7 @@ async function ensureServiceTunnel(port: number, processKey: string): Promise<st
   const projectUUID = processKey.split(':')[0];
 
   try {
-    const res = await fetch(`${config.tunnelServiceUrl}/api/endpoints/register`, {
+    const res = await fetch(`${config.tunnelServiceUrl}/api/tunnel-endpoints/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -166,7 +166,7 @@ async function closeServiceTunnelsForProcess(processKey: string): Promise<void> 
     const entry = serviceTunnels.get(port);
     if (entry) {
       try {
-        await fetch(`${config.tunnelServiceUrl}/api/endpoints/${entry.endpointId}`, {
+        await fetch(`${config.tunnelServiceUrl}/api/tunnel-endpoints/${entry.endpointId}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `users API-Key ${tunnelServiceApiKey}`,
@@ -278,7 +278,7 @@ async function closeAll(): Promise<void> {
   if (tunnelServiceApiKey && config.tunnelServiceUrl) {
     for (const [port, entry] of serviceTunnels) {
       try {
-        await fetch(`${config.tunnelServiceUrl}/api/endpoints/${entry.endpointId}`, {
+        await fetch(`${config.tunnelServiceUrl}/api/tunnel-endpoints/${entry.endpointId}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `users API-Key ${tunnelServiceApiKey}`,
@@ -293,6 +293,10 @@ async function closeAll(): Promise<void> {
   serviceTunnels.clear();
 }
 
+async function waitForConnection(timeoutMs = 10_000): Promise<boolean> {
+  return tunnelClient.waitForConnection(timeoutMs);
+}
+
 export default {
   isEnabled,
   ensureTunnel,
@@ -303,4 +307,5 @@ export default {
   setCredentials,
   clearCredentials,
   getCredentials,
+  waitForConnection,
 };
