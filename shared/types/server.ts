@@ -11,6 +11,10 @@ export interface ServerConfig {
   tunnelMode: 'ngrok' | 'tunnel-service' | 'none';
   tunnelServiceUrl: string | null;
   tunnelDomain: string | null;
+  isVps: boolean;
+  vpsIp: string | null;
+  sshUser: string;
+  sshPort: number;
 }
 
 // Augment express-session to include our custom session data

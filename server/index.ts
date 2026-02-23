@@ -11,9 +11,11 @@ import projectRoutes from './routes/projects.ts';
 import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
 import tunnelAuthRoutes from './routes/tunnelAuth.ts';
+import settingsRoutes from './routes/settings.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
+import sshKeyService from './services/sshKeyService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
@@ -50,6 +52,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/projects/:id/scripts', scriptRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/tunnel-auth', tunnelAuthRoutes);
+app.use('/api', settingsRoutes);
 
 // Socket.IO setup
 const io = new SocketIOServer(server, {
@@ -131,4 +134,9 @@ server.listen(config.port, async () => {
     console.log('[tunnel] TUNNEL_API_KEY not set. Tunnel activates after first user OAuth.');
   }
   autostartScripts();
+
+  // Sync SSH keys on startup in VPS mode
+  if (config.isVps) {
+    sshKeyService.syncAuthorizedKeys();
+  }
 });

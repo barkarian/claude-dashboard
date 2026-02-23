@@ -19,6 +19,10 @@ const config: ServerConfig = {
     : 'none') as 'ngrok' | 'tunnel-service' | 'none',
   tunnelServiceUrl: process.env.TUNNEL_SERVICE_URL || null,
   tunnelDomain: process.env.TUNNEL_DOMAIN || null,
+  isVps: process.env.IS_VPS === 'true',
+  vpsIp: process.env.VPS_IP || null,
+  sshUser: process.env.SSH_USER || 'claw-user',
+  sshPort: parseInt(process.env.SSH_PORT || '22', 10),
 };
 
 export default config;
