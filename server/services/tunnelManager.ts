@@ -31,6 +31,10 @@ function isEnabled(): boolean {
 }
 
 function setCredentials(apiKey: string, userSubdomain: string): void {
+  // Skip if same credentials are already active (avoids reconnect race)
+  if (tunnelServiceApiKey === apiKey && tunnelServiceSubdomain === userSubdomain && tunnelClient.isConnected()) {
+    return;
+  }
   tunnelServiceApiKey = apiKey;
   tunnelServiceSubdomain = userSubdomain;
   console.log(`[tunnel] Tunnel service credentials set for subdomain: ${userSubdomain}`);

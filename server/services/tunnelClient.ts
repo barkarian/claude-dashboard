@@ -28,7 +28,11 @@ function getReconnectDelay(): number {
 }
 
 export function connect(wsUrl: string, apiKey: string, userSubdomain: string): void {
-  // Clean up existing connection
+  // Clean up existing connection and pending reconnects
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   if (ws) {
     shouldReconnect = false;
     ws.close();
@@ -49,14 +53,18 @@ function doConnect(): void {
 
   console.log(`[tunnel-client] Connecting to ${currentWsUrl}...`);
 
-  ws = new WebSocket(currentWsUrl);
+  const thisWs = new WebSocket(currentWsUrl);
+  ws = thisWs;
 
-  ws.on('open', () => {
+  thisWs.on('open', () => {
+    // Guard: only act if this is still the active connection
+    if (ws !== thisWs) return;
     console.log('[tunnel-client] WebSocket connected, sending auth...');
-    ws!.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey }));
+    thisWs.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey }));
   });
 
-  ws.on('message', (data) => {
+  thisWs.on('message', (data) => {
+    if (ws !== thisWs) return;
     let msg: any;
     try {
       msg = JSON.parse(data.toString());
@@ -76,19 +84,23 @@ function doConnect(): void {
     }
   });
 
-  ws.on('close', (code, reason) => {
-    connected = false;
-    ws = null;
-    console.log(`[tunnel-client] WebSocket closed (code: ${code}, reason: ${reason?.toString() || 'none'})`);
+  thisWs.on('close', (code, reason) => {
+    // Only clean up state if this is still the active connection
+    // (a new connect() call may have already replaced ws)
+    if (ws === thisWs) {
+      connected = false;
+      ws = null;
+      console.log(`[tunnel-client] WebSocket closed (code: ${code}, reason: ${reason?.toString() || 'none'})`);
 
-    if (shouldReconnect) {
-      const delay = getReconnectDelay();
-      console.log(`[tunnel-client] Reconnecting in ${delay}ms...`);
-      reconnectTimer = setTimeout(doConnect, delay);
+      if (shouldReconnect) {
+        const delay = getReconnectDelay();
+        console.log(`[tunnel-client] Reconnecting in ${delay}ms...`);
+        reconnectTimer = setTimeout(doConnect, delay);
+      }
     }
   });
 
-  ws.on('error', (err) => {
+  thisWs.on('error', (err) => {
     console.error('[tunnel-client] WebSocket error:', err.message);
     // The 'close' event will fire after this, triggering reconnect
   });

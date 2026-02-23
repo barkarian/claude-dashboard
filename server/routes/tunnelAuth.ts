@@ -65,21 +65,29 @@ router.get('/callback', async (req: Request, res: Response) => {
       username: data.user.username,
     };
 
-    // Only bootstrap tunnel if not already set (env-bootstrapped tunnel takes priority)
-    if (!tunnelManager.getCredentials()) {
-      tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
-    }
+    // Always (re)connect the tunnel with the new OAuth credentials.
+    // This handles account switching — the old connection is replaced.
+    tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
 
     // Wait for the tunnel to connect (so it's ready for proxying)
-    await tunnelManager.waitForConnection(10_000);
+    const connected = await tunnelManager.waitForConnection(10_000);
 
-    // Redirect back to the SAME origin the callback was received on.
-    // This keeps the session cookie on the correct domain.
-    // The tunnel is now connected — the user can access the tunnel URL directly
-    // (and if they do, the frontend will trigger OAuth from that domain,
-    // setting the session cookie there too).
-    const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
-    res.redirect(frontendUrl);
+    // Redirect to the tunnel URL with credentials in the hash fragment.
+    // The session cookie is scoped to localhost, so the tunnel domain needs
+    // the credentials to bootstrap its own session via the /restore endpoint.
+    // Hash fragments are NOT sent to the server — only readable by frontend JS.
+    if (connected && config.tunnelDomain) {
+      const credentialsHash = `#restore=${encodeURIComponent(JSON.stringify({
+        apiKey: data.apiKey,
+        userSubdomain: data.user.userSubdomain,
+        email: data.user.email,
+        username: data.user.username,
+      }))}`;
+      res.redirect(`https://${data.user.userSubdomain}-${config.port}.${config.tunnelDomain}/${credentialsHash}`);
+    } else {
+      const frontendUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
+      res.redirect(frontendUrl);
+    }
   } catch (err) {
     console.error('[tunnel-auth] OAuth callback error:', err);
     res.status(500).send('Failed to complete OAuth flow');
@@ -121,10 +129,8 @@ router.post('/restore', async (req: Request, res: Response) => {
     username: username || '',
   };
 
-  // Bootstrap tunnel if not already connected
-  if (!tunnelManager.getCredentials()) {
-    tunnelManager.setCredentials(apiKey, userSubdomain);
-  }
+  // Always (re)connect — handles account switching and server restarts
+  tunnelManager.setCredentials(apiKey, userSubdomain);
 
   // Wait for the tunnel to connect before responding
   const connected = await tunnelManager.waitForConnection(5_000);

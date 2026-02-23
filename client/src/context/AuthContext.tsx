@@ -44,6 +44,26 @@ function clearTunnelCredentials(): void {
   }
 }
 
+/**
+ * Extract credentials from URL hash fragment (set by OAuth callback redirect).
+ * Format: #restore={...json...}
+ * Returns credentials if found and cleans the URL.
+ */
+function extractCredentialsFromHash(): TunnelCredentials | null {
+  try {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#restore=')) return null;
+    const json = decodeURIComponent(hash.slice('#restore='.length));
+    const creds: TunnelCredentials = JSON.parse(json);
+    // Clean up the URL so credentials don't linger in the address bar
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (creds.apiKey && creds.userSubdomain) return creds;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 interface AuthContextValue {
   isAuthenticated: boolean;
   loading: boolean;
@@ -90,6 +110,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
+      // 0. Check URL hash for credentials from OAuth redirect (cross-domain transfer)
+      const hashCreds = extractCredentialsFromHash();
+      if (hashCreds) {
+        const restored = await restoreFromCredentials(hashCreds);
+        if (restored) return;
+      }
+
       // 1. Check existing session
       const data = await api.get<{
         authenticated: boolean;
