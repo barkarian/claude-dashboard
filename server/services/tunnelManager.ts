@@ -26,26 +26,50 @@ const serviceTunnels = new Map<number, TunnelServiceEntry>();
 let tunnelServiceApiKey: string | null = null;
 let tunnelServiceSubdomain: string | null = null;
 
+// Cached user info from OAuth (used to auto-bootstrap sessions for tunnel-proxied requests)
+interface TunnelUserInfo {
+  apiKey: string;
+  userSubdomain: string;
+  userId: string;
+  email: string;
+  username: string;
+}
+let tunnelUserInfo: TunnelUserInfo | null = null;
+
 function isEnabled(): boolean {
   return config.tunnelMode === 'ngrok' || config.tunnelMode === 'tunnel-service';
 }
 
 function setCredentials(apiKey: string, userSubdomain: string): void {
+  const keyPreview = apiKey ? apiKey.slice(0, 8) + '...' : 'EMPTY';
+  console.log(`[tunnel] setCredentials: subdomain=${userSubdomain}, apiKey=${keyPreview}, keyLength=${apiKey?.length || 0}`);
+
+  // If credentials haven't changed and tunnel is already connected, skip reconnecting
+  if (tunnelServiceApiKey === apiKey && tunnelServiceSubdomain === userSubdomain && tunnelClient.isConnected()) {
+    console.log('[tunnel] Credentials unchanged and tunnel already connected, skipping reconnect');
+    return;
+  }
+
   tunnelServiceApiKey = apiKey;
   tunnelServiceSubdomain = userSubdomain;
-  console.log(`[tunnel] Tunnel service credentials set for subdomain: ${userSubdomain}`);
 
   // Connect WebSocket tunnel client
   if (config.tunnelServiceUrl) {
     const wsUrl = config.tunnelServiceUrl.replace(/^http/, 'ws') + '/tunnel/ws';
+    console.log(`[tunnel] Connecting WebSocket to ${wsUrl}`);
     tunnelClient.connect(wsUrl, apiKey, userSubdomain);
+  } else {
+    console.log('[tunnel] No tunnelServiceUrl configured, skipping WebSocket');
   }
 
   // Auto-register the dashboard itself as a tunnel endpoint
   // so it's accessible at <subdomain>.<TUNNEL_DOMAIN>
+  console.log(`[tunnel] Registering dashboard endpoint on port ${config.port}`);
   ensureServiceTunnel(config.port, 'dashboard:dashboard').then((url) => {
     if (url) {
       console.log(`[tunnel] Dashboard accessible at ${url}`);
+    } else {
+      console.log('[tunnel] Dashboard endpoint registration returned null');
     }
   });
 }
@@ -62,6 +86,20 @@ function getCredentials(): { apiKey: string; userSubdomain: string } | null {
     return { apiKey: tunnelServiceApiKey, userSubdomain: tunnelServiceSubdomain };
   }
   return null;
+}
+
+function setUserInfo(info: TunnelUserInfo): void {
+  tunnelUserInfo = info;
+  console.log(`[tunnel] User info cached: user=${info.username}, subdomain=${info.userSubdomain}`);
+}
+
+function clearUserInfo(): void {
+  tunnelUserInfo = null;
+  console.log('[tunnel] User info cleared');
+}
+
+function getUserInfo(): TunnelUserInfo | null {
+  return tunnelUserInfo;
 }
 
 // --- ngrok implementation ---
@@ -112,13 +150,22 @@ async function closeNgrokTunnelsForProcess(processKey: string): Promise<void> {
 // --- tunnel-service implementation ---
 
 async function ensureServiceTunnel(port: number, processKey: string): Promise<string | null> {
-  if (!tunnelServiceApiKey || !config.tunnelServiceUrl) return null;
+  if (!tunnelServiceApiKey || !config.tunnelServiceUrl) {
+    console.log(`[tunnel:service] ensureServiceTunnel skipped: apiKey=${!!tunnelServiceApiKey}, serviceUrl=${!!config.tunnelServiceUrl}`);
+    return null;
+  }
 
   const existing = serviceTunnels.get(port);
-  if (existing) return existing.url;
+  if (existing) {
+    console.log(`[tunnel:service] Reusing existing tunnel for port ${port}: ${existing.url}`);
+    return existing.url;
+  }
 
   // Extract projectUUID from processKey (format: "projectId:scriptId")
   const projectUUID = processKey.split(':')[0];
+  const keyPreview = tunnelServiceApiKey.slice(0, 8) + '...';
+
+  console.log(`[tunnel:service] Registering endpoint: port=${port}, processKey=${processKey}, projectUUID=${projectUUID}, apiKey=${keyPreview}`);
 
   try {
     const res = await fetch(`${config.tunnelServiceUrl}/api/endpoints/register`, {
@@ -129,6 +176,8 @@ async function ensureServiceTunnel(port: number, processKey: string): Promise<st
       },
       body: JSON.stringify({ projectUUID, port }),
     });
+
+    console.log(`[tunnel:service] Register response: ${res.status} ${res.statusText}`);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -303,4 +352,7 @@ export default {
   setCredentials,
   clearCredentials,
   getCredentials,
+  setUserInfo,
+  getUserInfo,
+  clearUserInfo,
 };

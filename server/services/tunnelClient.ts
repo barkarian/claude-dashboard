@@ -9,6 +9,7 @@ import type {
   TunnelResponseError,
 } from './tunnelProtocol.ts';
 
+// Current active WebSocket (only this one should handle events)
 let ws: WebSocket | null = null;
 let connected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -17,6 +18,10 @@ let shouldReconnect = false;
 let currentWsUrl: string | null = null;
 let currentApiKey: string | null = null;
 let currentSubdomain: string | null = null;
+
+// Generation counter: incremented on each connect() call.
+// Stale WebSocket event handlers check this to avoid corrupting new connections.
+let generation = 0;
 
 const MAX_RECONNECT_DELAY = 30_000;
 const BASE_RECONNECT_DELAY = 1_000;
@@ -28,11 +33,27 @@ function getReconnectDelay(): number {
 }
 
 export function connect(wsUrl: string, apiKey: string, userSubdomain: string): void {
+  const keyPreview = apiKey ? apiKey.slice(0, 8) + '...' : 'EMPTY';
+  console.log(`[tunnel-client] connect called: wsUrl=${wsUrl}, subdomain=${userSubdomain}, apiKey=${keyPreview}`);
+
+  // Bump generation so any stale event handlers from the old WS become no-ops
+  generation++;
+
+  // Clear any pending reconnect timer from previous connection
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
   // Clean up existing connection
   if (ws) {
-    shouldReconnect = false;
-    ws.close();
+    console.log('[tunnel-client] Closing existing WebSocket before reconnect');
+    const oldWs = ws;
     ws = null;
+    connected = false;
+    // Remove all listeners so stale events can't fire
+    oldWs.removeAllListeners();
+    oldWs.close();
   }
 
   currentWsUrl = wsUrl;
@@ -49,14 +70,25 @@ function doConnect(): void {
 
   console.log(`[tunnel-client] Connecting to ${currentWsUrl}...`);
 
-  ws = new WebSocket(currentWsUrl);
+  // Capture generation at the time this socket is created.
+  // If generation changes (new connect() call), all handlers become no-ops.
+  const myGeneration = generation;
+  const socket = new WebSocket(currentWsUrl);
+  ws = socket;
 
-  ws.on('open', () => {
+  socket.on('open', () => {
+    if (myGeneration !== generation) {
+      console.log('[tunnel-client] Stale WS open event (generation mismatch), ignoring');
+      socket.close();
+      return;
+    }
     console.log('[tunnel-client] WebSocket connected, sending auth...');
-    ws!.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey }));
+    socket.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey }));
   });
 
-  ws.on('message', (data) => {
+  socket.on('message', (data) => {
+    if (myGeneration !== generation) return; // stale
+
     let msg: any;
     try {
       msg = JSON.parse(data.toString());
@@ -76,7 +108,12 @@ function doConnect(): void {
     }
   });
 
-  ws.on('close', (code, reason) => {
+  socket.on('close', (code, reason) => {
+    if (myGeneration !== generation) {
+      console.log(`[tunnel-client] Stale WS close event (generation mismatch), ignoring`);
+      return;
+    }
+
     connected = false;
     ws = null;
     console.log(`[tunnel-client] WebSocket closed (code: ${code}, reason: ${reason?.toString() || 'none'})`);
@@ -88,16 +125,22 @@ function doConnect(): void {
     }
   });
 
-  ws.on('error', (err) => {
+  socket.on('error', (err) => {
+    if (myGeneration !== generation) return; // stale
     console.error('[tunnel-client] WebSocket error:', err.message);
     // The 'close' event will fire after this, triggering reconnect
   });
 }
 
 async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.log(`[tunnel-client] handleTunnelRequest: WebSocket not ready (ws=${!!ws}, readyState=${ws?.readyState})`);
+    return;
+  }
 
   const { requestId, method, url, headers, body, targetPort } = tunnelReq;
+
+  console.log(`[tunnel-client] Handling tunnel request: ${method} ${url} -> localhost:${targetPort} (reqId=${requestId.slice(0, 8)}..., cookie=${headers.cookie ? 'present' : 'MISSING'})`);
 
   // Build local request options
   const reqOptions: http.RequestOptions = {
@@ -113,6 +156,7 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
 
   try {
     const localRes = await makeLocalRequest(reqOptions, body);
+    console.log(`[tunnel-client] Local response: ${localRes.statusCode} for ${method} ${url}`);
 
     // Check if this should be streamed
     const contentType = localRes.headers['content-type'] || '';
@@ -227,14 +271,17 @@ function sendMessage(msg: object): void {
 }
 
 export function disconnect(): void {
+  generation++; // invalidate all stale handlers
   shouldReconnect = false;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (ws) {
-    ws.close();
+    const oldWs = ws;
     ws = null;
+    oldWs.removeAllListeners();
+    oldWs.close();
   }
   connected = false;
   currentWsUrl = null;
