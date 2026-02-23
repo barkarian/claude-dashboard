@@ -8,7 +8,8 @@ const router = Router();
 router.post('/logout', (req: Request, res: Response) => {
   console.log('[auth] Logout requested');
 
-  // Clear cached user info immediately so auto-bootstrap stops re-authenticating
+  // Clear cached user info so auto-bootstrap stops re-authenticating tunnel requests.
+  // The tunnel itself stays connected so the user can re-login through the tunnel URL.
   tunnelManager.clearUserInfo();
 
   req.session.destroy((err) => {
@@ -16,16 +17,8 @@ router.post('/logout', (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to logout' });
     }
     res.clearCookie('connect.sid');
-    console.log('[auth] Session destroyed');
-
-    // Send the response FIRST, then disconnect the tunnel after a short delay
-    // so the response can travel back through the WebSocket before it closes.
-    res.json({ success: true });
-
-    setTimeout(() => {
-      console.log('[auth] Disconnecting tunnel after logout');
-      tunnelManager.clearCredentials();
-    }, 1000);
+    console.log('[auth] Session destroyed, user info cleared (tunnel stays open for re-login)');
+    return res.json({ success: true });
   });
 });
 

@@ -148,7 +148,7 @@ router.get('/status', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/tunnel-auth/disconnect — destroy user session (tunnel is server-level)
+// POST /api/tunnel-auth/disconnect — destroy user session (tunnel stays open for re-login)
 router.post('/disconnect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /disconnect hit');
   tunnelManager.clearUserInfo();
@@ -157,12 +157,8 @@ router.post('/disconnect', (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to disconnect' });
     }
     res.clearCookie('connect.sid');
-    res.json({ success: true });
-
-    setTimeout(() => {
-      console.log('[tunnel-auth] Disconnecting tunnel after disconnect');
-      tunnelManager.clearCredentials();
-    }, 1000);
+    console.log('[tunnel-auth] Session destroyed, user info cleared (tunnel stays open)');
+    return res.json({ success: true });
   });
 });
 
