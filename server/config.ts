@@ -23,6 +23,7 @@ const config: ServerConfig = {
   vpsIp: process.env.VPS_IP || null,
   sshUser: process.env.SSH_USER || 'claw-user',
   sshPort: parseInt(process.env.SSH_PORT || '22', 10),
+  migrationSourceUrl: process.env.MIGRATION_SOURCE_URL || null,
 };
 
 export default config;

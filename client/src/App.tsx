@@ -6,6 +6,7 @@ import ProjectListPage from './pages/ProjectListPage.tsx';
 import NewProjectPage from './pages/NewProjectPage.tsx';
 import ProjectDashboardPage from './pages/ProjectDashboardPage.tsx';
 import SettingsPage from './pages/SettingsPage.tsx';
+import MigrationPage from './pages/MigrationPage.tsx';
 import Sidebar from './components/layout/Sidebar.tsx';
 
 interface ProtectedRouteProps {
@@ -53,6 +54,7 @@ export default function App() {
                   <Route path="/" element={<ProjectListPage />} />
                   <Route path="/new" element={<NewProjectPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/migrate" element={<MigrationPage />} />
                   <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
                 </Routes>
               </main>

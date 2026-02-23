@@ -12,6 +12,7 @@ router.get('/settings', async (req: Request, res: Response) => {
       vpsIp: config.vpsIp,
       sshUser: config.sshUser,
       sshPort: config.sshPort,
+      migrationAvailable: config.isVps && !!config.migrationSourceUrl,
     });
   } catch (err) {
     console.error('Error getting settings:', err);

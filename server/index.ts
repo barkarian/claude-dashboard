@@ -12,6 +12,7 @@ import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
 import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import settingsRoutes from './routes/settings.ts';
+import migrateRoutes from './routes/migrate.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
@@ -42,7 +43,7 @@ app.use(cors({
   origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '500mb' }));
 app.use(sessionMiddleware);
 app.use(authMiddleware);
 
@@ -53,6 +54,7 @@ app.use('/api/projects/:id/scripts', scriptRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/tunnel-auth', tunnelAuthRoutes);
 app.use('/api', settingsRoutes);
+app.use('/api/migrate', migrateRoutes);
 
 // Socket.IO setup
 const io = new SocketIOServer(server, {
