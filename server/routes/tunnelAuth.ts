@@ -6,6 +6,9 @@ import '../../shared/types/server.ts'; // session augmentation
 
 const router = Router();
 
+// Pending activation data for account switches (short-lived, used by /activate)
+let pendingActivation: { apiKey: string; userSubdomain: string; timestamp: number } | null = null;
+
 // GET /api/tunnel-auth/connect — redirect browser to tunnel-service OAuth
 router.get('/connect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /connect hit');
@@ -83,48 +86,122 @@ router.get('/callback', async (req: Request, res: Response) => {
     // Cache user info server-side so tunnel-proxied requests can auto-bootstrap sessions
     tunnelManager.setUserInfo(userInfo);
 
-    // Bootstrap tunnel with OAuth credentials (always update — fresh OAuth key takes priority)
-    console.log('[tunnel-auth] Setting tunnel credentials and waiting for connection...');
-    tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
+    // Check if the subdomain is changing (account switch)
+    const currentCreds = tunnelManager.getCredentials();
+    const isSubdomainChange = currentCreds && currentCreds.userSubdomain !== data.user.userSubdomain;
 
-    // Wait for tunnel WebSocket to connect before redirecting (up to 5s)
-    const maxWait = 5000;
-    const pollInterval = 200;
-    let waited = 0;
-    while (!tunnelClient.isConnected() && waited < maxWait) {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      waited += pollInterval;
-    }
-    console.log(`[tunnel-auth] Tunnel connected=${tunnelClient.isConnected()} after ${waited}ms`);
+    if (isSubdomainChange) {
+      // Account switch: the callback response must travel back through the OLD tunnel.
+      // We can't close the old WebSocket yet. Instead:
+      // 1. Redirect to localhost /api/tunnel-auth/activate (response goes through old tunnel safely)
+      // 2. The /activate endpoint (hit directly on localhost) switches the tunnel and redirects to the new URL
+      console.log(`[tunnel-auth] Subdomain changing from ${currentCreds.userSubdomain} to ${data.user.userSubdomain} — redirecting to localhost /activate`);
 
-    // Save session before redirect
-    await new Promise<void>((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('[tunnel-auth] Failed to save session:', err);
-          reject(err);
-        } else {
-          console.log('[tunnel-auth] Session saved successfully');
-          resolve();
-        }
+      // Store pending activation data so /activate can pick it up
+      pendingActivation = {
+        apiKey: data.apiKey,
+        userSubdomain: data.user.userSubdomain,
+        timestamp: Date.now(),
+      };
+
+      // Save session
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => err ? reject(err) : resolve());
       });
-    });
 
-    // Always redirect to the tunnel URL — the auth middleware will auto-bootstrap
-    // the session for tunnel-proxied requests using the cached user info.
-    let redirectUrl: string;
-    if (config.tunnelDomain) {
-      redirectUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}`;
+      // Redirect to localhost /activate — browser hits this directly, not through tunnel
+      res.redirect(`http://localhost:${config.port}/api/tunnel-auth/activate`);
     } else {
-      redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
-    }
+      // Same subdomain or fresh tunnel — switch immediately
+      console.log('[tunnel-auth] Setting tunnel credentials and waiting for connection...');
+      tunnelManager.setCredentials(data.apiKey, data.user.userSubdomain);
 
-    console.log(`[tunnel-auth] Redirecting to ${redirectUrl}`);
-    res.redirect(redirectUrl);
+      // Wait for tunnel WebSocket to connect before redirecting (up to 5s)
+      const maxWait = 5000;
+      const pollInterval = 200;
+      let waited = 0;
+      while (!tunnelClient.isConnected() && waited < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        waited += pollInterval;
+      }
+      console.log(`[tunnel-auth] Tunnel connected=${tunnelClient.isConnected()} after ${waited}ms`);
+
+      // Save session before redirect
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error('[tunnel-auth] Failed to save session:', err);
+            reject(err);
+          } else {
+            console.log('[tunnel-auth] Session saved successfully');
+            resolve();
+          }
+        });
+      });
+
+      // Redirect to the tunnel URL
+      let redirectUrl: string;
+      if (config.tunnelDomain) {
+        redirectUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}`;
+      } else {
+        redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
+      }
+
+      console.log(`[tunnel-auth] Redirecting to ${redirectUrl}`);
+      res.redirect(redirectUrl);
+    }
   } catch (err) {
     console.error('[tunnel-auth] OAuth callback error:', err);
     res.status(500).send('Failed to complete OAuth flow');
   }
+});
+
+// GET /api/tunnel-auth/activate — phase 2 of account switch: switch tunnel, then redirect to new URL
+// This endpoint is hit directly on localhost (not through tunnel) after the callback redirect.
+router.get('/activate', async (req: Request, res: Response) => {
+  console.log('[tunnel-auth] /activate hit');
+
+  if (!pendingActivation) {
+    console.error('[tunnel-auth] /activate called but no pending activation');
+    return res.status(400).send('No pending account switch');
+  }
+
+  // Check staleness (expire after 30s)
+  if (Date.now() - pendingActivation.timestamp > 30000) {
+    console.error('[tunnel-auth] Pending activation expired');
+    pendingActivation = null;
+    return res.status(400).send('Account switch expired, please try again');
+  }
+
+  const { apiKey, userSubdomain } = pendingActivation;
+  pendingActivation = null; // consume it
+
+  console.log(`[tunnel-auth] Activating tunnel for subdomain=${userSubdomain}`);
+
+  // Switch the tunnel to the new account
+  tunnelManager.resetEndpointCache();
+  tunnelManager.setCredentials(apiKey, userSubdomain);
+
+  // Wait for the new tunnel WebSocket to connect (up to 8s)
+  const maxWait = 8000;
+  const pollInterval = 200;
+  let waited = 0;
+  while (!tunnelClient.isConnected() && waited < maxWait) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    waited += pollInterval;
+  }
+  console.log(`[tunnel-auth] New tunnel connected=${tunnelClient.isConnected()} after ${waited}ms`);
+
+  // Build the new tunnel URL
+  let redirectUrl: string;
+  if (config.tunnelDomain) {
+    redirectUrl = `https://${userSubdomain}.${config.tunnelDomain}`;
+  } else {
+    redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
+  }
+
+  console.log(`[tunnel-auth] Account switch complete, redirecting to ${redirectUrl}`);
+  res.redirect(redirectUrl);
 });
 
 // GET /api/tunnel-auth/status — check if tunnel service is connected

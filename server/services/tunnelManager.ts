@@ -98,6 +98,11 @@ function clearUserInfo(): void {
   console.log('[tunnel] User info cleared');
 }
 
+function resetEndpointCache(): void {
+  serviceTunnels.clear();
+  console.log('[tunnel] Endpoint cache cleared');
+}
+
 function getUserInfo(): TunnelUserInfo | null {
   return tunnelUserInfo;
 }
@@ -355,4 +360,5 @@ export default {
   setUserInfo,
   getUserInfo,
   clearUserInfo,
+  resetEndpointCache,
 };
