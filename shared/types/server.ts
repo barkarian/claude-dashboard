@@ -3,7 +3,6 @@
 export interface ServerConfig {
   port: number;
   nodeEnv: string;
-  projectsBasePath: string;
   githubToken: string | null;
   sessionSecret: string;
   tunnelApiKey: string | null;

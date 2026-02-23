@@ -20,9 +20,7 @@ export default function ProjectCard({ project }: ProjectCardProps) {
           <h3 className="font-semibold text-text group-hover:text-primary transition-colors truncate">
             {project.name}
           </h3>
-          {project.repo && (
-            <p className="text-xs text-text-dim font-mono mt-0.5 truncate">{project.repo}</p>
-          )}
+          <p className="text-xs text-text-dim font-mono mt-0.5 truncate">{project.path}</p>
           <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
             <span>{project.scriptsCount || 0} scripts</span>
             <span className="text-border">·</span>

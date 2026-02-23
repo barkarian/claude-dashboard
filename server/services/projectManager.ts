@@ -1,163 +1,308 @@
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import config from '../config.ts';
+import db from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry } from '../../shared/types/models.ts';
 
-const CONFIG_DIR = '.claude-dashboard';
-const CONFIG_FILE = 'config.json';
+// === Project Methods ===
 
-const writeLocks = new Map<string, boolean>();
+function listProjects(): ProjectSummary[] {
+  const rows = db.prepare(`
+    SELECT
+      p.id, p.name, p.path, p.repo, p.created_at,
+      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
+      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+    FROM projects p
+    ORDER BY p.created_at DESC
+  `).all() as any[];
 
-async function withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-  while (writeLocks.get(projectId)) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  writeLocks.set(projectId, true);
-  try {
-    return await fn();
-  } finally {
-    writeLocks.delete(projectId);
-  }
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    repo: r.repo || null,
+    createdAt: r.created_at,
+    scriptsCount: r.scriptsCount,
+    chatsCount: r.chatsCount,
+  }));
 }
 
-function getProjectPath(projectId: string): string {
-  return path.join(config.projectsBasePath, projectId);
+function getProject(projectId: string): Project | null {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
+  if (!row) return null;
+
+  const scripts = listScripts(projectId);
+  const chats = listChatsWithHistory(projectId);
+
+  return {
+    id: row.id,
+    name: row.name,
+    path: row.path,
+    repo: row.repo || null,
+    createdAt: row.created_at,
+    scripts,
+    chats,
+  };
 }
 
-function getConfigPath(projectId: string): string {
-  return path.join(getProjectPath(projectId), CONFIG_DIR, CONFIG_FILE);
-}
+async function createProject(name: string, projectPath?: string, repoUrl?: string): Promise<{ project: Project; setupSessionId: string }> {
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const defaultBase = path.join(os.homedir(), 'projects');
+  const targetPath = projectPath || path.join(defaultBase, slug);
 
-async function readConfig(projectId: string): Promise<Project | null> {
-  try {
-    const data = await fs.readFile(getConfigPath(projectId), 'utf-8');
-    return JSON.parse(data) as Project;
-  } catch {
-    return null;
-  }
-}
-
-async function writeConfig(projectId: string, configData: Project): Promise<void> {
-  const configDir = path.join(getProjectPath(projectId), CONFIG_DIR);
-  await fs.mkdir(configDir, { recursive: true });
-  await fs.writeFile(getConfigPath(projectId), JSON.stringify(configData, null, 2));
-}
-
-async function listProjects(): Promise<ProjectSummary[]> {
-  try {
-    await fs.mkdir(config.projectsBasePath, { recursive: true });
-    const entries = await fs.readdir(config.projectsBasePath, { withFileTypes: true });
-    const projects: ProjectSummary[] = [];
-
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      const projectConfig = await readConfig(entry.name);
-      if (projectConfig) {
-        projects.push({
-          id: projectConfig.id,
-          name: projectConfig.name,
-          repo: projectConfig.repo,
-          createdAt: projectConfig.createdAt,
-          scriptsCount: (projectConfig.scripts || []).length,
-          chatsCount: (projectConfig.chats || []).length,
-        });
-      }
-    }
-
-    return projects.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  } catch (err) {
-    console.error('Error listing projects:', err);
-    return [];
-  }
-}
-
-async function getProject(projectId: string): Promise<Project | null> {
-  return readConfig(projectId);
-}
-
-async function createProject(name: string, repoUrl?: string): Promise<{ project: Project; setupSessionId: string }> {
-  const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  const projectPath = getProjectPath(id);
-
-  await fs.mkdir(config.projectsBasePath, { recursive: true });
-
-  // Check if directory already exists
-  try {
-    await fs.access(projectPath);
-    // If it exists, append a UUID suffix
-    const uniqueId = `${id}-${uuidv4().slice(0, 8)}`;
-    return createProjectWithId(uniqueId, name, repoUrl);
-  } catch {
-    // Directory doesn't exist, proceed
+  // Generate ID: slug, or slug + uuid suffix if already taken
+  let id = slug;
+  const existing = db.prepare('SELECT id FROM projects WHERE id = ?').get(id);
+  if (existing) {
+    id = `${slug}-${uuidv4().slice(0, 8)}`;
   }
 
-  return createProjectWithId(id, name, repoUrl);
-}
-
-async function createProjectWithId(id: string, name: string, repoUrl?: string): Promise<{ project: Project; setupSessionId: string }> {
-  const projectPath = getProjectPath(id);
-
+  // Create directory and initialize
   if (repoUrl) {
-    await gitService.clone(repoUrl, projectPath);
-    // Append .claude-dashboard to existing .gitignore (or create one)
-    const gitignorePath = path.join(projectPath, '.gitignore');
-    try {
-      const existing = await fs.readFile(gitignorePath, 'utf-8');
-      if (!existing.split('\n').some(line => line.trim() === '.claude-dashboard')) {
-        await fs.writeFile(gitignorePath, existing.trimEnd() + '\n.claude-dashboard\n');
-      }
-    } catch {
-      await fs.writeFile(gitignorePath, '.claude-dashboard\n');
-    }
+    await gitService.clone(repoUrl, targetPath);
   } else {
-    await fs.mkdir(projectPath, { recursive: true });
-    await gitService.init(projectPath);
-    // Create .gitignore with .claude-dashboard
-    await fs.writeFile(path.join(projectPath, '.gitignore'), '.claude-dashboard\n');
+    await fs.mkdir(targetPath, { recursive: true });
+    await gitService.init(targetPath);
   }
 
-  const projectConfig: Project = {
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO projects (id, name, path, repo, created_at) VALUES (?, ?, ?, ?, ?)').run(id, name, targetPath, repoUrl || null, now);
+
+  const project: Project = {
     id,
     name,
+    path: targetPath,
     repo: repoUrl || null,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     scripts: [],
     chats: [],
   };
 
-  await writeConfig(id, projectConfig);
-  return { project: projectConfig, setupSessionId: uuidv4() };
+  return { project, setupSessionId: uuidv4() };
 }
 
-async function updateProject(projectId: string, updates: Partial<Project>): Promise<Project> {
-  return withLock(projectId, async () => {
-    const current = await readConfig(projectId);
-    if (!current) {
-      throw new Error('Project not found');
-    }
-    const updated = { ...current, ...updates };
-    await writeConfig(projectId, updated);
-    return updated;
-  });
+function registerProject(name: string, projectPath: string): Project {
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  let id = slug;
+  const existing = db.prepare('SELECT id FROM projects WHERE id = ?').get(id);
+  if (existing) {
+    id = `${slug}-${uuidv4().slice(0, 8)}`;
+  }
+
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO projects (id, name, path, repo, created_at) VALUES (?, ?, ?, ?, ?)').run(id, name, projectPath, null, now);
+
+  return {
+    id,
+    name,
+    path: projectPath,
+    repo: null,
+    createdAt: now,
+    scripts: [],
+    chats: [],
+  };
+}
+
+function updateProject(projectId: string, updates: { name?: string }): Project | null {
+  const project = getProject(projectId);
+  if (!project) throw new Error('Project not found');
+
+  if (updates.name !== undefined) {
+    db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(updates.name, projectId);
+  }
+
+  return getProject(projectId);
 }
 
 async function deleteProject(projectId: string): Promise<void> {
-  const projectPath = getProjectPath(projectId);
+  const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as any;
+  if (!row) throw new Error('Project not found');
+
+  // Delete from DB first (CASCADE handles scripts/chats/messages)
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+  // Remove directory
   try {
-    await fs.rm(projectPath, { recursive: true, force: true });
+    await fs.rm(row.path, { recursive: true, force: true });
   } catch (err) {
     console.error('Error deleting project directory:', err);
-    throw err;
   }
 }
 
+function getProjectPath(projectId: string): string {
+  const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as any;
+  if (!row) throw new Error('Project not found');
+  return row.path;
+}
+
+// === Script Methods ===
+
+function listScripts(projectId: string): Script[] {
+  const rows = db.prepare('SELECT * FROM scripts WHERE project_id = ? ORDER BY created_at').all(projectId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    label: r.label,
+    command: r.command,
+    autostart: r.autostart === 1,
+  }));
+}
+
+function createScript(projectId: string, label: string, command: string, autostart?: boolean): Script {
+  const id = uuidv4();
+  db.prepare('INSERT INTO scripts (id, project_id, label, command, autostart) VALUES (?, ?, ?, ?, ?)').run(id, projectId, label, command, autostart ? 1 : 0);
+  return { id, label, command, autostart: autostart || false };
+}
+
+function updateScript(scriptId: string, updates: { label?: string; command?: string; autostart?: boolean }): Script | null {
+  const row = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
+  if (!row) return null;
+
+  if (updates.label !== undefined) db.prepare('UPDATE scripts SET label = ? WHERE id = ?').run(updates.label, scriptId);
+  if (updates.command !== undefined) db.prepare('UPDATE scripts SET command = ? WHERE id = ?').run(updates.command, scriptId);
+  if (updates.autostart !== undefined) db.prepare('UPDATE scripts SET autostart = ? WHERE id = ?').run(updates.autostart ? 1 : 0, scriptId);
+
+  const updated = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
+  return {
+    id: updated.id,
+    label: updated.label,
+    command: updated.command,
+    autostart: updated.autostart === 1,
+  };
+}
+
+function deleteScript(scriptId: string): void {
+  db.prepare('DELETE FROM scripts WHERE id = ?').run(scriptId);
+}
+
+function getScript(scriptId: string): Script | null {
+  const row = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
+  if (!row) return null;
+  return { id: row.id, label: row.label, command: row.command, autostart: row.autostart === 1 };
+}
+
+// === Chat Methods ===
+
+function listChats(projectId: string): Chat[] {
+  const rows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    label: r.label,
+    createdAt: r.created_at,
+    history: [],
+    sdkSessionId: r.sdk_session_id || null,
+  }));
+}
+
+function listChatsWithHistory(projectId: string): Chat[] {
+  const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  return chatRows.map(r => ({
+    id: r.id,
+    label: r.label,
+    createdAt: r.created_at,
+    history: getChatMessages(r.id),
+    sdkSessionId: r.sdk_session_id || null,
+  }));
+}
+
+function createChat(projectId: string, label?: string): Chat {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO chats (id, project_id, label, created_at) VALUES (?, ?, ?, ?)').run(id, projectId, label || 'New Chat', now);
+  return {
+    id,
+    label: label || 'New Chat',
+    createdAt: now,
+    history: [],
+    sdkSessionId: null,
+  };
+}
+
+function getChat(chatId: string): Chat | null {
+  const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
+  if (!row) return null;
+  return {
+    id: row.id,
+    label: row.label,
+    createdAt: row.created_at,
+    history: getChatMessages(chatId),
+    sdkSessionId: row.sdk_session_id || null,
+  };
+}
+
+function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null }): Chat | null {
+  const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
+  if (!row) return null;
+
+  if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
+  if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
+
+  return getChat(chatId);
+}
+
+function deleteChat(chatId: string): void {
+  db.prepare('DELETE FROM chats WHERE id = ?').run(chatId);
+}
+
+function addMessage(chatId: string, message: { role: string; content: unknown; timestamp?: string; id?: string }): ChatHistoryEntry {
+  const id = message.id || uuidv4();
+  const timestamp = message.timestamp || new Date().toISOString();
+  const contentStr = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+
+  // Get next sort_order
+  const maxOrder = db.prepare('SELECT MAX(sort_order) as max_order FROM chat_messages WHERE chat_id = ?').get(chatId) as any;
+  const sortOrder = (maxOrder?.max_order ?? -1) + 1;
+
+  db.prepare('INSERT INTO chat_messages (id, chat_id, role, content, timestamp, sort_order) VALUES (?, ?, ?, ?, ?, ?)').run(id, chatId, message.role, contentStr, timestamp, sortOrder);
+
+  return {
+    id,
+    role: message.role as 'user' | 'assistant',
+    content: message.content,
+    timestamp,
+  };
+}
+
+function getChatMessages(chatId: string): ChatHistoryEntry[] {
+  const rows = db.prepare('SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY sort_order').all(chatId) as any[];
+  return rows.map(r => {
+    let content: unknown;
+    try {
+      content = JSON.parse(r.content);
+    } catch {
+      content = r.content;
+    }
+    return {
+      id: r.id,
+      role: r.role as 'user' | 'assistant',
+      content,
+      timestamp: r.timestamp,
+    };
+  });
+}
+
 export default {
+  // Projects
   listProjects,
   getProject,
   createProject,
+  registerProject,
   updateProject,
   deleteProject,
   getProjectPath,
+  // Scripts
+  listScripts,
+  createScript,
+  updateScript,
+  deleteScript,
+  getScript,
+  // Chats
+  listChats,
+  createChat,
+  getChat,
+  updateChat,
+  deleteChat,
+  addMessage,
+  getChatMessages,
 };

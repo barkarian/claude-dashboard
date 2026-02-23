@@ -21,8 +21,7 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
       const room = `claude:${chatId}`;
       socket.join(room);
 
-      const project = await projectManager.getProject(projectId);
-      const chat = (project?.chats || []).find((c: any) => c.id === chatId);
+      const chat = projectManager.getChat(chatId);
 
       // Pass persisted SDK session ID if available (for resume)
       const savedSdkSessionId = chat?.sdkSessionId || undefined;
@@ -45,23 +44,20 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
       // Save user message to chat history
       const session = sdkSessionManager.getSession(chatId);
       if (session) {
-        const project = await projectManager.getProject(session.projectId);
-        if (project) {
-          const chat = (project.chats || []).find((c: any) => c.id === chatId);
-          if (chat) {
-            chat.history.push({
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
-              timestamp: new Date().toISOString(),
-            });
-            await projectManager.updateProject(session.projectId, { chats: project.chats });
+        projectManager.addMessage(chatId, {
+          role: 'user',
+          content: [{ type: 'text', text: prompt }],
+          timestamp: new Date().toISOString(),
+        });
 
-            // Auto-title: rename "New Chat" after first user message
-            if (chat.label === 'New Chat' && chat.history.filter((m: any) => m.role === 'user').length === 1) {
-              chat.label = prompt.trim().slice(0, 50) + (prompt.trim().length > 50 ? '...' : '');
-              await projectManager.updateProject(session.projectId, { chats: project.chats });
-              io.to(`claude:${chatId}`).emit('claude:chat-renamed', { chatId, label: chat.label });
-            }
+        // Auto-title: rename "New Chat" after first user message
+        const chat = projectManager.getChat(chatId);
+        if (chat && chat.label === 'New Chat') {
+          const userMessages = chat.history.filter((m: any) => m.role === 'user');
+          if (userMessages.length === 1) {
+            const newLabel = prompt.trim().slice(0, 50) + (prompt.trim().length > 50 ? '...' : '');
+            projectManager.updateChat(chatId, { label: newLabel });
+            io.to(`claude:${chatId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
           }
         }
       }
@@ -74,29 +70,22 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
       // Save assistant response and SDK session ID to history after completion
       if (session) {
-        const project = await projectManager.getProject(session.projectId);
-        if (project) {
-          const chat = (project.chats || []).find((c: any) => c.id === chatId);
-          if (chat) {
-            const messages = sdkSessionManager.getMessageHistory(chatId);
-            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-            if (lastAssistant) {
-              chat.history.push({
-                role: 'assistant',
-                content: lastAssistant.content,
-                timestamp: lastAssistant.timestamp || new Date().toISOString(),
-              });
-            }
+        const messages = sdkSessionManager.getMessageHistory(chatId);
+        const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+        if (lastAssistant) {
+          projectManager.addMessage(chatId, {
+            role: 'assistant',
+            content: lastAssistant.content,
+            timestamp: lastAssistant.timestamp || new Date().toISOString(),
+          });
+        }
 
-            // Persist the SDK session ID for future resume
-            const updatedSession = sdkSessionManager.getSession(chatId);
-            if (updatedSession?.sdkSessionId && chat.sdkSessionId !== updatedSession.sdkSessionId) {
-              chat.sdkSessionId = updatedSession.sdkSessionId;
-              console.log(`[sdk:${chatId}] Persisted SDK session ID: ${updatedSession.sdkSessionId}`);
-            }
-
-            await projectManager.updateProject(session.projectId, { chats: project.chats });
-          }
+        // Persist the SDK session ID for future resume
+        const updatedSession = sdkSessionManager.getSession(chatId);
+        const currentChat = projectManager.getChat(chatId);
+        if (updatedSession?.sdkSessionId && currentChat?.sdkSessionId !== updatedSession.sdkSessionId) {
+          projectManager.updateChat(chatId, { sdkSessionId: updatedSession.sdkSessionId });
+          console.log(`[sdk:${chatId}] Persisted SDK session ID: ${updatedSession.sdkSessionId}`);
         }
       }
     } catch (err: any) {
@@ -133,10 +122,9 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
       if (messages.length > 0) {
         socket.emit('sdk:history', { chatId, messages });
       } else {
-        // Runtime buffer empty — load persisted history from project file
+        // Runtime buffer empty — load persisted history from database
         try {
-          const project = await projectManager.getProject(session.projectId);
-          const chat = (project?.chats || []).find((c: any) => c.id === chatId);
+          const chat = projectManager.getChat(chatId);
           if (chat?.history && chat.history.length > 0) {
             const persistedMessages: SDKChatMessage[] = chat.history.map(migrateHistoryMessage);
             socket.emit('sdk:history', { chatId, messages: persistedMessages });

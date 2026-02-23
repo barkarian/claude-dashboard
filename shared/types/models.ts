@@ -25,6 +25,7 @@ export interface Chat {
 export interface Project {
   id: string;
   name: string;
+  path: string;
   repo: string | null;
   createdAt: string;
   scripts: Script[];
@@ -34,6 +35,7 @@ export interface Project {
 export interface ProjectSummary {
   id: string;
   name: string;
+  path: string;
   repo: string | null;
   createdAt: string;
   scriptsCount: number;

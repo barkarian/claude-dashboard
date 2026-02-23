@@ -1,14 +1,14 @@
 import { Router, type Request, type Response } from 'express';
+import fs from 'fs';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
-import type { Chat } from '../../shared/types/models.ts';
 
 const router = Router();
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const projects = await projectManager.listProjects();
+    const projects = projectManager.listProjects();
     res.json({ projects });
   } catch (err) {
     console.error('Error listing projects:', err);
@@ -18,7 +18,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const project = await projectManager.getProject(req.params.id);
+    const project = projectManager.getProject(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -31,11 +31,11 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, repoUrl } = req.body;
+    const { name, path: projectPath, repoUrl } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
-    const result = await projectManager.createProject(name, repoUrl);
+    const result = await projectManager.createProject(name, projectPath, repoUrl);
     res.status(201).json(result);
   } catch (err) {
     console.error('Error creating project:', err);
@@ -43,9 +43,30 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// Register an existing directory as a project
+router.post('/register', async (req: Request, res: Response) => {
+  try {
+    const { name, path: projectPath } = req.body;
+    if (!name || !projectPath) {
+      return res.status(400).json({ error: 'Name and path are required' });
+    }
+    if (!fs.existsSync(projectPath)) {
+      return res.status(400).json({ error: 'Path does not exist on disk' });
+    }
+    const project = projectManager.registerProject(name, projectPath);
+    res.status(201).json({ project });
+  } catch (err: any) {
+    console.error('Error registering project:', err);
+    if (err.message?.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: 'A project with this path is already registered' });
+    }
+    res.status(500).json({ error: 'Failed to register project' });
+  }
+});
+
 router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const project = await projectManager.updateProject(req.params.id, req.body);
+    const project = projectManager.updateProject(req.params.id, req.body);
     res.json({ project });
   } catch (err) {
     console.error('Error updating project:', err);
@@ -108,7 +129,7 @@ router.post('/:id/commit', async (req: Request<{ id: string }>, res: Response) =
 // Chat endpoints
 router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const project = await projectManager.getProject(req.params.id);
+    const project = projectManager.getProject(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -116,16 +137,18 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     // Clean up empty chats (label still "New Chat" and no history)
     const chats = project.chats || [];
     const emptyChats = chats.filter(c => c.label === 'New Chat' && (!c.history || c.history.length === 0));
-    if (emptyChats.length > 0) {
-      for (const chat of emptyChats) {
-        sdkSessionManager.endSession(chat.id);
-      }
-      const emptyIds = new Set(emptyChats.map(c => c.id));
-      project.chats = chats.filter(c => !emptyIds.has(c.id));
-      await projectManager.updateProject(req.params.id, { chats: project.chats });
+    for (const chat of emptyChats) {
+      sdkSessionManager.endSession(chat.id);
+      projectManager.deleteChat(chat.id);
     }
 
-    res.json({ chats: project.chats || [] });
+    const updatedChats = projectManager.listChats(req.params.id);
+    // Load history for each chat for response
+    const chatsWithHistory = updatedChats.map(c => ({
+      ...c,
+      history: projectManager.getChatMessages(c.id),
+    }));
+    res.json({ chats: chatsWithHistory });
   } catch (err) {
     console.error('Error listing chats:', err);
     res.status(500).json({ error: 'Failed to list chats' });
@@ -135,21 +158,11 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
 router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { label } = req.body;
-    const project = await projectManager.getProject(req.params.id);
+    const project = projectManager.getProject(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
-    const { v4: uuidv4 } = await import('uuid');
-    const chat: Chat = {
-      id: uuidv4(),
-      label: label || 'New Chat',
-      createdAt: new Date().toISOString(),
-      history: [],
-      sdkSessionId: null,
-    };
-    project.chats = project.chats || [];
-    project.chats.push(chat);
-    await projectManager.updateProject(req.params.id, { chats: project.chats });
+    const chat = projectManager.createChat(req.params.id, label);
     res.status(201).json({ chat });
   } catch (err) {
     console.error('Error creating chat:', err);
@@ -159,17 +172,12 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
 
 router.patch('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
-    const project = await projectManager.getProject(req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-    const chatIndex = (project.chats || []).findIndex(c => c.id === req.params.chatId);
-    if (chatIndex === -1) {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) {
       return res.status(404).json({ error: 'Chat not found' });
     }
-    Object.assign(project.chats[chatIndex], req.body);
-    await projectManager.updateProject(req.params.id, { chats: project.chats });
-    res.json({ chat: project.chats[chatIndex] });
+    const updated = projectManager.updateChat(req.params.chatId, req.body);
+    res.json({ chat: updated });
   } catch (err) {
     console.error('Error updating chat:', err);
     res.status(500).json({ error: 'Failed to update chat' });
@@ -178,12 +186,7 @@ router.patch('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: str
 
 router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
-    const project = await projectManager.getProject(req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-    project.chats = (project.chats || []).filter(c => c.id !== req.params.chatId);
-    await projectManager.updateProject(req.params.id, { chats: project.chats });
+    projectManager.deleteChat(req.params.chatId);
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting chat:', err);

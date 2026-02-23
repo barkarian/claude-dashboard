@@ -1,5 +1,4 @@
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import type { ServerConfig } from '../shared/types/server.ts';
@@ -10,7 +9,6 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 const config: ServerConfig = {
   port: 2222,
   nodeEnv: process.env.NODE_ENV || 'development',
-  projectsBasePath: process.env.PROJECTS_PATH || path.join(os.homedir(), 'claude-projects'),
   githubToken: process.env.GITHUB_TOKEN || null,
   sessionSecret: process.env.SESSION_SECRET || 'dev-secret-change-me',
   tunnelApiKey: process.env.TUNNEL_API_KEY || null,

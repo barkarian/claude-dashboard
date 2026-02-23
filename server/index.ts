@@ -17,7 +17,6 @@ import tunnelManager from './services/tunnelManager.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
-import fs from 'fs/promises';
 import '../shared/types/server.ts'; // session augmentation
 
 const app = express();
@@ -77,9 +76,6 @@ if (config.nodeEnv === 'production') {
   });
 }
 
-// Ensure projects directory exists
-await fs.mkdir(config.projectsBasePath, { recursive: true });
-
 // Auto-start scripts marked with autostart
 async function autostartScripts(): Promise<void> {
   try {
@@ -122,7 +118,6 @@ process.on('SIGINT', shutdown);
 server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
-  console.log(`Projects directory: ${config.projectsBasePath}`);
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
     // Auto-connect using env vars — tunnel is immediately available
     tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);
