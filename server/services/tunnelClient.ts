@@ -8,6 +8,7 @@ import type {
   TunnelResponseEnd,
   TunnelResponseError,
 } from './tunnelProtocol.ts';
+import credentialService from './credentialService.ts';
 
 // Current active WebSocket (only this one should handle events)
 let ws: WebSocket | null = null;
@@ -100,6 +101,12 @@ function doConnect(): void {
       connected = true;
       reconnectAttempt = 0;
       console.log(`[tunnel-client] Authenticated as subdomain: ${msg.subdomain}`);
+      return;
+    }
+
+    if (msg.type === 'credential-sync') {
+      console.log('[tunnel-client] Received credential-sync push, syncing...');
+      credentialService.syncCredentials();
       return;
     }
 

@@ -1,7 +1,11 @@
 import { Router, type Request, type Response } from 'express';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import config from '../config.ts';
 import sshKeyService from '../services/sshKeyService.ts';
 import credentialService from '../services/credentialService.ts';
+
+const execFileAsync = promisify(execFile);
 
 const router = Router();
 
@@ -71,26 +75,56 @@ router.post('/ssh-keys/sync', async (req: Request, res: Response) => {
 
 // --- Credential routes ---
 
-// POST /api/credentials/auto-detect — detect local env vars and save them
+// Helper: read Claude Code OAuth token from macOS Keychain
+async function readClaudeKeychainToken(): Promise<string | null> {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const user = process.env.USER || process.env.LOGNAME || '';
+    const { stdout } = await execFileAsync('security', [
+      'find-generic-password', '-s', 'Claude Code-credentials', '-a', user, '-w',
+    ]);
+    const json = JSON.parse(stdout.trim());
+    const token = json?.claudeAiOauth?.accessToken;
+    return (token && typeof token === 'string') ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+// Helper: read GitHub token from gh CLI config
+async function readGhCliToken(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('gh', ['auth', 'token']);
+    const token = stdout.trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/credentials/auto-detect — detect local credentials (env vars, keychain, CLI configs)
 router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
   try {
-    const results: { provider: string; saved: boolean }[] = [];
+    const results: { provider: string; saved: boolean; source?: string }[] = [];
 
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    // Anthropic: env var → macOS Keychain (Claude Code OAuth)
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || await readClaudeKeychainToken();
     if (anthropicKey) {
       try {
+        const keyPrefix = anthropicKey.slice(0, 10) + '...';
         await credentialService.setToken('anthropic', anthropicKey);
-        results.push({ provider: 'anthropic', saved: true });
+        results.push({ provider: 'anthropic', saved: true, source: process.env.ANTHROPIC_API_KEY ? 'env' : 'keychain' });
       } catch {
         results.push({ provider: 'anthropic', saved: false });
       }
     }
 
-    const githubToken = process.env.GITHUB_TOKEN;
+    // GitHub: env var → gh CLI auth token
+    const githubToken = process.env.GITHUB_TOKEN || await readGhCliToken();
     if (githubToken) {
       try {
         await credentialService.setToken('github', githubToken);
-        results.push({ provider: 'github', saved: true });
+        results.push({ provider: 'github', saved: true, source: process.env.GITHUB_TOKEN ? 'env' : 'gh-cli' });
       } catch {
         results.push({ provider: 'github', saved: false });
       }
