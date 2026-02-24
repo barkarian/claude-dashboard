@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '../ui/button.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
+import SettingsTerminal from './SettingsTerminal.tsx';
 
 interface CredentialStatus {
   connected: boolean;
@@ -25,6 +26,7 @@ export default function IntegrationsPanel() {
   const [githubToken, setGithubToken] = useState('');
   const [savingGithub, setSavingGithub] = useState(false);
 
+  const [showTerminal, setShowTerminal] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -41,6 +43,24 @@ export default function IntegrationsPanel() {
       ]);
       setAnthropicStatus(anthro);
       setGithubStatus(gh);
+
+      // Auto-detect local env credentials for any disconnected provider
+      if (!anthro.connected || !gh.connected) {
+        try {
+          const { detected } = await api.post<{ detected: { provider: string; saved: boolean }[] }>('/api/credentials/auto-detect', {});
+          if (detected.length > 0) {
+            // Re-fetch statuses if anything was detected
+            const [anthro2, gh2] = await Promise.all([
+              api.get<CredentialStatus>('/api/credentials/anthropic/status'),
+              api.get<CredentialStatus>('/api/credentials/github/status'),
+            ]);
+            setAnthropicStatus(anthro2);
+            setGithubStatus(gh2);
+          }
+        } catch {
+          // Auto-detect is best-effort, ignore failures
+        }
+      }
     } catch (err) {
       console.error('Failed to load credential statuses:', err);
     } finally {
@@ -178,6 +198,11 @@ export default function IntegrationsPanel() {
               <p className="mt-2">
                 You can also use <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> via SSH for OAuth with a Claude subscription (Pro, Max, Team, Enterprise).
               </p>
+              <p className="mt-1">
+                <button type="button" onClick={() => setShowTerminal(true)} className="text-primary underline hover:text-primary-dark">
+                  Open a terminal
+                </button> to run <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> directly.
+              </p>
             </div>
 
             <form onSubmit={handleSaveAnthropic} className="space-y-3">
@@ -254,6 +279,9 @@ export default function IntegrationsPanel() {
                 <li>Under "Permissions", grant <strong>Contents</strong> (read & write) at minimum</li>
                 <li>Click "Generate token" and copy it</li>
               </ol>
+              <p className="mt-1">
+                Or <button type="button" onClick={() => setShowTerminal(true)} className="text-primary underline hover:text-primary-dark">open a terminal</button> to run <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">gh auth login</code> directly.
+              </p>
             </div>
 
             <form onSubmit={handleSaveGithub} className="space-y-3">
@@ -280,6 +308,21 @@ export default function IntegrationsPanel() {
           </div>
         )}
       </div>
+
+      {/* Terminal section */}
+      {showTerminal ? (
+        <SettingsTerminal onClose={() => setShowTerminal(false)} />
+      ) : (
+        <button
+          onClick={() => setShowTerminal(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm text-text-muted hover:text-text bg-bg-surface border border-border rounded-xl hover:border-primary/30 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+          Open Terminal
+        </button>
+      )}
     </div>
   );
 }

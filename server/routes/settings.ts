@@ -71,6 +71,38 @@ router.post('/ssh-keys/sync', async (req: Request, res: Response) => {
 
 // --- Credential routes ---
 
+// POST /api/credentials/auto-detect — detect local env vars and save them
+router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
+  try {
+    const results: { provider: string; saved: boolean }[] = [];
+
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (anthropicKey) {
+      try {
+        await credentialService.setToken('anthropic', anthropicKey);
+        results.push({ provider: 'anthropic', saved: true });
+      } catch {
+        results.push({ provider: 'anthropic', saved: false });
+      }
+    }
+
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (githubToken) {
+      try {
+        await credentialService.setToken('github', githubToken);
+        results.push({ provider: 'github', saved: true });
+      } catch {
+        results.push({ provider: 'github', saved: false });
+      }
+    }
+
+    res.json({ detected: results });
+  } catch (err: any) {
+    console.error('Error auto-detecting credentials:', err);
+    res.status(500).json({ error: err.message || 'Failed to auto-detect credentials' });
+  }
+});
+
 // PUT /api/credentials/anthropic — save Anthropic API key
 router.put('/credentials/anthropic', async (req: Request, res: Response) => {
   try {

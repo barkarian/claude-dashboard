@@ -1,4 +1,5 @@
 import type { Socket, Server as SocketIOServer } from 'socket.io';
+import os from 'os';
 import processManager from '../services/processManager.ts';
 import projectManager from '../services/projectManager.ts';
 import type {
@@ -49,6 +50,21 @@ export default function registerTerminalEvents(socket: Socket, io: SocketIOServe
     } catch (err: any) {
       console.error('terminal:spawn-shell error:', err);
       socket.emit('terminal:error', { projectId, scriptId: '', error: err.message });
+    }
+  });
+
+  socket.on('terminal:spawn-settings-shell', async () => {
+    try {
+      const cwd = os.homedir();
+      const scriptId = `settings-shell-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const projectId = '__settings__';
+      const room = `terminal:${projectId}:${scriptId}`;
+      socket.join(room);
+      processManager.spawnShell(projectId, scriptId, cwd, io);
+      socket.emit('terminal:shell-spawned', { projectId, scriptId });
+    } catch (err: any) {
+      console.error('terminal:spawn-settings-shell error:', err);
+      socket.emit('terminal:error', { projectId: '__settings__', scriptId: '', error: err.message });
     }
   });
 
