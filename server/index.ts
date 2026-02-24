@@ -18,6 +18,7 @@ import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
 import sshKeyService from './services/sshKeyService.ts';
+import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
@@ -163,8 +164,9 @@ server.listen(config.port, async () => {
   }
   autostartScripts();
 
-  // Sync SSH keys on startup in VPS mode
+  // Sync SSH keys and credentials on startup in VPS mode
   if (config.isVps) {
     sshKeyService.syncAuthorizedKeys();
+    credentialService.syncCredentials();
   }
 });

@@ -2,6 +2,7 @@ import Header from '../components/layout/Header.tsx';
 import MobileNav from '../components/layout/MobileNav.tsx';
 import BillingSection from '../components/settings/BillingSection.tsx';
 import VpsStatusSection from '../components/settings/VpsStatusSection.tsx';
+import IntegrationsPanel from '../components/settings/IntegrationsPanel.tsx';
 import SshAccessPanel from '../components/settings/SshAccessPanel.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -17,6 +18,7 @@ export default function SettingsPage() {
             <BillingSection />
           </div>
           {user?.plan === 'pro' && <VpsStatusSection />}
+          <IntegrationsPanel />
           <SshAccessPanel />
         </div>
       </div>
