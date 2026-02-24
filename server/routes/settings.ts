@@ -78,7 +78,7 @@ router.put('/credentials/anthropic', async (req: Request, res: Response) => {
     if (!apiKey) {
       return res.status(400).json({ error: 'apiKey is required' });
     }
-    const result = await credentialService.setAnthropicKey(apiKey);
+    const result = await credentialService.setToken('anthropic', apiKey);
     res.json(result);
   } catch (err: any) {
     console.error('Error saving Anthropic key:', err);
@@ -86,34 +86,18 @@ router.put('/credentials/anthropic', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/credentials/github/app — save user's GitHub OAuth App credentials
-router.put('/credentials/github/app', async (req: Request, res: Response) => {
+// PUT /api/credentials/github — save GitHub token
+router.put('/credentials/github', async (req: Request, res: Response) => {
   try {
-    const { clientId, clientSecret } = req.body;
-    if (!clientId || !clientSecret) {
-      return res.status(400).json({ error: 'clientId and clientSecret are required' });
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'token is required' });
     }
-    const result = await credentialService.setGitHubApp(clientId, clientSecret);
+    const result = await credentialService.setToken('github', token);
     res.json(result);
   } catch (err: any) {
-    console.error('Error saving GitHub app config:', err);
-    res.status(500).json({ error: err.message || 'Failed to save GitHub app config' });
-  }
-});
-
-// GET /api/credentials/github/connect-url — get GitHub OAuth start URL (before :provider routes)
-router.get('/credentials/github/connect-url', async (req: Request, res: Response) => {
-  try {
-    // Build redirect URI from request origin or config
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const redirectUri = `${protocol}://${host}/settings`;
-
-    const url = await credentialService.getGitHubConnectUrl(redirectUri);
-    res.json({ url });
-  } catch (err: any) {
-    console.error('Error getting GitHub connect URL:', err);
-    res.status(500).json({ error: err.message || 'Failed to get connect URL' });
+    console.error('Error saving GitHub token:', err);
+    res.status(500).json({ error: err.message || 'Failed to save token' });
   }
 });
 
@@ -128,7 +112,7 @@ router.post('/credentials/sync', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/credentials/:provider/status — get connection status for a provider
+// GET /api/credentials/:provider/status — get connection status
 router.get('/credentials/:provider/status', async (req: Request<{ provider: string }>, res: Response) => {
   try {
     const provider = req.params.provider as 'anthropic' | 'github';

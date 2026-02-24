@@ -11,8 +11,7 @@ interface Credential {
 }
 
 interface CredentialStatus {
-  connected?: boolean;
-  configured?: boolean;
+  connected: boolean;
   metadata?: Record<string, any>;
 }
 
@@ -153,19 +152,21 @@ async function getStatus(provider: 'anthropic' | 'github'): Promise<CredentialSt
   }
 }
 
-async function setAnthropicKey(apiKey: string): Promise<CredentialStatus> {
+async function setToken(provider: 'anthropic' | 'github', token: string): Promise<CredentialStatus> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     throw new Error('No tunnel credentials or service URL configured');
   }
 
-  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/anthropic`, {
+  const body = provider === 'anthropic' ? { apiKey: token } : { token };
+
+  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `users API-Key ${creds.apiKey}`,
     },
-    body: JSON.stringify({ apiKey }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -207,60 +208,10 @@ async function disconnectProvider(provider: 'anthropic' | 'github'): Promise<voi
   }
 }
 
-async function getGitHubConnectUrl(redirectUri: string): Promise<string> {
-  const creds = tunnelManager.getCredentials();
-  if (!creds || !config.tunnelServiceUrl) {
-    throw new Error('No tunnel credentials or service URL configured');
-  }
-
-  // Create a short-lived auth_code via authorization-codes collection
-  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/github/connect-url`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `users API-Key ${creds.apiKey}`,
-    },
-    body: JSON.stringify({ redirectUri }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((err as any).error || `HTTP ${res.status}`);
-  }
-
-  const data = await res.json() as { url: string };
-  return data.url;
-}
-
-async function setGitHubApp(clientId: string, clientSecret: string): Promise<CredentialStatus> {
-  const creds = tunnelManager.getCredentials();
-  if (!creds || !config.tunnelServiceUrl) {
-    throw new Error('No tunnel credentials or service URL configured');
-  }
-
-  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/github/app`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `users API-Key ${creds.apiKey}`,
-    },
-    body: JSON.stringify({ clientId, clientSecret }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((err as any).error || `HTTP ${res.status}`);
-  }
-
-  return await res.json() as CredentialStatus;
-}
-
 export default {
   isActive,
   syncCredentials,
   getStatus,
-  setAnthropicKey,
-  setGitHubApp,
+  setToken,
   disconnectProvider,
-  getGitHubConnectUrl,
 };
