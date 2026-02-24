@@ -33,6 +33,7 @@ interface TunnelUserInfo {
   userId: string;
   email: string;
   username: string;
+  plan?: 'free' | 'pro';
 }
 let tunnelUserInfo: TunnelUserInfo | null = null;
 

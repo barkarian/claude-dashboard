@@ -35,6 +35,7 @@ router.get('/status', (req: Request, res: Response) => {
 
   return res.json({
     authenticated,
+    isVps: config.isVps,
     user: tunnelService ? {
       username: tunnelService.username,
       email: tunnelService.email,

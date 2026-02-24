@@ -41,6 +41,7 @@ function tryAutoBootstrapSession(req: Request): boolean {
     userId: userInfo.userId,
     email: userInfo.email,
     username: userInfo.username,
+    plan: userInfo.plan || 'free',
   };
 
   // Explicitly save so the session persists (saveUninitialized: false won't auto-save)

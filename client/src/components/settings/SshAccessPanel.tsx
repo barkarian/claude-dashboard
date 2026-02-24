@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui/button.tsx';
+import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
 
 interface SshKey {
@@ -18,6 +19,7 @@ interface DashboardSettings {
 }
 
 export default function SshAccessPanel() {
+  const { user, isVps } = useAuth();
   const [settings, setSettings] = useState<DashboardSettings | null>(null);
   const [keys, setKeys] = useState<SshKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +29,7 @@ export default function SshAccessPanel() {
   const [adding, setAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [vpsIpFromStatus, setVpsIpFromStatus] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -41,6 +44,16 @@ export default function SshAccessPanel() {
       ]);
       setSettings(settingsData);
       setKeys(keysData.keys || []);
+
+      // On local + pro, fetch VPS IP from billing status
+      if (!settingsData.isVps && user?.plan === 'pro') {
+        try {
+          const vpsData = await api.get<{ vpsInstance: { ipv4?: string; status: string } | null }>('/api/billing/vps-status');
+          if (vpsData.vpsInstance?.ipv4) {
+            setVpsIpFromStatus(vpsData.vpsInstance.ipv4);
+          }
+        } catch { /* ignore */ }
+      }
     } catch (err) {
       console.error('Failed to load SSH settings:', err);
     } finally {
@@ -96,7 +109,8 @@ export default function SshAccessPanel() {
     );
   }
 
-  if (!settings?.isVps) {
+  // Not on Pro plan — show upgrade prompt
+  if (user?.plan !== 'pro') {
     return (
       <div className="bg-bg-surface border border-border rounded-xl p-6 text-center">
         <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -117,56 +131,93 @@ export default function SshAccessPanel() {
     );
   }
 
-  const sshHost = settings.vpsIp || 'your-vps-ip';
-  const sshCommand = settings.sshPort === 22
-    ? `ssh ${settings.sshUser}@${sshHost}`
-    : `ssh -p ${settings.sshPort} ${settings.sshUser}@${sshHost}`;
+  // Resolve VPS IP: from settings (on VPS) or from vps-status (on local)
+  const sshHost = settings?.vpsIp || vpsIpFromStatus || null;
+  const sshUser = settings?.sshUser || 'claw-user';
+  const sshPort = settings?.sshPort || 22;
+  const sshCommand = sshHost
+    ? (sshPort === 22 ? `ssh ${sshUser}@${sshHost}` : `ssh -p ${sshPort} ${sshUser}@${sshHost}`)
+    : null;
+
+  const hasNoKeys = keys.length === 0;
 
   return (
     <div className="space-y-6">
-      {/* Connection Info */}
-      <div className="bg-bg-surface border border-border rounded-xl p-5">
-        <h3 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-          <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
-          </svg>
-          SSH Connection
-        </h3>
+      {/* Setup prompt when no keys added yet */}
+      {hasNoKeys && (
+        <div className="bg-primary/5 border border-primary/20 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-text mb-2 flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+            Set up SSH Access
+          </h3>
+          <p className="text-sm text-text-muted mb-3">
+            Add your SSH public key to connect to your VPS from the terminal. Here's how:
+          </p>
+          <ol className="text-sm text-text-muted space-y-2 mb-4 list-decimal list-inside">
+            <li>
+              Open a terminal and run: <code className="px-1.5 py-0.5 bg-bg rounded text-xs font-mono text-text">cat ~/.ssh/id_ed25519.pub</code>
+            </li>
+            <li>Copy the output (starts with <code className="px-1.5 py-0.5 bg-bg rounded text-xs font-mono text-text">ssh-ed25519</code> or <code className="px-1.5 py-0.5 bg-bg rounded text-xs font-mono text-text">ssh-rsa</code>)</li>
+            <li>Click "Add Key" below and paste it</li>
+            {sshCommand && (
+              <li>
+                Connect with: <code className="px-1.5 py-0.5 bg-bg rounded text-xs font-mono text-text">{sshCommand}</code>
+              </li>
+            )}
+          </ol>
+          <p className="text-xs text-text-dim">
+            Don't have an SSH key? Run <code className="px-1 py-0.5 bg-bg rounded font-mono">ssh-keygen -t ed25519</code> to generate one.
+          </p>
+        </div>
+      )}
 
-        <div className="space-y-3">
-          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-            <span className="text-text-muted">Host</span>
-            <span className="text-text font-mono">{sshHost}</span>
-            <span className="text-text-muted">Port</span>
-            <span className="text-text font-mono">{settings.sshPort}</span>
-            <span className="text-text-muted">User</span>
-            <span className="text-text font-mono">{settings.sshUser}</span>
-          </div>
+      {/* Connection Info — show when we have a VPS IP */}
+      {sshCommand && !hasNoKeys && (
+        <div className="bg-bg-surface border border-border rounded-xl p-5">
+          <h3 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            SSH Connection
+          </h3>
 
-          <div className="flex items-center gap-2 mt-3">
-            <code className="flex-1 px-3 py-2 bg-bg rounded-lg text-sm font-mono text-text border border-border truncate">
-              {sshCommand}
-            </code>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => copyToClipboard(sshCommand)}
-              className="flex-shrink-0"
-            >
-              {copied ? (
-                <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                </svg>
-              )}
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
+          <div className="space-y-3">
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+              <span className="text-text-muted">Host</span>
+              <span className="text-text font-mono">{sshHost}</span>
+              <span className="text-text-muted">Port</span>
+              <span className="text-text font-mono">{sshPort}</span>
+              <span className="text-text-muted">User</span>
+              <span className="text-text font-mono">{sshUser}</span>
+            </div>
+
+            <div className="flex items-center gap-2 mt-3">
+              <code className="flex-1 px-3 py-2 bg-bg rounded-lg text-sm font-mono text-text border border-border truncate">
+                {sshCommand}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copyToClipboard(sshCommand)}
+                className="flex-shrink-0"
+              >
+                {copied ? (
+                  <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                  </svg>
+                )}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* SSH Keys */}
       <div className="bg-bg-surface border border-border rounded-xl p-5">

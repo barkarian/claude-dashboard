@@ -10,6 +10,7 @@ interface AuthUser {
 
 interface AuthContextValue {
   isAuthenticated: boolean;
+  isVps: boolean;
   loading: boolean;
   user: AuthUser | null;
   oauthUrl: string | null;
@@ -21,6 +22,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isVps, setIsVps] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
@@ -31,8 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
-      const data = await api.get<{ authenticated: boolean; user: AuthUser | null; oauthUrl: string | null }>('/api/auth/status');
+      const data = await api.get<{ authenticated: boolean; isVps: boolean; user: AuthUser | null; oauthUrl: string | null }>('/api/auth/status');
       setIsAuthenticated(data.authenticated);
+      setIsVps(data.isVps);
       setUser(data.user);
       setOauthUrl(data.oauthUrl);
     } catch {
@@ -58,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, loading, user, oauthUrl, logout, refreshPlan }}>
+    <AuthContext.Provider value={{ isAuthenticated, isVps, loading, user, oauthUrl, logout, refreshPlan }}>
       {children}
     </AuthContext.Provider>
   );

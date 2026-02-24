@@ -118,6 +118,13 @@ function doConnect(): void {
     ws = null;
     console.log(`[tunnel-client] WebSocket closed (code: ${code}, reason: ${reason?.toString() || 'none'})`);
 
+    // Code 4000 = replaced by VPS connection. Stop reconnecting.
+    if (code === 4000) {
+      shouldReconnect = false;
+      console.log('[tunnel-client] Connection replaced by VPS — stopping reconnect');
+      return;
+    }
+
     if (shouldReconnect) {
       const delay = getReconnectDelay();
       console.log(`[tunnel-client] Reconnecting in ${delay}ms...`);

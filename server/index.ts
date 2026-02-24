@@ -128,6 +128,30 @@ server.listen(config.port, async () => {
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
     // Auto-connect using env vars — tunnel is immediately available
     tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);
+
+    // Fetch user info so tryAutoBootstrapSession() can create sessions
+    if (config.tunnelServiceUrl) {
+      try {
+        const meRes = await fetch(`${config.tunnelServiceUrl}/api/users/me`, {
+          headers: { 'Authorization': `users API-Key ${config.tunnelApiKey}` },
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json() as { user?: { id?: string; email?: string; username?: string; plan?: string } };
+          if (meData.user) {
+            tunnelManager.setUserInfo({
+              apiKey: config.tunnelApiKey,
+              userSubdomain: config.tunnelUserSubdomain,
+              userId: meData.user.id || '',
+              email: meData.user.email || '',
+              username: meData.user.username || '',
+              plan: meData.user.plan === 'pro' ? 'pro' : 'free',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[startup] Failed to fetch user info for session bootstrap:', err);
+      }
+    }
   } else if (config.tunnelMode === 'ngrok') {
     // ngrok mode unchanged
     const url = await tunnelManager.startDashboardTunnel(config.port);
