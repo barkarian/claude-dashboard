@@ -39,9 +39,40 @@ router.get('/status', (req: Request, res: Response) => {
       username: tunnelService.username,
       email: tunnelService.email,
       userSubdomain: tunnelService.userSubdomain,
+      plan: tunnelService.plan || 'free',
     } : null,
     oauthUrl,
   });
+});
+
+router.post('/refresh-plan', async (req: Request, res: Response) => {
+  const tunnelService = req.session?.tunnelService;
+  if (!tunnelService) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const meRes = await fetch(`${config.tunnelServiceUrl}/api/users/me`, {
+      headers: { 'Authorization': `users API-Key ${tunnelService.apiKey}` },
+    });
+
+    if (!meRes.ok) {
+      return res.status(502).json({ error: 'Failed to fetch plan from tunnel-service' });
+    }
+
+    const meData = await meRes.json() as { user?: { plan?: string } };
+    const plan: 'free' | 'pro' = meData.user?.plan === 'pro' ? 'pro' : 'free';
+
+    req.session.tunnelService!.plan = plan;
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((err) => err ? reject(err) : resolve());
+    });
+
+    res.json({ plan });
+  } catch (err: any) {
+    console.error('[auth] Failed to refresh plan:', err);
+    res.status(500).json({ error: 'Failed to refresh plan' });
+  }
 });
 
 export default router;

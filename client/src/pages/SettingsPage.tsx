@@ -1,13 +1,24 @@
 import Header from '../components/layout/Header.tsx';
 import MobileNav from '../components/layout/MobileNav.tsx';
+import BillingSection from '../components/settings/BillingSection.tsx';
+import VpsStatusSection from '../components/settings/VpsStatusSection.tsx';
 import SshAccessPanel from '../components/settings/SshAccessPanel.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
 
 export default function SettingsPage() {
+  const { user } = useAuth();
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <Header title="Settings" backTo="/" />
       <div className="flex-1 overflow-y-auto">
-        <SshAccessPanel />
+        <div className="p-4 md:p-6 space-y-6">
+          <div id="billing-section">
+            <BillingSection />
+          </div>
+          {user?.plan === 'pro' && <VpsStatusSection />}
+          <SshAccessPanel />
+        </div>
       </div>
       <MobileNav />
     </div>

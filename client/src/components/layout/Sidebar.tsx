@@ -105,7 +105,22 @@ export default function Sidebar() {
             <span className="text-xs font-medium text-text truncate">
               {user.username}
             </span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+              user.plan === 'pro'
+                ? 'bg-primary/15 text-primary'
+                : 'bg-border text-text-dim'
+            }`}>
+              {user.plan === 'pro' ? 'PRO' : 'FREE'}
+            </span>
           </div>
+          {user.plan !== 'pro' && (
+            <button
+              onClick={() => navigate('/settings')}
+              className="text-[11px] text-primary hover:underline mt-1 ml-4"
+            >
+              Upgrade to Pro &rarr;
+            </button>
+          )}
         </div>
       )}
 

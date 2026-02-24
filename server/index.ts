@@ -12,6 +12,7 @@ import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
 import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import settingsRoutes from './routes/settings.ts';
+import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
@@ -54,6 +55,7 @@ app.use('/api/projects/:id/scripts', scriptRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/tunnel-auth', tunnelAuthRoutes);
 app.use('/api', settingsRoutes);
+app.use('/api/billing', billingRoutes);
 app.use('/api/migrate', migrateRoutes);
 
 // Socket.IO setup

@@ -6,6 +6,8 @@ import ProjectListPage from './pages/ProjectListPage.tsx';
 import NewProjectPage from './pages/NewProjectPage.tsx';
 import ProjectDashboardPage from './pages/ProjectDashboardPage.tsx';
 import SettingsPage from './pages/SettingsPage.tsx';
+import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
+import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
 import Sidebar from './components/layout/Sidebar.tsx';
 
@@ -54,6 +56,8 @@ export default function App() {
                   <Route path="/" element={<ProjectListPage />} />
                   <Route path="/new" element={<NewProjectPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/billing/success" element={<BillingSuccessPage />} />
+                  <Route path="/billing/cancel" element={<BillingCancelPage />} />
                   <Route path="/migrate" element={<MigrationPage />} />
                   <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
                 </Routes>

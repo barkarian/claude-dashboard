@@ -5,6 +5,7 @@ interface AuthUser {
   username: string;
   email: string;
   userSubdomain: string;
+  plan: 'free' | 'pro';
 }
 
 interface AuthContextValue {
@@ -13,6 +14,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   oauthUrl: string | null;
   logout: () => Promise<void>;
+  refreshPlan: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -46,8 +48,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const refreshPlan = useCallback(async () => {
+    try {
+      const data = await api.post<{ plan: 'free' | 'pro' }>('/api/auth/refresh-plan');
+      setUser((prev) => prev ? { ...prev, plan: data.plan } : prev);
+    } catch (err) {
+      console.error('Failed to refresh plan:', err);
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated, loading, user, oauthUrl, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, loading, user, oauthUrl, logout, refreshPlan }}>
       {children}
     </AuthContext.Provider>
   );

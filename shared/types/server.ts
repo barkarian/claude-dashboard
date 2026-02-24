@@ -27,6 +27,7 @@ declare module 'express-session' {
       userId: string;
       email: string;
       username: string;
+      plan: 'free' | 'pro';
     };
   }
 }

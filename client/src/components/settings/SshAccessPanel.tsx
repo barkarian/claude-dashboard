@@ -98,16 +98,21 @@ export default function SshAccessPanel() {
 
   if (!settings?.isVps) {
     return (
-      <div className="p-6">
-        <div className="bg-bg-surface border border-border rounded-xl p-6 text-center">
-          <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-          </svg>
-          <h3 className="text-lg font-semibold text-text mb-1">SSH Access Not Available</h3>
-          <p className="text-sm text-text-muted">
-            SSH access is only available on Pro VPS instances. Upgrade to Pro to get a dedicated VPS with SSH access.
-          </p>
-        </div>
+      <div className="bg-bg-surface border border-border rounded-xl p-6 text-center">
+        <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        </svg>
+        <h3 className="text-lg font-semibold text-text mb-1">SSH Access Not Available</h3>
+        <p className="text-sm text-text-muted mb-3">
+          SSH access is only available on Pro VPS instances. Upgrade to Pro to get a dedicated VPS with SSH access.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => document.getElementById('billing-section')?.scrollIntoView({ behavior: 'smooth' })}
+        >
+          Upgrade to Pro
+        </Button>
       </div>
     );
   }
@@ -118,7 +123,7 @@ export default function SshAccessPanel() {
     : `ssh -p ${settings.sshPort} ${settings.sshUser}@${sshHost}`;
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className="space-y-6">
       {/* Connection Info */}
       <div className="bg-bg-surface border border-border rounded-xl p-5">
         <h3 className="text-base font-semibold text-text mb-4 flex items-center gap-2">

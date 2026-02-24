@@ -72,6 +72,18 @@ router.get('/callback', async (req: Request, res: Response) => {
       return res.status(400).send('No API key returned. Please enable API key in your tunnel-service account.');
     }
 
+    // Fetch the user's plan from tunnel-service
+    let plan: 'free' | 'pro' = 'free';
+    try {
+      const meRes = await fetch(`${config.tunnelServiceUrl}/api/users/me`, {
+        headers: { 'Authorization': `users API-Key ${data.apiKey}` },
+      });
+      if (meRes.ok) {
+        const meData = await meRes.json() as { user?: { plan?: string } };
+        if (meData.user?.plan === 'pro') plan = 'pro';
+      }
+    } catch { /* default to free */ }
+
     // Store credentials in session
     const userInfo = {
       apiKey: data.apiKey,
@@ -79,6 +91,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       userId: data.user.id,
       email: data.user.email,
       username: data.user.username,
+      plan,
     };
     req.session.tunnelService = userInfo;
     console.log(`[tunnel-auth] Session stored for user=${data.user.username}`);
