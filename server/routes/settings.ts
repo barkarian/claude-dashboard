@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import simpleGit from 'simple-git';
 import config from '../config.ts';
 import sshKeyService from '../services/sshKeyService.ts';
 import credentialService from '../services/credentialService.ts';
@@ -8,6 +9,10 @@ import credentialService from '../services/credentialService.ts';
 const execFileAsync = promisify(execFile);
 
 const router = Router();
+
+// --- Dashboard self-update state ---
+let updating = false;
+let updateError: string | null = null;
 
 // GET /api/settings — return dashboard environment info
 router.get('/settings', async (req: Request, res: Response) => {
@@ -23,6 +28,101 @@ router.get('/settings', async (req: Request, res: Response) => {
     console.error('Error getting settings:', err);
     res.status(500).json({ error: 'Failed to get settings' });
   }
+});
+
+// GET /api/settings/update-status — check for available updates
+router.get('/settings/update-status', async (req: Request, res: Response) => {
+  try {
+    const git = simpleGit(process.cwd());
+    const branch = await git.branch();
+    const log = await git.log({ maxCount: 1 });
+
+    if (!log.latest) {
+      return res.status(500).json({ error: 'No commits found in repository' });
+    }
+
+    await git.fetch('origin', branch.current);
+
+    const currentCommit = {
+      hash: log.latest.hash.substring(0, 7),
+      message: log.latest.message,
+      date: log.latest.date,
+    };
+
+    // Check if remote has new commits
+    const remoteLog = await git.log({
+      from: log.latest.hash,
+      to: `origin/${branch.current}`,
+      maxCount: 1,
+    });
+
+    const hasUpdate = remoteLog.total > 0;
+    const latestCommit = hasUpdate && remoteLog.latest
+      ? {
+          hash: remoteLog.latest.hash.substring(0, 7),
+          message: remoteLog.latest.message,
+          date: remoteLog.latest.date,
+        }
+      : currentCommit;
+
+    res.json({
+      currentCommit,
+      currentBranch: branch.current,
+      latestCommit,
+      updateAvailable: hasUpdate,
+      updating,
+      updateError,
+    });
+
+    // Clear error after it's been read
+    if (updateError) updateError = null;
+  } catch (err: any) {
+    console.error('Error checking update status:', err);
+    res.status(500).json({ error: err.message || 'Failed to check update status' });
+  }
+});
+
+// POST /api/settings/update — pull, rebuild, and restart the dashboard
+router.post('/settings/update', async (req: Request, res: Response) => {
+  if (updating) {
+    return res.status(409).json({ error: 'Update already in progress' });
+  }
+
+  updating = true;
+  updateError = null;
+  res.json({ updating: true });
+
+  // Fire-and-forget background update
+  (async () => {
+    try {
+      const git = simpleGit(process.cwd());
+      const branch = await git.branch();
+
+      // Pull latest changes
+      await git.pull('origin', branch.current);
+
+      // Install dependencies
+      await execFileAsync('npm', ['install'], { cwd: process.cwd() });
+
+      // Build
+      await execFileAsync('npm', ['run', 'build'], { cwd: process.cwd() });
+
+      // Schedule restart after 1s
+      setTimeout(() => {
+        if (config.isVps) {
+          execFile('sudo', ['systemctl', 'restart', 'claw-dashboard'], (err) => {
+            if (err) console.error('Failed to restart via systemd:', err);
+          });
+        } else {
+          process.exit(0);
+        }
+      }, 1000);
+    } catch (err: any) {
+      console.error('Update failed:', err);
+      updating = false;
+      updateError = err.message || 'Update failed';
+    }
+  })();
 });
 
 // GET /api/ssh-keys — list user's SSH keys (proxied from tunnel-service)
