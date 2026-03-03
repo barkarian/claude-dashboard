@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui/button.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
@@ -15,13 +15,91 @@ interface CredentialStatus {
   };
 }
 
-const MODEL_OPTIONS = [
-  { label: 'claude-opus-4', value: 'anthropic/claude-opus-4' },
-  { label: 'claude-sonnet-4', value: 'anthropic/claude-sonnet-4' },
-  { label: 'claude-haiku-4', value: 'anthropic/claude-haiku-4' },
-  { label: 'claude-3.5-sonnet', value: 'anthropic/claude-3.5-sonnet' },
-  { label: 'claude-3.5-haiku', value: 'anthropic/claude-3.5-haiku' },
-];
+interface OpenRouterModel {
+  id: string;
+  name: string;
+}
+
+// Cache fetched models across re-renders
+let modelsCache: OpenRouterModel[] | null = null;
+
+function ModelSearchSelect({ value, onChange, models, loadingModels }: {
+  value: string;
+  onChange: (id: string) => void;
+  models: OpenRouterModel[];
+  loadingModels: boolean;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const filtered = query
+    ? models.filter(m =>
+        m.id.toLowerCase().includes(query.toLowerCase()) ||
+        m.name.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 50)
+    : models.slice(0, 50);
+
+  const selectedModel = models.find(m => m.id === value);
+  const displayValue = selectedModel ? selectedModel.name : value;
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setQuery(''); }}
+        className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text text-left truncate focus:outline-none focus:ring-2 focus:ring-primary"
+        title={value}
+      >
+        {loadingModels ? 'Loading models...' : displayValue || 'Select a model'}
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-bg-surface border border-border rounded-lg shadow-lg max-h-60 flex flex-col">
+          <div className="p-2 border-b border-border">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search models..."
+              className="w-full px-2 py-1.5 bg-bg border border-border rounded text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-primary"
+              autoFocus
+            />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {loadingModels ? (
+              <div className="px-3 py-4 text-xs text-text-muted text-center">Loading models from OpenRouter...</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-text-muted text-center">No models found</div>
+            ) : (
+              filtered.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => { onChange(m.id); setOpen(false); setQuery(''); }}
+                  className={`w-full px-3 py-2 text-left text-sm hover:bg-primary/10 transition-colors ${m.id === value ? 'bg-primary/5 text-primary font-medium' : 'text-text'}`}
+                >
+                  <span className="block truncate">{m.name}</span>
+                  <span className="block text-xs text-text-muted truncate font-mono">{m.id}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function IntegrationsPanel() {
   const { user } = useAuth();
@@ -44,6 +122,8 @@ export default function IntegrationsPanel() {
   const [sonnetModel, setSonnetModel] = useState('anthropic/claude-sonnet-4');
   const [haikuModel, setHaikuModel] = useState('anthropic/claude-haiku-4');
   const [savingOpenrouter, setSavingOpenrouter] = useState(false);
+  const [openrouterModels, setOpenrouterModels] = useState<OpenRouterModel[]>(modelsCache || []);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   const [showTerminal, setShowTerminal] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -52,6 +132,37 @@ export default function IntegrationsPanel() {
   useEffect(() => {
     loadStatuses();
   }, []);
+
+  // Fetch OpenRouter models when form is opened (or connected status shown)
+  useEffect(() => {
+    if ((showOpenrouterForm || openrouterStatus.connected) && openrouterModels.length === 0 && !loadingModels) {
+      fetchOpenRouterModels();
+    }
+  }, [showOpenrouterForm, openrouterStatus.connected]);
+
+  async function fetchOpenRouterModels() {
+    if (modelsCache) {
+      setOpenrouterModels(modelsCache);
+      return;
+    }
+    setLoadingModels(true);
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/models');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const models: OpenRouterModel[] = (data.data || []).map((m: any) => ({
+        id: m.id,
+        name: m.name || m.id,
+      }));
+      models.sort((a, b) => a.name.localeCompare(b.name));
+      modelsCache = models;
+      setOpenrouterModels(models);
+    } catch (err) {
+      console.error('Failed to fetch OpenRouter models:', err);
+    } finally {
+      setLoadingModels(false);
+    }
+  }
 
   async function loadStatuses() {
     setLoading(true);
@@ -342,9 +453,9 @@ export default function IntegrationsPanel() {
         {/* Connected: show model mappings */}
         {openrouterStatus.connected && openrouterStatus.metadata && (
           <div className="mt-3 p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-1">
-            <p><span className="font-medium text-text">Opus:</span> {openrouterStatus.metadata.opusModel}</p>
-            <p><span className="font-medium text-text">Sonnet:</span> {openrouterStatus.metadata.sonnetModel}</p>
-            <p><span className="font-medium text-text">Haiku:</span> {openrouterStatus.metadata.haikuModel}</p>
+            <p><span className="font-medium text-text">Opus:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.opusModel)?.name || openrouterStatus.metadata.opusModel}</p>
+            <p><span className="font-medium text-text">Sonnet:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.sonnetModel)?.name || openrouterStatus.metadata.sonnetModel}</p>
+            <p><span className="font-medium text-text">Haiku:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.haikuModel)?.name || openrouterStatus.metadata.haikuModel}</p>
           </div>
         )}
 
@@ -377,39 +488,30 @@ export default function IntegrationsPanel() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-text-muted mb-1">Opus Model</label>
-                  <select
+                  <ModelSearchSelect
                     value={opusModel}
-                    onChange={(e) => setOpusModel(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    {MODEL_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    onChange={setOpusModel}
+                    models={openrouterModels}
+                    loadingModels={loadingModels}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-text-muted mb-1">Sonnet Model</label>
-                  <select
+                  <ModelSearchSelect
                     value={sonnetModel}
-                    onChange={(e) => setSonnetModel(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    {MODEL_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    onChange={setSonnetModel}
+                    models={openrouterModels}
+                    loadingModels={loadingModels}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-text-muted mb-1">Haiku Model</label>
-                  <select
+                  <ModelSearchSelect
                     value={haikuModel}
-                    onChange={(e) => setHaikuModel(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    {MODEL_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    onChange={setHaikuModel}
+                    models={openrouterModels}
+                    loadingModels={loadingModels}
+                  />
                 </div>
               </div>
 
