@@ -21,9 +21,8 @@ export default function EnvironmentToggle() {
 
   function switchTo(target: 'local' | 'vps') {
     if (target === currentEnv) return;
-    // Full page nav — different server instance
-    const newPath = window.location.pathname.replace(/^\/(local|vps)/, `/${target}`);
-    window.location.href = newPath || `/${target}/`;
+    // Full page nav — navigate to environment root
+    window.location.href = `/${target}/`;
   }
 
   return (
