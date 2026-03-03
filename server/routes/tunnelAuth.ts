@@ -238,6 +238,27 @@ router.get('/status', (req: Request, res: Response) => {
   });
 });
 
+// GET /api/tunnel-auth/modes — which modes (local/vps) are connected for this user
+router.get('/modes', async (req: Request, res: Response) => {
+  const tunnelService = req.session?.tunnelService;
+  if (!tunnelService || !config.tunnelServiceUrl) {
+    return res.json({ modes: [] });
+  }
+
+  try {
+    const modesRes = await fetch(
+      `${config.tunnelServiceUrl}/api/tunnel/modes/${tunnelService.userSubdomain}`,
+      { headers: { 'Authorization': `users API-Key ${tunnelService.apiKey}` } },
+    );
+    if (modesRes.ok) {
+      const data = await modesRes.json() as { modes: string[] };
+      return res.json({ modes: data.modes });
+    }
+  } catch { /* fall through */ }
+
+  res.json({ modes: [] });
+});
+
 // POST /api/tunnel-auth/disconnect — destroy user session (tunnel stays open for re-login)
 router.post('/disconnect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /disconnect hit');

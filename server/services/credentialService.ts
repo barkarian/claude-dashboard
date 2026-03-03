@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import config from '../config.ts';
@@ -109,6 +110,66 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
   }
 
   fs.writeFileSync(envPath, envContent);
+
+  // Also write to system-wide and user shell profile so SSH sessions get the vars
+  if (config.isVps) {
+    updateSystemEnv(credentials);
+  }
+}
+
+// Write env vars to /etc/environment (system-wide) and ~/.bashrc (user shell)
+function updateSystemEnv(credentials: Credential[]): void {
+  const providers = credentials.map(c => c.provider);
+  const envVars: Record<string, string | null> = {
+    ANTHROPIC_API_KEY: null,
+    GITHUB_TOKEN: null,
+  };
+
+  for (const cred of credentials) {
+    if (cred.provider === 'anthropic') {
+      envVars.ANTHROPIC_API_KEY = cred.token;
+    } else if (cred.provider === 'github') {
+      envVars.GITHUB_TOKEN = cred.token;
+    }
+  }
+
+  // Update /etc/environment (system-wide for all login sessions)
+  const etcEnvPath = '/etc/environment';
+  try {
+    let content = fs.existsSync(etcEnvPath) ? fs.readFileSync(etcEnvPath, 'utf-8') : '';
+    for (const [key, value] of Object.entries(envVars)) {
+      if (value) {
+        content = setEnvVar(content, key, value);
+      } else {
+        content = removeEnvVar(content, key);
+      }
+    }
+    fs.writeFileSync(etcEnvPath, content);
+  } catch (err) {
+    console.error('[credentials] Failed to write /etc/environment:', err);
+  }
+
+  // Update ~/.bashrc with export lines (for interactive SSH shells)
+  const bashrcPath = path.join(os.homedir(), '.bashrc');
+  try {
+    let content = fs.existsSync(bashrcPath) ? fs.readFileSync(bashrcPath, 'utf-8') : '';
+    for (const [key, value] of Object.entries(envVars)) {
+      const exportRegex = new RegExp(`^export ${key}=.*$`, 'm');
+      const exportLine = `export ${key}=${value}`;
+      if (value) {
+        if (exportRegex.test(content)) {
+          content = content.replace(exportRegex, exportLine);
+        } else {
+          content = content.trimEnd() + `\n${exportLine}\n`;
+        }
+      } else {
+        content = content.replace(new RegExp(`^export ${key}=.*\n?`, 'm'), '');
+      }
+    }
+    fs.writeFileSync(bashrcPath, content);
+  } catch (err) {
+    console.error('[credentials] Failed to write ~/.bashrc:', err);
+  }
 }
 
 function setEnvVar(content: string, key: string, value: string): string {

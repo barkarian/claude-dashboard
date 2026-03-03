@@ -27,7 +27,8 @@ function isRequestViaTunnel(req: Request): boolean {
  * Returns true if session now has tunnelService data (either existing or freshly bootstrapped).
  */
 function tryAutoBootstrapSession(req: Request): boolean {
-  if (req.session?.tunnelService) return true; // already has session
+  if (!req.session) return false; // no session (path mismatch)
+  if (req.session.tunnelService) return true; // already has session
 
   if (!isRequestViaTunnel(req)) return false;
 
