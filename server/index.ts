@@ -26,9 +26,11 @@ import '../shared/types/server.ts'; // session augmentation
 
 const app = express();
 const server = http.createServer(app);
+const env = config.dashboardEnv;
 
-// Session middleware
+// Session middleware — env-specific cookie name and path
 const sessionMiddleware = session({
+  name: `connect.sid.${env}`,
   secret: config.sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -37,6 +39,7 @@ const sessionMiddleware = session({
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     sameSite: 'lax',
+    path: config.nodeEnv === 'production' ? `/${env}` : '/',
   },
 });
 
@@ -49,18 +52,24 @@ app.use(express.json({ limit: '500mb' }));
 app.use(sessionMiddleware);
 app.use(authMiddleware);
 
-// REST routes
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/projects/:id/scripts', scriptRoutes);
-app.use('/api/github', githubRoutes);
-app.use('/api/tunnel-auth', tunnelAuthRoutes);
-app.use('/api', settingsRoutes);
-app.use('/api/billing', billingRoutes);
-app.use('/api/migrate', migrateRoutes);
+// Collect all routes into one router
+const apiRouter = express.Router();
+apiRouter.use('/auth', authRoutes);
+apiRouter.use('/projects', projectRoutes);
+apiRouter.use('/projects/:id/scripts', scriptRoutes);
+apiRouter.use('/github', githubRoutes);
+apiRouter.use('/tunnel-auth', tunnelAuthRoutes);
+apiRouter.use('/', settingsRoutes);
+apiRouter.use('/billing', billingRoutes);
+apiRouter.use('/migrate', migrateRoutes);
 
-// Socket.IO setup
+// Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
+app.use(`/${env}/api`, apiRouter);
+app.use('/api', apiRouter);
+
+// Socket.IO setup — env-prefixed path
 const io = new SocketIOServer(server, {
+  path: `/${env}/socket.io`,
   cors: {
     origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
     credentials: true,
@@ -76,9 +85,17 @@ registerSocketHandlers(io);
 
 // Serve static files in production
 if (config.nodeEnv === 'production') {
+  // Env-prefixed static files + SPA fallback
+  app.use(`/${env}`, express.static(config.publicPath));
+  app.get(`/${env}/*`, (req, res) => {
+    if (!req.path.startsWith(`/${env}/api/`)) {
+      res.sendFile(path.join(config.publicPath, 'index.html'));
+    }
+  });
+  // Also serve at root for direct/dev access
   app.use(express.static(config.publicPath));
   app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api/')) {
+    if (!req.path.startsWith('/api/') && !req.path.startsWith(`/${env}/`)) {
       res.sendFile(path.join(config.publicPath, 'index.html'));
     }
   });
@@ -125,7 +142,7 @@ process.on('SIGINT', shutdown);
 // Start server
 server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
-  console.log(`Environment: ${config.nodeEnv}`);
+  console.log(`Environment: ${config.nodeEnv}, dashboardEnv: ${env}`);
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
     // Auto-connect using env vars — tunnel is immediately available
     tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);

@@ -16,6 +16,7 @@ export interface ServerConfig {
   sshUser: string;
   sshPort: number;
   migrationSourceUrl: string | null;
+  dashboardEnv: 'local' | 'vps';
 }
 
 // Augment express-session to include our custom session data

@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
+import EnvironmentToggle from './EnvironmentToggle.tsx';
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
@@ -26,10 +27,13 @@ export default function Sidebar() {
   return (
     <aside className="hidden md:flex flex-col w-64 bg-bg-surface border-r border-border h-screen sticky top-0">
       <div className="p-4 border-b border-border">
-        <h1 className="text-lg font-bold text-text flex items-center gap-2">
-          <span className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white text-sm font-bold">C</span>
-          Claude Dashboard
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-bold text-text flex items-center gap-2">
+            <span className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white text-sm font-bold">C</span>
+            Claude Dashboard
+          </h1>
+          <EnvironmentToggle />
+        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">

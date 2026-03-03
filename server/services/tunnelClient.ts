@@ -9,6 +9,7 @@ import type {
   TunnelResponseError,
 } from './tunnelProtocol.ts';
 import credentialService from './credentialService.ts';
+import config from '../config.ts';
 
 // Current active WebSocket (only this one should handle events)
 let ws: WebSocket | null = null;
@@ -84,7 +85,7 @@ function doConnect(): void {
       return;
     }
     console.log('[tunnel-client] WebSocket connected, sending auth...');
-    socket.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey }));
+    socket.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey, mode: config.dashboardEnv }));
   });
 
   socket.on('message', (data) => {

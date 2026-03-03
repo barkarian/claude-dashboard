@@ -16,7 +16,7 @@ router.post('/logout', (req: Request, res: Response) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to logout' });
     }
-    res.clearCookie('connect.sid');
+    res.clearCookie(`connect.sid.${config.dashboardEnv}`);
     console.log('[auth] Session destroyed, user info cleared (tunnel stays open for re-login)');
     return res.json({ success: true });
   });
@@ -27,7 +27,7 @@ router.get('/status', (req: Request, res: Response) => {
   const authenticated = !!tunnelService;
 
   const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
-    ? '/api/tunnel-auth/connect'
+    ? `/${config.dashboardEnv}/api/tunnel-auth/connect`
     : null;
 
   const sessionId = req.sessionID ? req.sessionID.slice(0, 8) + '...' : 'none';
@@ -36,6 +36,7 @@ router.get('/status', (req: Request, res: Response) => {
   return res.json({
     authenticated,
     isVps: config.isVps,
+    dashboardEnv: config.dashboardEnv,
     user: tunnelService ? {
       username: tunnelService.username,
       email: tunnelService.email,

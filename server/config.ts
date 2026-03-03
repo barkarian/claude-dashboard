@@ -24,6 +24,7 @@ const config: ServerConfig = {
   sshUser: process.env.SSH_USER || 'claw-user',
   sshPort: parseInt(process.env.SSH_PORT || '22', 10),
   migrationSourceUrl: process.env.MIGRATION_SOURCE_URL || null,
+  dashboardEnv: (process.env.DASHBOARD_ENV === 'vps' ? 'vps' : 'local') as 'local' | 'vps',
 };
 
 export default config;

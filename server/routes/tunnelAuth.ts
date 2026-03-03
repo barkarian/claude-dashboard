@@ -21,7 +21,7 @@ router.get('/connect', (req: Request, res: Response) => {
   const forwardedHost = req.get('X-Forwarded-Host');
   const protocol = req.get('X-Forwarded-Proto') || req.protocol;
   const host = forwardedHost || req.get('host') || `localhost:${config.port}`;
-  const callbackUrl = `${protocol}://${host}/api/tunnel-auth/callback`;
+  const callbackUrl = `${protocol}://${host}/${config.dashboardEnv}/api/tunnel-auth/callback`;
 
   console.log(`[tunnel-auth] Redirecting to OAuth. callbackUrl=${callbackUrl}, forwardedHost=${forwardedHost}, host=${host}`);
 
@@ -152,10 +152,10 @@ router.get('/callback', async (req: Request, res: Response) => {
         });
       });
 
-      // Redirect to the tunnel URL
+      // Redirect to the tunnel URL (env-prefixed)
       let redirectUrl: string;
       if (config.tunnelDomain) {
-        redirectUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}`;
+        redirectUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
       } else {
         redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
       }
@@ -205,10 +205,10 @@ router.get('/activate', async (req: Request, res: Response) => {
   }
   console.log(`[tunnel-auth] New tunnel connected=${tunnelClient.isConnected()} after ${waited}ms`);
 
-  // Build the new tunnel URL
+  // Build the new tunnel URL (env-prefixed)
   let redirectUrl: string;
   if (config.tunnelDomain) {
-    redirectUrl = `https://${userSubdomain}.${config.tunnelDomain}`;
+    redirectUrl = `https://${userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
   } else {
     redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
   }
@@ -246,7 +246,7 @@ router.post('/disconnect', (req: Request, res: Response) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to disconnect' });
     }
-    res.clearCookie('connect.sid');
+    res.clearCookie(`connect.sid.${config.dashboardEnv}`);
     console.log('[tunnel-auth] Session destroyed, user info cleared (tunnel stays open)');
     return res.json({ success: true });
   });

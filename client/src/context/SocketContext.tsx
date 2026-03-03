@@ -24,7 +24,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const envMatch = window.location.pathname.match(/^\/(local|vps)/);
+    const socketPath = envMatch ? `${envMatch[0]}/socket.io` : '/socket.io';
+
     const s = io({
+      path: socketPath,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

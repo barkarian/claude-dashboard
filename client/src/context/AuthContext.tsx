@@ -11,6 +11,7 @@ interface AuthUser {
 interface AuthContextValue {
   isAuthenticated: boolean;
   isVps: boolean;
+  dashboardEnv: 'local' | 'vps';
   loading: boolean;
   user: AuthUser | null;
   oauthUrl: string | null;
@@ -20,9 +21,16 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Derive env from URL as fallback
+function getEnvFromUrl(): 'local' | 'vps' {
+  const match = window.location.pathname.match(/^\/(local|vps)/);
+  return match ? (match[1] as 'local' | 'vps') : 'local';
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isVps, setIsVps] = useState(false);
+  const [dashboardEnv, setDashboardEnv] = useState<'local' | 'vps'>(getEnvFromUrl());
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
@@ -33,9 +41,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
-      const data = await api.get<{ authenticated: boolean; isVps: boolean; user: AuthUser | null; oauthUrl: string | null }>('/api/auth/status');
+      const data = await api.get<{ authenticated: boolean; isVps: boolean; dashboardEnv?: 'local' | 'vps'; user: AuthUser | null; oauthUrl: string | null }>('/api/auth/status');
       setIsAuthenticated(data.authenticated);
       setIsVps(data.isVps);
+      if (data.dashboardEnv) setDashboardEnv(data.dashboardEnv);
       setUser(data.user);
       setOauthUrl(data.oauthUrl);
     } catch {
@@ -61,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isVps, loading, user, oauthUrl, logout, refreshPlan }}>
+    <AuthContext.Provider value={{ isAuthenticated, isVps, dashboardEnv, loading, user, oauthUrl, logout, refreshPlan }}>
       {children}
     </AuthContext.Provider>
   );

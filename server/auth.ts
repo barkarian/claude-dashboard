@@ -67,6 +67,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   // like /api/auth/status see the bootstrapped session data.
   tryAutoBootstrapSession(req);
 
+  // Strip env prefix before checking whitelisted paths
+  const envPrefix = `/${config.dashboardEnv}`;
+  const pathToCheck = req.path.startsWith(envPrefix + '/')
+    ? req.path.slice(envPrefix.length)
+    : req.path;
+
   // Whitelisted paths (accessible without OAuth)
   const whitelistedPaths = [
     '/api/auth/status',
@@ -76,7 +82,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     '/api/tunnel-auth/activate',
   ];
 
-  if (whitelistedPaths.includes(req.path)) {
+  if (whitelistedPaths.includes(pathToCheck)) {
     next();
     return;
   }
@@ -87,13 +93,13 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  // Build OAuth URL for redirect
+  // Build OAuth URL for redirect (env-prefixed)
   const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
-    ? '/api/tunnel-auth/connect'
+    ? `/${config.dashboardEnv}/api/tunnel-auth/connect`
     : null;
 
   // API routes: return 401 JSON
-  if (req.path.startsWith('/api/')) {
+  if (pathToCheck.startsWith('/api/')) {
     res.status(401).json({ error: 'Unauthorized — OAuth required', oauthUrl });
     return;
   }

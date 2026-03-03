@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
 export default defineConfig({
+  base: './', // relative assets — works under any path prefix
   plugins: [
     react(),
     VitePWA({
@@ -12,7 +13,7 @@ export default defineConfig({
       manifest: {
         name: 'Claude Dashboard',
         short_name: 'Claude Dash',
-        start_url: '/',
+        start_url: './',
         display: 'standalone',
         background_color: '#0f1117',
         theme_color: '#6366f1',
@@ -23,11 +24,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/api\//],
         runtimeCaching: [
           {
-            urlPattern: /^\/api\//,
+            urlPattern: /\/api\//,
             handler: 'NetworkOnly',
           },
         ],
@@ -45,7 +46,11 @@ export default defineConfig({
     allowedHosts: ['.ngrok-free.app', '.ngrok.io'],
     proxy: {
       '/api': 'http://localhost:2222',
+      '/local/api': 'http://localhost:2222',
+      '/vps/api': 'http://localhost:2222',
       '/socket.io': { target: 'http://localhost:2222', ws: true },
+      '/local/socket.io': { target: 'http://localhost:2222', ws: true },
+      '/vps/socket.io': { target: 'http://localhost:2222', ws: true },
     },
   },
   build: {

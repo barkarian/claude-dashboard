@@ -1,4 +1,5 @@
-const BASE_URL = '';
+const envMatch = window.location.pathname.match(/^\/(local|vps)/);
+const BASE_URL = envMatch ? envMatch[0] : '';
 
 async function request<T = any>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = {
