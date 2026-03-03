@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui/button.tsx';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
 import SettingsTerminal from './SettingsTerminal.tsx';
+
+type CredentialEnvironment = 'local' | 'vps';
 
 interface CredentialStatus {
   connected: boolean;
@@ -15,9 +18,26 @@ interface CredentialStatus {
   };
 }
 
+interface EnvCredentialState {
+  anthropicStatus: CredentialStatus;
+  openrouterStatus: CredentialStatus;
+}
+
+interface ToastState {
+  message: string;
+  type: 'success' | 'error';
+}
+
 interface OpenRouterModel {
   id: string;
   name: string;
+}
+
+interface PendingSave {
+  provider: 'anthropic' | 'openrouter';
+  environment: CredentialEnvironment;
+  competingProvider: string;
+  execute: () => Promise<void>;
 }
 
 // Cache fetched models across re-renders
@@ -101,11 +121,17 @@ function ModelSearchSelect({ value, onChange, models, loadingModels }: {
   );
 }
 
+const defaultEnvState: EnvCredentialState = {
+  anthropicStatus: { connected: false },
+  openrouterStatus: { connected: false },
+};
+
 export default function IntegrationsPanel() {
-  const { user } = useAuth();
-  const [anthropicStatus, setAnthropicStatus] = useState<CredentialStatus>({ connected: false });
+  const { user, dashboardEnv } = useAuth();
+  const [localState, setLocalState] = useState<EnvCredentialState>({ ...defaultEnvState });
+  const [vpsState, setVpsState] = useState<EnvCredentialState>({ ...defaultEnvState });
   const [githubStatus, setGithubStatus] = useState<CredentialStatus>({ connected: false });
-  const [openrouterStatus, setOpenrouterStatus] = useState<CredentialStatus>({ connected: false });
+  const [claudeOauthDetected, setClaudeOauthDetected] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [showAnthropicForm, setShowAnthropicForm] = useState(false);
@@ -127,18 +153,21 @@ export default function IntegrationsPanel() {
 
   const [showTerminal, setShowTerminal] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
+  const [activeTab, setActiveTab] = useState<string>(dashboardEnv);
 
   useEffect(() => {
     loadStatuses();
   }, []);
 
-  // Fetch OpenRouter models when form is opened (or connected status shown)
+  // Fetch OpenRouter models when form is opened or any openrouter is connected
+  const anyOpenrouterConnected = localState.openrouterStatus.connected || vpsState.openrouterStatus.connected;
   useEffect(() => {
-    if ((showOpenrouterForm || openrouterStatus.connected) && openrouterModels.length === 0 && !loadingModels) {
+    if ((showOpenrouterForm || anyOpenrouterConnected) && openrouterModels.length === 0 && !loadingModels) {
       fetchOpenRouterModels();
     }
-  }, [showOpenrouterForm, openrouterStatus.connected]);
+  }, [showOpenrouterForm, anyOpenrouterConnected]);
 
   async function fetchOpenRouterModels() {
     if (modelsCache) {
@@ -164,39 +193,56 @@ export default function IntegrationsPanel() {
     }
   }
 
+  function getEnvState(env: CredentialEnvironment): EnvCredentialState {
+    return env === 'local' ? localState : vpsState;
+  }
+
+  function setEnvState(env: CredentialEnvironment, state: EnvCredentialState) {
+    if (env === 'local') setLocalState(state);
+    else setVpsState(state);
+  }
+
   async function loadStatuses() {
     setLoading(true);
     try {
-      const [anthro, gh, or] = await Promise.all([
-        api.get<CredentialStatus>('/api/credentials/anthropic/status'),
+      const [localAnthro, localOr, vpsAnthro, vpsOr, gh, claudeLogin] = await Promise.all([
+        api.get<CredentialStatus>('/api/credentials/anthropic/status?environment=local'),
+        api.get<CredentialStatus>('/api/credentials/openrouter/status?environment=local'),
+        api.get<CredentialStatus>('/api/credentials/anthropic/status?environment=vps'),
+        api.get<CredentialStatus>('/api/credentials/openrouter/status?environment=vps'),
         api.get<CredentialStatus>('/api/credentials/github/status'),
-        api.get<CredentialStatus>('/api/credentials/openrouter/status'),
+        api.get<{ detected: boolean }>('/api/credentials/claude-login-status').catch(() => ({ detected: false })),
       ]);
-      setAnthropicStatus(anthro);
-      setGithubStatus(gh);
-      setOpenrouterStatus(or);
 
-      // Populate model dropdowns from stored metadata
-      if (or.connected && or.metadata) {
-        if (or.metadata.opusModel) setOpusModel(or.metadata.opusModel);
-        if (or.metadata.sonnetModel) setSonnetModel(or.metadata.sonnetModel);
-        if (or.metadata.haikuModel) setHaikuModel(or.metadata.haikuModel);
+      setLocalState({ anthropicStatus: localAnthro, openrouterStatus: localOr });
+      setVpsState({ anthropicStatus: vpsAnthro, openrouterStatus: vpsOr });
+      setGithubStatus(gh);
+      setClaudeOauthDetected(claudeLogin.detected);
+
+      // Populate model dropdowns from stored metadata (prefer current env)
+      const orStatus = (dashboardEnv === 'local' ? localOr : vpsOr);
+      if (orStatus.connected && orStatus.metadata) {
+        if (orStatus.metadata.opusModel) setOpusModel(orStatus.metadata.opusModel);
+        if (orStatus.metadata.sonnetModel) setSonnetModel(orStatus.metadata.sonnetModel);
+        if (orStatus.metadata.haikuModel) setHaikuModel(orStatus.metadata.haikuModel);
       }
 
-      // Auto-detect local env credentials for any disconnected provider
-      if (!anthro.connected || !gh.connected || !or.connected) {
+      // Auto-detect for current dashboard env
+      const currentEnv = dashboardEnv === 'local' ? localAnthro : vpsAnthro;
+      const currentOr = dashboardEnv === 'local' ? localOr : vpsOr;
+      if (!currentEnv.connected || !gh.connected || !currentOr.connected) {
         try {
           const { detected } = await api.post<{ detected: { provider: string; saved: boolean }[] }>('/api/credentials/auto-detect', {});
           if (detected.length > 0) {
-            // Re-fetch statuses if anything was detected
-            const [anthro2, gh2, or2] = await Promise.all([
-              api.get<CredentialStatus>('/api/credentials/anthropic/status'),
+            // Re-fetch statuses for current env
+            const env = dashboardEnv;
+            const [anthro2, or2, gh2] = await Promise.all([
+              api.get<CredentialStatus>(`/api/credentials/anthropic/status?environment=${env}`),
+              api.get<CredentialStatus>(`/api/credentials/openrouter/status?environment=${env}`),
               api.get<CredentialStatus>('/api/credentials/github/status'),
-              api.get<CredentialStatus>('/api/credentials/openrouter/status'),
             ]);
-            setAnthropicStatus(anthro2);
+            setEnvState(env, { anthropicStatus: anthro2, openrouterStatus: or2 });
             setGithubStatus(gh2);
-            setOpenrouterStatus(or2);
             if (or2.connected && or2.metadata) {
               if (or2.metadata.opusModel) setOpusModel(or2.metadata.opusModel);
               if (or2.metadata.sonnetModel) setSonnetModel(or2.metadata.sonnetModel);
@@ -204,7 +250,7 @@ export default function IntegrationsPanel() {
             }
           }
         } catch {
-          // Auto-detect is best-effort, ignore failures
+          // Auto-detect is best-effort
         }
       }
     } catch (err) {
@@ -214,23 +260,50 @@ export default function IntegrationsPanel() {
     }
   }
 
-  function showToast(msg: string) {
-    setToast(msg);
+  function showSuccessToast(msg: string) {
+    setToast({ message: msg, type: 'success' });
     setTimeout(() => setToast(null), 3000);
   }
 
-  async function handleSaveAnthropic(e: React.FormEvent) {
+  function showErrorToast(msg: string) {
+    setToast({ message: msg, type: 'error' });
+    setTimeout(() => setToast(null), 5000);
+  }
+
+  async function handleSaveAnthropic(e: React.FormEvent, environment: CredentialEnvironment) {
     e.preventDefault();
     if (!anthropicKey.trim()) return;
+
+    const envState = getEnvState(environment);
+    if (envState.openrouterStatus.connected) {
+      setPendingSave({
+        provider: 'anthropic',
+        environment,
+        competingProvider: 'OpenRouter',
+        execute: async () => {
+          await doSaveAnthropic(environment);
+        },
+      });
+      return;
+    }
+
+    await doSaveAnthropic(environment);
+  }
+
+  async function doSaveAnthropic(environment: CredentialEnvironment) {
     setSavingAnthropic(true);
     try {
-      const result = await api.put<CredentialStatus>('/api/credentials/anthropic', { apiKey: anthropicKey.trim() });
-      setAnthropicStatus(result);
+      const result = await api.put<CredentialStatus>('/api/credentials/anthropic', {
+        apiKey: anthropicKey.trim(),
+        environment,
+      });
+      const envState = getEnvState(environment);
+      setEnvState(environment, { ...envState, anthropicStatus: result, openrouterStatus: { connected: false } });
       setAnthropicKey('');
       setShowAnthropicForm(false);
-      showToast('Anthropic API key saved');
-    } catch (err) {
-      console.error('Failed to save Anthropic key:', err);
+      showSuccessToast('Anthropic API key saved');
+    } catch (err: any) {
+      showErrorToast(err.message || 'Failed to save Anthropic key');
     } finally {
       setSavingAnthropic(false);
     }
@@ -245,17 +318,35 @@ export default function IntegrationsPanel() {
       setGithubStatus(result);
       setGithubToken('');
       setShowGithubForm(false);
-      showToast('GitHub token saved');
-    } catch (err) {
-      console.error('Failed to save GitHub token:', err);
+      showSuccessToast('GitHub token saved');
+    } catch (err: any) {
+      showErrorToast(err.message || 'Failed to save GitHub token');
     } finally {
       setSavingGithub(false);
     }
   }
 
-  async function handleSaveOpenrouter(e: React.FormEvent) {
+  async function handleSaveOpenrouter(e: React.FormEvent, environment: CredentialEnvironment) {
     e.preventDefault();
     if (!openrouterKey.trim()) return;
+
+    const envState = getEnvState(environment);
+    if (envState.anthropicStatus.connected) {
+      setPendingSave({
+        provider: 'openrouter',
+        environment,
+        competingProvider: 'Anthropic',
+        execute: async () => {
+          await doSaveOpenrouter(environment);
+        },
+      });
+      return;
+    }
+
+    await doSaveOpenrouter(environment);
+  }
+
+  async function doSaveOpenrouter(environment: CredentialEnvironment) {
     setSavingOpenrouter(true);
     try {
       const result = await api.put<CredentialStatus>('/api/credentials/openrouter', {
@@ -263,35 +354,48 @@ export default function IntegrationsPanel() {
         opusModel,
         sonnetModel,
         haikuModel,
+        environment,
       });
-      setOpenrouterStatus(result);
+      const envState = getEnvState(environment);
+      setEnvState(environment, { ...envState, openrouterStatus: result, anthropicStatus: { connected: false } });
       setOpenrouterKey('');
       setShowOpenrouterForm(false);
-      showToast('OpenRouter API key saved');
-    } catch (err) {
-      console.error('Failed to save OpenRouter key:', err);
+      showSuccessToast('OpenRouter API key saved');
+    } catch (err: any) {
+      showErrorToast(err.message || 'Failed to save OpenRouter key');
     } finally {
       setSavingOpenrouter(false);
     }
   }
 
-  async function handleDisconnect(provider: 'anthropic' | 'github' | 'openrouter') {
+  async function handleDisconnect(provider: 'anthropic' | 'github' | 'openrouter', environment?: CredentialEnvironment) {
     setDisconnecting(provider);
     try {
-      await api.delete(`/api/credentials/${provider}`);
-      if (provider === 'anthropic') {
-        setAnthropicStatus({ connected: false });
-      } else if (provider === 'github') {
+      const envParam = environment ? `?environment=${environment}` : '';
+      await api.delete(`/api/credentials/${provider}${envParam}`);
+      if (provider === 'github') {
         setGithubStatus({ connected: false });
-      } else {
-        setOpenrouterStatus({ connected: false });
+      } else if (environment) {
+        const envState = getEnvState(environment);
+        if (provider === 'anthropic') {
+          setEnvState(environment, { ...envState, anthropicStatus: { connected: false } });
+        } else {
+          setEnvState(environment, { ...envState, openrouterStatus: { connected: false } });
+        }
       }
       const names = { anthropic: 'Claude Code', github: 'GitHub', openrouter: 'OpenRouter' };
-      showToast(`${names[provider]} disconnected`);
-    } catch (err) {
-      console.error('Failed to disconnect:', err);
+      showSuccessToast(`${names[provider]} disconnected`);
+    } catch (err: any) {
+      showErrorToast(err.message || 'Failed to disconnect');
     } finally {
       setDisconnecting(null);
+    }
+  }
+
+  function handleConfirmSwitch() {
+    if (pendingSave) {
+      pendingSave.execute();
+      setPendingSave(null);
     }
   }
 
@@ -307,35 +411,16 @@ export default function IntegrationsPanel() {
     return null;
   }
 
-  return (
-    <div className="space-y-4">
-      {toast && (
-        <div className="bg-success/10 border border-success/20 text-success rounded-lg px-4 py-2 text-sm">
-          {toast}
-        </div>
-      )}
+  const envLabel = (env: CredentialEnvironment) => env === 'local' ? 'Local' : 'VPS';
+  const providerName = (p: 'anthropic' | 'openrouter') => p === 'anthropic' ? 'Anthropic' : 'OpenRouter';
+  const currentTabEnv = activeTab as CredentialEnvironment;
 
-      {/* Warning when both Anthropic and OpenRouter are connected */}
-      {anthropicStatus.connected && openrouterStatus.connected && (
-        <div className="bg-warning/10 border border-warning/20 text-warning rounded-lg px-4 py-3 text-sm flex items-start gap-2">
-          <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-          </svg>
-          <p>Both Anthropic and OpenRouter are connected. OpenRouter will take precedence for routing Claude Code requests. Disconnect one if this is unintended.</p>
-        </div>
-      )}
+  function renderAnthropicCard(environment: CredentialEnvironment) {
+    const envState = getEnvState(environment);
+    const status = envState.anthropicStatus;
+    const isLocal = environment === 'local';
 
-      <h3 className="text-base font-semibold text-text flex items-center gap-2">
-        <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.536a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.497" />
-        </svg>
-        Integrations
-      </h3>
-
-      {/* ── All Environments ── */}
-      <p className="text-xs font-medium text-text-muted uppercase tracking-wide">All Environments</p>
-
-      {/* Claude Code Card */}
+    return (
       <div className="bg-bg-surface border border-border rounded-xl p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -344,9 +429,9 @@ export default function IntegrationsPanel() {
             </div>
             <div>
               <h4 className="text-sm font-semibold text-text">Claude Code</h4>
-              {anthropicStatus.connected ? (
+              {status.connected ? (
                 <p className="text-xs text-text-muted">
-                  Connected &middot; <span className="font-mono">{anthropicStatus.metadata?.keyPrefix}</span>
+                  Connected &middot; <span className="font-mono">{status.metadata?.keyPrefix}</span>
                 </p>
               ) : (
                 <p className="text-xs text-text-muted">Add your Anthropic API key</p>
@@ -354,24 +439,34 @@ export default function IntegrationsPanel() {
             </div>
           </div>
 
-          {anthropicStatus.connected ? (
+          {status.connected ? (
             <Button
               variant="ghost"
               size="sm"
               className="text-danger hover:text-danger-dark"
-              onClick={() => handleDisconnect('anthropic')}
+              onClick={() => handleDisconnect('anthropic', environment)}
               disabled={disconnecting === 'anthropic'}
             >
               {disconnecting === 'anthropic' ? 'Disconnecting...' : 'Disconnect'}
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => setShowAnthropicForm(!showAnthropicForm)}>
+            <Button variant="outline" size="sm" onClick={() => { setShowAnthropicForm(!showAnthropicForm); setShowOpenrouterForm(false); }}>
               Connect
             </Button>
           )}
         </div>
 
-        {showAnthropicForm && !anthropicStatus.connected && (
+        {/* Claude OAuth detection banner (Local tab only) */}
+        {isLocal && claudeOauthDetected && !status.connected && (
+          <div className="mt-3 p-3 bg-success/10 border border-success/20 rounded-lg text-sm text-success flex items-start gap-2">
+            <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p>Claude Code session detected &mdash; connected via Claude subscription.</p>
+          </div>
+        )}
+
+        {showAnthropicForm && !status.connected && (
           <div className="mt-4 space-y-3">
             <div className="p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-2">
               <p className="font-medium text-text text-sm">Get an API key:</p>
@@ -379,17 +474,21 @@ export default function IntegrationsPanel() {
                 <li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline">console.anthropic.com/settings/keys</a></li>
                 <li>Click "Create Key" and copy it</li>
               </ol>
-              <p className="mt-2">
-                You can also use <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> via SSH for OAuth with a Claude subscription (Pro, Max, Team, Enterprise).
-              </p>
-              <p className="mt-1">
-                <button type="button" onClick={() => setShowTerminal(true)} className="text-primary underline hover:text-primary-dark">
-                  Open a terminal
-                </button> to run <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> directly.
-              </p>
+              {isLocal && (
+                <>
+                  <p className="mt-2">
+                    You can also use <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> via SSH for OAuth with a Claude subscription (Pro, Max, Team, Enterprise).
+                  </p>
+                  <p className="mt-1">
+                    <button type="button" onClick={() => setShowTerminal(true)} className="text-primary underline hover:text-primary-dark">
+                      Open a terminal
+                    </button> to run <code className="px-1 py-0.5 bg-bg-surface rounded font-mono text-text">claude login</code> directly.
+                  </p>
+                </>
+              )}
             </div>
 
-            <form onSubmit={handleSaveAnthropic} className="space-y-3">
+            <form onSubmit={(e) => handleSaveAnthropic(e, environment)} className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-text-muted mb-1">API Key</label>
                 <input
@@ -413,8 +512,14 @@ export default function IntegrationsPanel() {
           </div>
         )}
       </div>
+    );
+  }
 
-      {/* OpenRouter Card */}
+  function renderOpenrouterCard(environment: CredentialEnvironment) {
+    const envState = getEnvState(environment);
+    const status = envState.openrouterStatus;
+
+    return (
       <div className="bg-bg-surface border border-border rounded-xl p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -423,9 +528,9 @@ export default function IntegrationsPanel() {
             </div>
             <div>
               <h4 className="text-sm font-semibold text-text">OpenRouter</h4>
-              {openrouterStatus.connected ? (
+              {status.connected ? (
                 <p className="text-xs text-text-muted">
-                  Connected &middot; <span className="font-mono">{openrouterStatus.metadata?.keyPrefix}</span>
+                  Connected &middot; <span className="font-mono">{status.metadata?.keyPrefix}</span>
                 </p>
               ) : (
                 <p className="text-xs text-text-muted">Route through OpenRouter API</p>
@@ -433,33 +538,33 @@ export default function IntegrationsPanel() {
             </div>
           </div>
 
-          {openrouterStatus.connected ? (
+          {status.connected ? (
             <Button
               variant="ghost"
               size="sm"
               className="text-danger hover:text-danger-dark"
-              onClick={() => handleDisconnect('openrouter')}
+              onClick={() => handleDisconnect('openrouter', environment)}
               disabled={disconnecting === 'openrouter'}
             >
               {disconnecting === 'openrouter' ? 'Disconnecting...' : 'Disconnect'}
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => setShowOpenrouterForm(!showOpenrouterForm)}>
+            <Button variant="outline" size="sm" onClick={() => { setShowOpenrouterForm(!showOpenrouterForm); setShowAnthropicForm(false); }}>
               Connect
             </Button>
           )}
         </div>
 
         {/* Connected: show model mappings */}
-        {openrouterStatus.connected && openrouterStatus.metadata && (
+        {status.connected && status.metadata && (
           <div className="mt-3 p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-1">
-            <p><span className="font-medium text-text">Opus:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.opusModel)?.name || openrouterStatus.metadata.opusModel}</p>
-            <p><span className="font-medium text-text">Sonnet:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.sonnetModel)?.name || openrouterStatus.metadata.sonnetModel}</p>
-            <p><span className="font-medium text-text">Haiku:</span> {openrouterModels.find(m => m.id === openrouterStatus.metadata?.haikuModel)?.name || openrouterStatus.metadata.haikuModel}</p>
+            <p><span className="font-medium text-text">Opus:</span> {openrouterModels.find(m => m.id === status.metadata?.opusModel)?.name || status.metadata.opusModel}</p>
+            <p><span className="font-medium text-text">Sonnet:</span> {openrouterModels.find(m => m.id === status.metadata?.sonnetModel)?.name || status.metadata.sonnetModel}</p>
+            <p><span className="font-medium text-text">Haiku:</span> {openrouterModels.find(m => m.id === status.metadata?.haikuModel)?.name || status.metadata.haikuModel}</p>
           </div>
         )}
 
-        {showOpenrouterForm && !openrouterStatus.connected && (
+        {showOpenrouterForm && !status.connected && (
           <div className="mt-4 space-y-3">
             <div className="p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-2">
               <p className="font-medium text-text text-sm">Get an API key:</p>
@@ -472,7 +577,7 @@ export default function IntegrationsPanel() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveOpenrouter} className="space-y-3">
+            <form onSubmit={(e) => handleSaveOpenrouter(e, environment)} className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-text-muted mb-1">API Key</label>
                 <input
@@ -527,11 +632,11 @@ export default function IntegrationsPanel() {
           </div>
         )}
       </div>
+    );
+  }
 
-      {/* ── VPS Only ── */}
-      <p className="text-xs font-medium text-text-muted uppercase tracking-wide pt-2">VPS Only</p>
-
-      {/* GitHub Card */}
+  function renderGithubCard() {
+    return (
       <div className="bg-bg-surface border border-border rounded-xl p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -609,6 +714,50 @@ export default function IntegrationsPanel() {
           </div>
         )}
       </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Toast */}
+      {toast && (
+        <div className={`${
+          toast.type === 'success'
+            ? 'bg-success/10 border-success/20 text-success'
+            : 'bg-danger/10 border-danger/20 text-danger'
+        } border rounded-lg px-4 py-2 text-sm`}>
+          {toast.message}
+        </div>
+      )}
+
+      <h3 className="text-base font-semibold text-text flex items-center gap-2">
+        <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.536a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.497" />
+        </svg>
+        Integrations
+      </h3>
+
+      <Tabs defaultValue={dashboardEnv} onValueChange={(v) => { setActiveTab(v); setShowAnthropicForm(false); setShowOpenrouterForm(false); setShowGithubForm(false); }}>
+        <div className="border-b border-border">
+          <TabsList>
+            <TabsTrigger value="local">Local</TabsTrigger>
+            <TabsTrigger value="vps">VPS</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="local" className="pt-4 space-y-4">
+          {renderAnthropicCard('local')}
+          {renderOpenrouterCard('local')}
+        </TabsContent>
+
+        <TabsContent value="vps" className="pt-4 space-y-4">
+          {renderAnthropicCard('vps')}
+          {renderOpenrouterCard('vps')}
+
+          <p className="text-xs font-medium text-text-muted uppercase tracking-wide pt-2">VPS Only</p>
+          {renderGithubCard()}
+        </TabsContent>
+      </Tabs>
 
       {/* Terminal section */}
       {showTerminal ? (
@@ -623,6 +772,26 @@ export default function IntegrationsPanel() {
           </svg>
           Open Terminal
         </button>
+      )}
+
+      {/* Mutual exclusivity confirmation modal */}
+      {pendingSave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setPendingSave(null)}>
+          <div className="card w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-3">Switch AI Provider?</h3>
+            <p className="text-sm text-text-muted mb-5">
+              Switching to {providerName(pendingSave.provider)} will disconnect {pendingSave.competingProvider} on your {envLabel(pendingSave.environment)} environment. Continue?
+            </p>
+            <div className="flex items-center gap-2 justify-end">
+              <Button variant="ghost" size="sm" onClick={() => setPendingSave(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleConfirmSwitch}>
+                Continue
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

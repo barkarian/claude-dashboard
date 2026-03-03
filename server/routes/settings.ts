@@ -102,24 +102,35 @@ async function readGhCliToken(): Promise<string | null> {
   }
 }
 
+// GET /api/credentials/claude-login-status — check if Claude Code OAuth token exists in keychain
+router.get('/credentials/claude-login-status', async (req: Request, res: Response) => {
+  try {
+    const token = await readClaudeKeychainToken();
+    res.json({ detected: !!token, source: token ? 'keychain' : undefined });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to check Claude login status' });
+  }
+});
+
 // POST /api/credentials/auto-detect — detect local credentials (env vars, keychain, CLI configs)
 router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
   try {
     const results: { provider: string; saved: boolean; source?: string }[] = [];
 
+    const env = config.dashboardEnv;
+
     // Anthropic: env var → macOS Keychain (Claude Code OAuth)
     const anthropicKey = process.env.ANTHROPIC_API_KEY || await readClaudeKeychainToken();
     if (anthropicKey) {
       try {
-        const keyPrefix = anthropicKey.slice(0, 10) + '...';
-        await credentialService.setToken('anthropic', anthropicKey);
+        await credentialService.setToken('anthropic', anthropicKey, undefined, env);
         results.push({ provider: 'anthropic', saved: true, source: process.env.ANTHROPIC_API_KEY ? 'env' : 'keychain' });
       } catch {
         results.push({ provider: 'anthropic', saved: false });
       }
     }
 
-    // GitHub: env var → gh CLI auth token
+    // GitHub: env var → gh CLI auth token (no environment)
     const githubToken = process.env.GITHUB_TOKEN || await readGhCliToken();
     if (githubToken) {
       try {
@@ -134,7 +145,7 @@ router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     if (openrouterKey) {
       try {
-        await credentialService.setToken('openrouter', openrouterKey);
+        await credentialService.setToken('openrouter', openrouterKey, undefined, env);
         results.push({ provider: 'openrouter', saved: true, source: 'env' });
       } catch {
         results.push({ provider: 'openrouter', saved: false });
@@ -151,11 +162,12 @@ router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
 // PUT /api/credentials/anthropic — save Anthropic API key
 router.put('/credentials/anthropic', async (req: Request, res: Response) => {
   try {
-    const { apiKey } = req.body;
+    const { apiKey, environment } = req.body;
     if (!apiKey) {
       return res.status(400).json({ error: 'apiKey is required' });
     }
-    const result = await credentialService.setToken('anthropic', apiKey);
+    const env = (environment === 'local' || environment === 'vps') ? environment : undefined;
+    const result = await credentialService.setToken('anthropic', apiKey, undefined, env);
     res.json(result);
   } catch (err: any) {
     console.error('Error saving Anthropic key:', err);
@@ -181,11 +193,12 @@ router.put('/credentials/github', async (req: Request, res: Response) => {
 // PUT /api/credentials/openrouter — save OpenRouter API key with model mappings
 router.put('/credentials/openrouter', async (req: Request, res: Response) => {
   try {
-    const { apiKey, opusModel, sonnetModel, haikuModel } = req.body;
+    const { apiKey, opusModel, sonnetModel, haikuModel, environment } = req.body;
     if (!apiKey) {
       return res.status(400).json({ error: 'apiKey is required' });
     }
-    const result = await credentialService.setToken('openrouter', apiKey, { opusModel, sonnetModel, haikuModel });
+    const env = (environment === 'local' || environment === 'vps') ? environment : undefined;
+    const result = await credentialService.setToken('openrouter', apiKey, { opusModel, sonnetModel, haikuModel }, env);
     res.json(result);
   } catch (err: any) {
     console.error('Error saving OpenRouter key:', err);
@@ -211,7 +224,9 @@ router.get('/credentials/:provider/status', async (req: Request<{ provider: stri
     if (provider !== 'anthropic' && provider !== 'github' && provider !== 'openrouter') {
       return res.status(400).json({ error: 'Invalid provider' });
     }
-    const status = await credentialService.getStatus(provider);
+    const env = req.query.environment as string | undefined;
+    const environment = (env === 'local' || env === 'vps') ? env : undefined;
+    const status = await credentialService.getStatus(provider, environment);
     res.json(status);
   } catch (err: any) {
     console.error('Error getting credential status:', err);
@@ -226,7 +241,9 @@ router.delete('/credentials/:provider', async (req: Request<{ provider: string }
     if (provider !== 'anthropic' && provider !== 'github' && provider !== 'openrouter') {
       return res.status(400).json({ error: 'Invalid provider' });
     }
-    await credentialService.disconnectProvider(provider);
+    const env = req.query.environment as string | undefined;
+    const environment = (env === 'local' || env === 'vps') ? env : undefined;
+    await credentialService.disconnectProvider(provider, environment);
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error disconnecting provider:', err);

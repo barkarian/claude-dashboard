@@ -7,7 +7,7 @@ import SshAccessPanel from '../components/settings/SshAccessPanel.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
 
 export default function SettingsPage() {
-  const { user, dashboardEnv } = useAuth();
+  const { user } = useAuth();
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -20,9 +20,7 @@ export default function SettingsPage() {
           {user?.plan === 'pro' && <VpsStatusSection />}
           <IntegrationsPanel />
           <div>
-            {dashboardEnv === 'local' && (
-              <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-4">VPS Only</p>
-            )}
+            <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-4">VPS Only</p>
             <SshAccessPanel />
           </div>
         </div>

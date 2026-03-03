@@ -6,11 +6,13 @@ import config from '../config.ts';
 import tunnelManager from './tunnelManager.ts';
 
 type CredentialProvider = 'anthropic' | 'github' | 'openrouter';
+type CredentialEnvironment = 'local' | 'vps';
 
 interface Credential {
   provider: CredentialProvider;
   token: string;
   metadata: Record<string, any> | null;
+  environment: CredentialEnvironment | null;
 }
 
 interface CredentialStatus {
@@ -68,8 +70,13 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
     envContent = fs.readFileSync(envPath, 'utf-8');
   }
 
+  // Filter to only credentials matching this dashboard's environment (or null for github/legacy)
+  const filtered = credentials.filter(c =>
+    c.environment === config.dashboardEnv || c.environment === null
+  );
+
   // Sort credentials so openrouter is processed last (takes precedence for ANTHROPIC_API_KEY)
-  const sorted = [...credentials].sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     if (a.provider === 'openrouter') return 1;
     if (b.provider === 'openrouter') return -1;
     return 0;
@@ -106,7 +113,7 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
   }
 
   // Remove env vars for credentials that are no longer present
-  const providers = credentials.map(c => c.provider);
+  const providers = filtered.map(c => c.provider);
   if (!providers.includes('anthropic')) {
     envContent = removeEnvVar(envContent, 'ANTHROPIC_API_KEY');
     delete process.env.ANTHROPIC_API_KEY;
@@ -139,7 +146,7 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
 
   // Also write to system-wide and user shell profile so SSH sessions get the vars
   if (config.isVps) {
-    updateSystemEnv(credentials);
+    updateSystemEnv(filtered);
   }
 }
 
@@ -224,14 +231,15 @@ function removeEnvVar(content: string, key: string): string {
   return content.replace(regex, '');
 }
 
-async function getStatus(provider: CredentialProvider): Promise<CredentialStatus> {
+async function getStatus(provider: CredentialProvider, environment?: CredentialEnvironment): Promise<CredentialStatus> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     return { connected: false };
   }
 
   try {
-    const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}/status`, {
+    const envParam = environment ? `?environment=${environment}` : '';
+    const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}/status${envParam}`, {
       headers: {
         'Authorization': `users API-Key ${creds.apiKey}`,
       },
@@ -247,7 +255,7 @@ async function getStatus(provider: CredentialProvider): Promise<CredentialStatus
   }
 }
 
-async function setToken(provider: CredentialProvider, token: string, metadata?: Record<string, any>): Promise<CredentialStatus> {
+async function setToken(provider: CredentialProvider, token: string, metadata?: Record<string, any>, environment?: CredentialEnvironment): Promise<CredentialStatus> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     throw new Error('No tunnel credentials or service URL configured');
@@ -260,6 +268,10 @@ async function setToken(provider: CredentialProvider, token: string, metadata?: 
     body = { apiKey: token, ...metadata };
   } else {
     body = { token };
+  }
+
+  if (environment) {
+    body.environment = environment;
   }
 
   const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}`, {
@@ -286,13 +298,14 @@ async function setToken(provider: CredentialProvider, token: string, metadata?: 
   return result;
 }
 
-async function disconnectProvider(provider: CredentialProvider): Promise<void> {
+async function disconnectProvider(provider: CredentialProvider, environment?: CredentialEnvironment): Promise<void> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     throw new Error('No tunnel credentials or service URL configured');
   }
 
-  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}`, {
+  const envParam = environment ? `?environment=${environment}` : '';
+  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}${envParam}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `users API-Key ${creds.apiKey}`,
