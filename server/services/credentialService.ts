@@ -5,8 +5,10 @@ import { execSync } from 'child_process';
 import config from '../config.ts';
 import tunnelManager from './tunnelManager.ts';
 
+type CredentialProvider = 'anthropic' | 'github' | 'openrouter';
+
 interface Credential {
-  provider: 'anthropic' | 'github';
+  provider: CredentialProvider;
   token: string;
   metadata: Record<string, any> | null;
 }
@@ -66,7 +68,14 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
     envContent = fs.readFileSync(envPath, 'utf-8');
   }
 
-  for (const cred of credentials) {
+  // Sort credentials so openrouter is processed last (takes precedence for ANTHROPIC_API_KEY)
+  const sorted = [...credentials].sort((a, b) => {
+    if (a.provider === 'openrouter') return 1;
+    if (b.provider === 'openrouter') return -1;
+    return 0;
+  });
+
+  for (const cred of sorted) {
     if (cred.provider === 'anthropic') {
       envContent = setEnvVar(envContent, 'ANTHROPIC_API_KEY', cred.token);
       process.env.ANTHROPIC_API_KEY = cred.token;
@@ -84,6 +93,15 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
       } catch (err) {
         console.error('[credentials] Failed to authenticate gh CLI:', err);
       }
+    } else if (cred.provider === 'openrouter') {
+      envContent = setEnvVar(envContent, 'OPENROUTER_API_KEY', cred.token);
+      envContent = setEnvVar(envContent, 'ANTHROPIC_BASE_URL', 'https://openrouter.ai/api');
+      envContent = setEnvVar(envContent, 'ANTHROPIC_AUTH_TOKEN', cred.token);
+      envContent = setEnvVar(envContent, 'ANTHROPIC_API_KEY', '');
+      process.env.OPENROUTER_API_KEY = cred.token;
+      process.env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
+      process.env.ANTHROPIC_AUTH_TOKEN = cred.token;
+      process.env.ANTHROPIC_API_KEY = '';
     }
   }
 
@@ -108,6 +126,14 @@ async function applyCredentials(credentials: Credential[]): Promise<void> {
       // Ignore — may not be logged in
     }
   }
+  if (!providers.includes('openrouter')) {
+    envContent = removeEnvVar(envContent, 'OPENROUTER_API_KEY');
+    envContent = removeEnvVar(envContent, 'ANTHROPIC_BASE_URL');
+    envContent = removeEnvVar(envContent, 'ANTHROPIC_AUTH_TOKEN');
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+  }
 
   fs.writeFileSync(envPath, envContent);
 
@@ -123,6 +149,9 @@ function updateSystemEnv(credentials: Credential[]): void {
   const envVars: Record<string, string | null> = {
     ANTHROPIC_API_KEY: null,
     GITHUB_TOKEN: null,
+    OPENROUTER_API_KEY: null,
+    ANTHROPIC_BASE_URL: null,
+    ANTHROPIC_AUTH_TOKEN: null,
   };
 
   for (const cred of credentials) {
@@ -130,6 +159,11 @@ function updateSystemEnv(credentials: Credential[]): void {
       envVars.ANTHROPIC_API_KEY = cred.token;
     } else if (cred.provider === 'github') {
       envVars.GITHUB_TOKEN = cred.token;
+    } else if (cred.provider === 'openrouter') {
+      envVars.OPENROUTER_API_KEY = cred.token;
+      envVars.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api';
+      envVars.ANTHROPIC_AUTH_TOKEN = cred.token;
+      envVars.ANTHROPIC_API_KEY = '';
     }
   }
 
@@ -138,7 +172,7 @@ function updateSystemEnv(credentials: Credential[]): void {
   try {
     let content = fs.existsSync(etcEnvPath) ? fs.readFileSync(etcEnvPath, 'utf-8') : '';
     for (const [key, value] of Object.entries(envVars)) {
-      if (value) {
+      if (value !== null) {
         content = setEnvVar(content, key, value);
       } else {
         content = removeEnvVar(content, key);
@@ -156,7 +190,7 @@ function updateSystemEnv(credentials: Credential[]): void {
     for (const [key, value] of Object.entries(envVars)) {
       const exportRegex = new RegExp(`^export ${key}=.*$`, 'm');
       const exportLine = `export ${key}=${value}`;
-      if (value) {
+      if (value !== null) {
         if (exportRegex.test(content)) {
           content = content.replace(exportRegex, exportLine);
         } else {
@@ -190,7 +224,7 @@ function removeEnvVar(content: string, key: string): string {
   return content.replace(regex, '');
 }
 
-async function getStatus(provider: 'anthropic' | 'github'): Promise<CredentialStatus> {
+async function getStatus(provider: CredentialProvider): Promise<CredentialStatus> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     return { connected: false };
@@ -213,13 +247,20 @@ async function getStatus(provider: 'anthropic' | 'github'): Promise<CredentialSt
   }
 }
 
-async function setToken(provider: 'anthropic' | 'github', token: string): Promise<CredentialStatus> {
+async function setToken(provider: CredentialProvider, token: string, metadata?: Record<string, any>): Promise<CredentialStatus> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     throw new Error('No tunnel credentials or service URL configured');
   }
 
-  const body = provider === 'anthropic' ? { apiKey: token } : { token };
+  let body: Record<string, any>;
+  if (provider === 'anthropic') {
+    body = { apiKey: token };
+  } else if (provider === 'openrouter') {
+    body = { apiKey: token, ...metadata };
+  } else {
+    body = { token };
+  }
 
   const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/${provider}`, {
     method: 'PUT',
@@ -245,7 +286,7 @@ async function setToken(provider: 'anthropic' | 'github', token: string): Promis
   return result;
 }
 
-async function disconnectProvider(provider: 'anthropic' | 'github'): Promise<void> {
+async function disconnectProvider(provider: CredentialProvider): Promise<void> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) {
     throw new Error('No tunnel credentials or service URL configured');

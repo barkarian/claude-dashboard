@@ -9,13 +9,25 @@ interface CredentialStatus {
   metadata?: {
     keyPrefix?: string;
     tokenPrefix?: string;
+    opusModel?: string;
+    sonnetModel?: string;
+    haikuModel?: string;
   };
 }
+
+const MODEL_OPTIONS = [
+  { label: 'claude-opus-4', value: 'anthropic/claude-opus-4' },
+  { label: 'claude-sonnet-4', value: 'anthropic/claude-sonnet-4' },
+  { label: 'claude-haiku-4', value: 'anthropic/claude-haiku-4' },
+  { label: 'claude-3.5-sonnet', value: 'anthropic/claude-3.5-sonnet' },
+  { label: 'claude-3.5-haiku', value: 'anthropic/claude-3.5-haiku' },
+];
 
 export default function IntegrationsPanel() {
   const { user } = useAuth();
   const [anthropicStatus, setAnthropicStatus] = useState<CredentialStatus>({ connected: false });
   const [githubStatus, setGithubStatus] = useState<CredentialStatus>({ connected: false });
+  const [openrouterStatus, setOpenrouterStatus] = useState<CredentialStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
 
   const [showAnthropicForm, setShowAnthropicForm] = useState(false);
@@ -25,6 +37,13 @@ export default function IntegrationsPanel() {
   const [showGithubForm, setShowGithubForm] = useState(false);
   const [githubToken, setGithubToken] = useState('');
   const [savingGithub, setSavingGithub] = useState(false);
+
+  const [showOpenrouterForm, setShowOpenrouterForm] = useState(false);
+  const [openrouterKey, setOpenrouterKey] = useState('');
+  const [opusModel, setOpusModel] = useState('anthropic/claude-opus-4');
+  const [sonnetModel, setSonnetModel] = useState('anthropic/claude-sonnet-4');
+  const [haikuModel, setHaikuModel] = useState('anthropic/claude-haiku-4');
+  const [savingOpenrouter, setSavingOpenrouter] = useState(false);
 
   const [showTerminal, setShowTerminal] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -37,25 +56,41 @@ export default function IntegrationsPanel() {
   async function loadStatuses() {
     setLoading(true);
     try {
-      const [anthro, gh] = await Promise.all([
+      const [anthro, gh, or] = await Promise.all([
         api.get<CredentialStatus>('/api/credentials/anthropic/status'),
         api.get<CredentialStatus>('/api/credentials/github/status'),
+        api.get<CredentialStatus>('/api/credentials/openrouter/status'),
       ]);
       setAnthropicStatus(anthro);
       setGithubStatus(gh);
+      setOpenrouterStatus(or);
+
+      // Populate model dropdowns from stored metadata
+      if (or.connected && or.metadata) {
+        if (or.metadata.opusModel) setOpusModel(or.metadata.opusModel);
+        if (or.metadata.sonnetModel) setSonnetModel(or.metadata.sonnetModel);
+        if (or.metadata.haikuModel) setHaikuModel(or.metadata.haikuModel);
+      }
 
       // Auto-detect local env credentials for any disconnected provider
-      if (!anthro.connected || !gh.connected) {
+      if (!anthro.connected || !gh.connected || !or.connected) {
         try {
           const { detected } = await api.post<{ detected: { provider: string; saved: boolean }[] }>('/api/credentials/auto-detect', {});
           if (detected.length > 0) {
             // Re-fetch statuses if anything was detected
-            const [anthro2, gh2] = await Promise.all([
+            const [anthro2, gh2, or2] = await Promise.all([
               api.get<CredentialStatus>('/api/credentials/anthropic/status'),
               api.get<CredentialStatus>('/api/credentials/github/status'),
+              api.get<CredentialStatus>('/api/credentials/openrouter/status'),
             ]);
             setAnthropicStatus(anthro2);
             setGithubStatus(gh2);
+            setOpenrouterStatus(or2);
+            if (or2.connected && or2.metadata) {
+              if (or2.metadata.opusModel) setOpusModel(or2.metadata.opusModel);
+              if (or2.metadata.sonnetModel) setSonnetModel(or2.metadata.sonnetModel);
+              if (or2.metadata.haikuModel) setHaikuModel(or2.metadata.haikuModel);
+            }
           }
         } catch {
           // Auto-detect is best-effort, ignore failures
@@ -107,16 +142,41 @@ export default function IntegrationsPanel() {
     }
   }
 
-  async function handleDisconnect(provider: 'anthropic' | 'github') {
+  async function handleSaveOpenrouter(e: React.FormEvent) {
+    e.preventDefault();
+    if (!openrouterKey.trim()) return;
+    setSavingOpenrouter(true);
+    try {
+      const result = await api.put<CredentialStatus>('/api/credentials/openrouter', {
+        apiKey: openrouterKey.trim(),
+        opusModel,
+        sonnetModel,
+        haikuModel,
+      });
+      setOpenrouterStatus(result);
+      setOpenrouterKey('');
+      setShowOpenrouterForm(false);
+      showToast('OpenRouter API key saved');
+    } catch (err) {
+      console.error('Failed to save OpenRouter key:', err);
+    } finally {
+      setSavingOpenrouter(false);
+    }
+  }
+
+  async function handleDisconnect(provider: 'anthropic' | 'github' | 'openrouter') {
     setDisconnecting(provider);
     try {
       await api.delete(`/api/credentials/${provider}`);
       if (provider === 'anthropic') {
         setAnthropicStatus({ connected: false });
-      } else {
+      } else if (provider === 'github') {
         setGithubStatus({ connected: false });
+      } else {
+        setOpenrouterStatus({ connected: false });
       }
-      showToast(`${provider === 'anthropic' ? 'Claude Code' : 'GitHub'} disconnected`);
+      const names = { anthropic: 'Claude Code', github: 'GitHub', openrouter: 'OpenRouter' };
+      showToast(`${names[provider]} disconnected`);
     } catch (err) {
       console.error('Failed to disconnect:', err);
     } finally {
@@ -144,12 +204,25 @@ export default function IntegrationsPanel() {
         </div>
       )}
 
+      {/* Warning when both Anthropic and OpenRouter are connected */}
+      {anthropicStatus.connected && openrouterStatus.connected && (
+        <div className="bg-warning/10 border border-warning/20 text-warning rounded-lg px-4 py-3 text-sm flex items-start gap-2">
+          <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <p>Both Anthropic and OpenRouter are connected. OpenRouter will take precedence for routing Claude Code requests. Disconnect one if this is unintended.</p>
+        </div>
+      )}
+
       <h3 className="text-base font-semibold text-text flex items-center gap-2">
         <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.536a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.497" />
         </svg>
         Integrations
       </h3>
+
+      {/* ── All Environments ── */}
+      <p className="text-xs font-medium text-text-muted uppercase tracking-wide">All Environments</p>
 
       {/* Claude Code Card */}
       <div className="bg-bg-surface border border-border rounded-xl p-5">
@@ -229,6 +302,132 @@ export default function IntegrationsPanel() {
           </div>
         )}
       </div>
+
+      {/* OpenRouter Card */}
+      <div className="bg-bg-surface border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+              OR
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-text">OpenRouter</h4>
+              {openrouterStatus.connected ? (
+                <p className="text-xs text-text-muted">
+                  Connected &middot; <span className="font-mono">{openrouterStatus.metadata?.keyPrefix}</span>
+                </p>
+              ) : (
+                <p className="text-xs text-text-muted">Route through OpenRouter API</p>
+              )}
+            </div>
+          </div>
+
+          {openrouterStatus.connected ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger hover:text-danger-dark"
+              onClick={() => handleDisconnect('openrouter')}
+              disabled={disconnecting === 'openrouter'}
+            >
+              {disconnecting === 'openrouter' ? 'Disconnecting...' : 'Disconnect'}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setShowOpenrouterForm(!showOpenrouterForm)}>
+              Connect
+            </Button>
+          )}
+        </div>
+
+        {/* Connected: show model mappings */}
+        {openrouterStatus.connected && openrouterStatus.metadata && (
+          <div className="mt-3 p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-1">
+            <p><span className="font-medium text-text">Opus:</span> {openrouterStatus.metadata.opusModel}</p>
+            <p><span className="font-medium text-text">Sonnet:</span> {openrouterStatus.metadata.sonnetModel}</p>
+            <p><span className="font-medium text-text">Haiku:</span> {openrouterStatus.metadata.haikuModel}</p>
+          </div>
+        )}
+
+        {showOpenrouterForm && !openrouterStatus.connected && (
+          <div className="mt-4 space-y-3">
+            <div className="p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-2">
+              <p className="font-medium text-text text-sm">Get an API key:</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Go to <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline">openrouter.ai/keys</a></li>
+                <li>Create a key and copy it</li>
+              </ol>
+              <p className="mt-2">
+                OpenRouter routes Claude Code requests through their API. Useful on VPS where browser-based Anthropic OAuth isn't available.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveOpenrouter} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={openrouterKey}
+                  onChange={(e) => setOpenrouterKey(e.target.value)}
+                  placeholder="sk-or-..."
+                  className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text font-mono placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-text-muted mb-1">Opus Model</label>
+                  <select
+                    value={opusModel}
+                    onChange={(e) => setOpusModel(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {MODEL_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-text-muted mb-1">Sonnet Model</label>
+                  <select
+                    value={sonnetModel}
+                    onChange={(e) => setSonnetModel(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {MODEL_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-text-muted mb-1">Haiku Model</label>
+                  <select
+                    value={haikuModel}
+                    onChange={(e) => setHaikuModel(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {MODEL_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 justify-end">
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setShowOpenrouterForm(false); setOpenrouterKey(''); }}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={savingOpenrouter || !openrouterKey.trim()}>
+                  {savingOpenrouter ? 'Saving...' : 'Save Key'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+
+      {/* ── VPS Only ── */}
+      <p className="text-xs font-medium text-text-muted uppercase tracking-wide pt-2">VPS Only</p>
 
       {/* GitHub Card */}
       <div className="bg-bg-surface border border-border rounded-xl p-5">

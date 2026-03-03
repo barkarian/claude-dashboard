@@ -130,6 +130,17 @@ router.post('/credentials/auto-detect', async (req: Request, res: Response) => {
       }
     }
 
+    // OpenRouter: env var
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    if (openrouterKey) {
+      try {
+        await credentialService.setToken('openrouter', openrouterKey);
+        results.push({ provider: 'openrouter', saved: true, source: 'env' });
+      } catch {
+        results.push({ provider: 'openrouter', saved: false });
+      }
+    }
+
     res.json({ detected: results });
   } catch (err: any) {
     console.error('Error auto-detecting credentials:', err);
@@ -167,6 +178,21 @@ router.put('/credentials/github', async (req: Request, res: Response) => {
   }
 });
 
+// PUT /api/credentials/openrouter — save OpenRouter API key with model mappings
+router.put('/credentials/openrouter', async (req: Request, res: Response) => {
+  try {
+    const { apiKey, opusModel, sonnetModel, haikuModel } = req.body;
+    if (!apiKey) {
+      return res.status(400).json({ error: 'apiKey is required' });
+    }
+    const result = await credentialService.setToken('openrouter', apiKey, { opusModel, sonnetModel, haikuModel });
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error saving OpenRouter key:', err);
+    res.status(500).json({ error: err.message || 'Failed to save API key' });
+  }
+});
+
 // POST /api/credentials/sync — trigger credential sync on VPS
 router.post('/credentials/sync', async (req: Request, res: Response) => {
   try {
@@ -181,8 +207,8 @@ router.post('/credentials/sync', async (req: Request, res: Response) => {
 // GET /api/credentials/:provider/status — get connection status
 router.get('/credentials/:provider/status', async (req: Request<{ provider: string }>, res: Response) => {
   try {
-    const provider = req.params.provider as 'anthropic' | 'github';
-    if (provider !== 'anthropic' && provider !== 'github') {
+    const provider = req.params.provider as 'anthropic' | 'github' | 'openrouter';
+    if (provider !== 'anthropic' && provider !== 'github' && provider !== 'openrouter') {
       return res.status(400).json({ error: 'Invalid provider' });
     }
     const status = await credentialService.getStatus(provider);
@@ -196,8 +222,8 @@ router.get('/credentials/:provider/status', async (req: Request<{ provider: stri
 // DELETE /api/credentials/:provider — disconnect a provider
 router.delete('/credentials/:provider', async (req: Request<{ provider: string }>, res: Response) => {
   try {
-    const provider = req.params.provider as 'anthropic' | 'github';
-    if (provider !== 'anthropic' && provider !== 'github') {
+    const provider = req.params.provider as 'anthropic' | 'github' | 'openrouter';
+    if (provider !== 'anthropic' && provider !== 'github' && provider !== 'openrouter') {
       return res.status(400).json({ error: 'Invalid provider' });
     }
     await credentialService.disconnectProvider(provider);
