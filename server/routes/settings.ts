@@ -206,6 +206,19 @@ router.put('/credentials/openrouter', async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/credentials/openrouter/models — update model mappings without re-submitting API key
+router.patch('/credentials/openrouter/models', async (req: Request, res: Response) => {
+  try {
+    const { opusModel, sonnetModel, haikuModel, environment } = req.body;
+    const env = (environment === 'local' || environment === 'vps') ? environment : undefined;
+    const result = await credentialService.updateOpenrouterModels({ opusModel, sonnetModel, haikuModel }, env);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error updating OpenRouter models:', err);
+    res.status(500).json({ error: err.message || 'Failed to update models' });
+  }
+});
+
 // POST /api/credentials/sync — trigger credential sync on VPS
 router.post('/credentials/sync', async (req: Request, res: Response) => {
   try {

@@ -323,10 +323,40 @@ async function disconnectProvider(provider: CredentialProvider, environment?: Cr
   }
 }
 
+async function updateOpenrouterModels(models: Record<string, string>, environment?: CredentialEnvironment): Promise<CredentialStatus> {
+  const creds = tunnelManager.getCredentials();
+  if (!creds || !config.tunnelServiceUrl) {
+    throw new Error('No tunnel credentials or service URL configured');
+  }
+
+  const res = await fetch(`${config.tunnelServiceUrl}/api/credentials/openrouter/models`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `users API-Key ${creds.apiKey}`,
+    },
+    body: JSON.stringify({ ...models, environment }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error((err as any).error || `HTTP ${res.status}`);
+  }
+
+  const result = await res.json() as CredentialStatus;
+
+  if (isActive()) {
+    await syncCredentials();
+  }
+
+  return result;
+}
+
 export default {
   isActive,
   syncCredentials,
   getStatus,
   setToken,
   disconnectProvider,
+  updateOpenrouterModels,
 };

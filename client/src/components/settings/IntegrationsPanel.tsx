@@ -151,6 +151,12 @@ export default function IntegrationsPanel() {
   const [openrouterModels, setOpenrouterModels] = useState<OpenRouterModel[]>(modelsCache || []);
   const [loadingModels, setLoadingModels] = useState(false);
 
+  const [editingModels, setEditingModels] = useState<CredentialEnvironment | null>(null);
+  const [editOpusModel, setEditOpusModel] = useState('');
+  const [editSonnetModel, setEditSonnetModel] = useState('');
+  const [editHaikuModel, setEditHaikuModel] = useState('');
+  const [savingModels, setSavingModels] = useState(false);
+
   const [showTerminal, setShowTerminal] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -399,6 +405,35 @@ export default function IntegrationsPanel() {
     }
   }
 
+  function startEditingModels(environment: CredentialEnvironment) {
+    const envState = getEnvState(environment);
+    const meta = envState.openrouterStatus.metadata;
+    setEditOpusModel(meta?.opusModel || 'anthropic/claude-opus-4');
+    setEditSonnetModel(meta?.sonnetModel || 'anthropic/claude-sonnet-4');
+    setEditHaikuModel(meta?.haikuModel || 'anthropic/claude-haiku-4');
+    setEditingModels(environment);
+  }
+
+  async function handleSaveModels(environment: CredentialEnvironment) {
+    setSavingModels(true);
+    try {
+      const result = await api.patch<CredentialStatus>('/api/credentials/openrouter/models', {
+        opusModel: editOpusModel,
+        sonnetModel: editSonnetModel,
+        haikuModel: editHaikuModel,
+        environment,
+      });
+      const envState = getEnvState(environment);
+      setEnvState(environment, { ...envState, openrouterStatus: result });
+      setEditingModels(null);
+      showSuccessToast('Model mappings updated');
+    } catch (err: any) {
+      showErrorToast(err.message || 'Failed to update models');
+    } finally {
+      setSavingModels(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -555,12 +590,65 @@ export default function IntegrationsPanel() {
           )}
         </div>
 
-        {/* Connected: show model mappings */}
-        {status.connected && status.metadata && (
+        {/* Connected: show model mappings (read-only or edit mode) */}
+        {status.connected && status.metadata && editingModels !== environment && (
           <div className="mt-3 p-3 bg-bg rounded-lg border border-border text-xs text-text-muted space-y-1">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-medium text-text text-xs uppercase tracking-wide">Model Mappings</span>
+              <button
+                type="button"
+                onClick={() => startEditingModels(environment)}
+                className="text-xs text-primary hover:text-primary-dark"
+              >
+                Edit
+              </button>
+            </div>
             <p><span className="font-medium text-text">Opus:</span> {openrouterModels.find(m => m.id === status.metadata?.opusModel)?.name || status.metadata.opusModel}</p>
             <p><span className="font-medium text-text">Sonnet:</span> {openrouterModels.find(m => m.id === status.metadata?.sonnetModel)?.name || status.metadata.sonnetModel}</p>
             <p><span className="font-medium text-text">Haiku:</span> {openrouterModels.find(m => m.id === status.metadata?.haikuModel)?.name || status.metadata.haikuModel}</p>
+          </div>
+        )}
+
+        {/* Edit model mappings */}
+        {status.connected && editingModels === environment && (
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1">Opus Model</label>
+                <ModelSearchSelect
+                  value={editOpusModel}
+                  onChange={setEditOpusModel}
+                  models={openrouterModels}
+                  loadingModels={loadingModels}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1">Sonnet Model</label>
+                <ModelSearchSelect
+                  value={editSonnetModel}
+                  onChange={setEditSonnetModel}
+                  models={openrouterModels}
+                  loadingModels={loadingModels}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1">Haiku Model</label>
+                <ModelSearchSelect
+                  value={editHaikuModel}
+                  onChange={setEditHaikuModel}
+                  models={openrouterModels}
+                  loadingModels={loadingModels}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEditingModels(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => handleSaveModels(environment)} disabled={savingModels}>
+                {savingModels ? 'Saving...' : 'Save Models'}
+              </Button>
+            </div>
           </div>
         )}
 
