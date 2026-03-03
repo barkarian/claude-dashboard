@@ -91,6 +91,18 @@ async function getVpsStatus(): Promise<any> {
   return await res.json();
 }
 
+async function provisionVps(): Promise<any> {
+  const res = await fetch(`${getBaseUrl()}/api/vps/provision`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error((err as any).error || `HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
 async function destroyVps(): Promise<any> {
   const res = await fetch(`${getBaseUrl()}/api/vps/destroy`, {
     method: 'DELETE',
@@ -110,5 +122,6 @@ export default {
   devUpgrade,
   devDowngrade,
   getVpsStatus,
+  provisionVps,
   destroyVps,
 };

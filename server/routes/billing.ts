@@ -109,6 +109,20 @@ router.get('/vps-status', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/billing/vps-provision
+router.post('/vps-provision', async (req: Request, res: Response) => {
+  if (!req.session?.tunnelService) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const data = await billingService.provisionVps();
+    res.status(201).json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to provision VPS' });
+  }
+});
+
 // DELETE /api/billing/vps-destroy
 router.delete('/vps-destroy', async (req: Request, res: Response) => {
   if (!req.session?.tunnelService) {

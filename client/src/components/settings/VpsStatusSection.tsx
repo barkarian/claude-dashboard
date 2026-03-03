@@ -14,6 +14,7 @@ export default function VpsStatusSection() {
   const [vps, setVps] = useState<VpsInstance | null>(null);
   const [loading, setLoading] = useState(true);
   const [destroying, setDestroying] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -61,6 +62,18 @@ export default function VpsStatusSection() {
     }
   }
 
+  async function handleProvision() {
+    setProvisioning(true);
+    try {
+      const data = await api.post<{ vpsInstance: VpsInstance }>('/api/billing/vps-provision');
+      setVps(data.vpsInstance || null);
+    } catch (err) {
+      console.error('Failed to provision VPS:', err);
+    } finally {
+      setProvisioning(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-bg-surface border border-border rounded-xl p-6">
@@ -81,7 +94,15 @@ export default function VpsStatusSection() {
           </svg>
           VPS Instance
         </h3>
-        <p className="text-sm text-text-muted">No VPS active.</p>
+        <p className="text-sm text-text-muted mb-3">No VPS active.</p>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleProvision}
+          disabled={provisioning}
+        >
+          {provisioning ? 'Creating...' : 'Create VPS'}
+        </Button>
       </div>
     );
   }
