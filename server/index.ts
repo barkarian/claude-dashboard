@@ -129,6 +129,7 @@ async function autostartScripts(): Promise<void> {
 // Graceful shutdown
 async function shutdown(): Promise<void> {
   console.log('Shutting down...');
+  await tunnelManager.deactivateAllEndpoints();
   processManager.killAll();
   sdkSessionManager.endAllSessions();
   fileService.stopAllWatching();

@@ -301,6 +301,33 @@ async function startDashboardTunnel(port: number): Promise<string | null> {
   }
 }
 
+/**
+ * Bulk-deactivate all active endpoints for this user on the tunnel service.
+ * This catches both in-memory tracked endpoints and orphaned ones from previous crashes.
+ */
+async function deactivateAllEndpoints(): Promise<void> {
+  if (!tunnelServiceApiKey || !config.tunnelServiceUrl) return;
+
+  try {
+    const res = await fetch(`${config.tunnelServiceUrl}/api/endpoints/deactivate-all`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `users API-Key ${tunnelServiceApiKey}`,
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json() as { deactivated: number };
+      console.log(`[tunnel:service] Bulk deactivated ${data.deactivated} endpoint(s)`);
+    } else {
+      console.error(`[tunnel:service] Bulk deactivate failed: ${res.status} ${res.statusText}`);
+    }
+  } catch (err) {
+    console.error('[tunnel:service] Error during bulk deactivation:', err);
+  }
+}
+
 async function closeAll(): Promise<void> {
   if (!isEnabled()) return;
 
@@ -355,6 +382,7 @@ export default {
   closeTunnelsForProcess,
   startDashboardTunnel,
   closeAll,
+  deactivateAllEndpoints,
   setCredentials,
   clearCredentials,
   getCredentials,

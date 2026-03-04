@@ -224,7 +224,7 @@ function getBuffer(projectId: string, scriptId: string): string {
   return entry.buffer.join('');
 }
 
-function getDetectedPorts(projectId: string, scriptId: string): number[] {
+async function getDetectedPorts(projectId: string, scriptId: string): Promise<number[]> {
   const entry = getProcess(projectId, scriptId);
   if (!entry) return [];
   return detectPorts(entry.buffer.join(''));

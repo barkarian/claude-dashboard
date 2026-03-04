@@ -18,7 +18,7 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
       const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
       const isShell = scriptId.startsWith('shell-');
       const detectedPorts = entry.status === 'running'
-        ? processManager.getDetectedPorts(projectId, scriptId)
+        ? await processManager.getDetectedPorts(projectId, scriptId)
         : [];
       const tunnelUrls = (entry.status === 'running' && detectedPorts.length > 0)
         ? await tunnelManager.getTunnelUrls(detectedPorts, `${projectId}:${scriptId}`)
