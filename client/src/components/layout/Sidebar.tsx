@@ -1,19 +1,30 @@
 import { useEffect, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // Auto-close drawer on navigation
+  useEffect(() => {
+    onClose();
+  }, [location.pathname]);
 
   async function loadProjects() {
     try {
@@ -24,8 +35,8 @@ export default function Sidebar() {
     }
   }
 
-  return (
-    <aside className="hidden md:flex flex-col w-64 bg-bg-surface border-r border-border h-screen sticky top-0">
+  const sidebarContent = (
+    <>
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-text flex items-center gap-2">
@@ -140,6 +151,33 @@ export default function Sidebar() {
           Logout
         </Button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex flex-col w-64 bg-bg-surface border-r border-border h-screen sticky top-0">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile drawer */}
+      <div
+        className={`md:hidden fixed inset-0 z-50 transition-opacity duration-300 ${
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        {/* Backdrop */}
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        {/* Drawer panel */}
+        <aside
+          className={`absolute inset-y-0 left-0 w-72 bg-bg-surface flex flex-col shadow-xl transition-transform duration-300 ${
+            isOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          {sidebarContent}
+        </aside>
+      </div>
+    </>
   );
 }

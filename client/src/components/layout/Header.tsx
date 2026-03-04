@@ -1,5 +1,6 @@
 import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSidebar } from '../../context/SidebarContext.tsx';
 
 interface HeaderProps {
   // Simple mode
@@ -35,6 +36,7 @@ export default function Header({
   onNewChat,
 }: HeaderProps) {
   const navigate = useNavigate();
+  const { openSidebar } = useSidebar();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
 
@@ -66,6 +68,15 @@ export default function Header({
       <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
         <div className="flex items-center justify-between h-14 px-4">
           <div className="flex items-center gap-3">
+            <button
+              onClick={openSidebar}
+              className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
+              aria-label="Open menu"
+            >
+              <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            </button>
             {backTo && (
               <button
                 onClick={() => navigate(backTo)}
@@ -89,15 +100,26 @@ export default function Header({
     <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
       {/* Row 1: Back to projects | Project Name | New Chat */}
       <div className="flex items-center justify-between h-12 px-4">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-1 text-sm text-text-muted hover:text-text transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          Projects
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={openSidebar}
+            className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
+            aria-label="Open menu"
+          >
+            <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-1 text-sm text-text-muted hover:text-text transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            Projects
+          </button>
+        </div>
 
         <h2 className="text-base font-semibold truncate mx-4">{projectName}</h2>
 
