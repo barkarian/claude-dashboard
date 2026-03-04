@@ -6,6 +6,7 @@ export interface RecordingScript {
   scriptId: string;
   label: string;
   command: string;
+  fromStart?: boolean;
 }
 
 export interface Recording {
@@ -52,7 +53,7 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
 
   // Mutable buffer for capturing output without triggering renders on every line
   const bufferRef = useRef<{ lines: string[]; rawLines: string[] }>({ lines: [], rawLines: [] });
-  const activeRef = useRef<{ id: string; projectId: string; scriptIds: Set<string>; scripts: RecordingScript[]; startedAt: number } | null>(null);
+  const activeRef = useRef<{ id: string; projectId: string; scriptIds: Set<string>; scripts: RecordingScript[]; startedAt: number; readyAfter: Map<string, number> } | null>(null);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushBuffer = useCallback(() => {
@@ -74,6 +75,10 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
 
     const handleOutput = ({ scriptId, data }: { projectId: string; scriptId: string; data: string }) => {
       if (!activeRef.current || !activeRef.current.scriptIds.has(scriptId)) return;
+
+      // Skip buffer replay for "From Now" scripts
+      const readyTime = activeRef.current.readyAfter.get(scriptId);
+      if (readyTime !== undefined && Date.now() < readyTime) return;
 
       const buf = bufferRef.current;
       // Split incoming data into lines
@@ -111,8 +116,13 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
 
     const id = generateId();
     const scriptIds = new Set(scripts.map(s => s.scriptId));
+    const readyAfter = new Map<string, number>();
+    const now = Date.now();
+    for (const s of scripts) {
+      readyAfter.set(s.scriptId, s.fromStart ? 0 : now + 150);
+    }
 
-    activeRef.current = { id, projectId, scriptIds, scripts, startedAt: Date.now() };
+    activeRef.current = { id, projectId, scriptIds, scripts, startedAt: now, readyAfter };
     bufferRef.current = { lines: [], rawLines: [] };
 
     // Attach to terminal rooms for each script

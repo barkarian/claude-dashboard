@@ -21,6 +21,7 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
   const [processes, setProcesses] = useState<ScriptProcess[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [scriptModes, setScriptModes] = useState<Map<string, 'now' | 'start'>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -48,10 +49,19 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
     });
   }
 
+  function toggleMode(scriptId: string) {
+    setScriptModes(prev => {
+      const next = new Map(prev);
+      const current = prev.get(scriptId) ?? 'now';
+      next.set(scriptId, current === 'now' ? 'start' : 'now');
+      return next;
+    });
+  }
+
   function handleStart() {
     const scripts: RecordingScript[] = processes
       .filter(p => selected.has(p.scriptId))
-      .map(p => ({ scriptId: p.scriptId, label: p.label, command: p.command }));
+      .map(p => ({ scriptId: p.scriptId, label: p.label, command: p.command, fromStart: scriptModes.get(p.scriptId) === 'start' }));
 
     if (scripts.length === 0) return;
     startRecording(projectId, scripts);
@@ -91,6 +101,13 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
                 <div className="text-sm font-medium truncate">{proc.label}</div>
                 <div className="text-xs text-text-muted font-mono truncate">{proc.command}</div>
               </div>
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); toggleMode(proc.scriptId); }}
+                className="text-xs px-2 py-0.5 rounded border border-border hover:bg-bg-hover transition-colors whitespace-nowrap text-text-muted"
+              >
+                {(scriptModes.get(proc.scriptId) ?? 'now') === 'now' ? 'From Now' : 'From Start'}
+              </button>
             </label>
           ))
         )}
