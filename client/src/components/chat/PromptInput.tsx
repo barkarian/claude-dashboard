@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import FilePicker from './FilePicker.tsx';
+import TerminalRecordButton from './TerminalRecordButton.tsx';
+import ScriptPickerPanel from './ScriptPickerPanel.tsx';
+import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
+import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
+import RecordingContentModal from './RecordingContentModal.tsx';
+import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface PromptInputProps {
   projectId: string;
@@ -16,7 +22,12 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [showScriptPicker, setShowScriptPicker] = useState(false);
+  const [showLivePreview, setShowLivePreview] = useState(false);
+  const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -77,8 +88,18 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
       return;
     }
     // Otherwise send the text
-    const trimmed = value.trim();
+    let trimmed = value.trim();
     if (!trimmed || disabled || isThinking) return;
+
+    // Expand #rec:ID tokens into formatted terminal output
+    const recIds = extractRecordingIds(trimmed);
+    for (const id of recIds) {
+      const content = getRecordingContent(id);
+      if (content) {
+        trimmed = trimmed.replace(`#rec:${id}`, content);
+      }
+    }
+
     onSend(trimmed);
     setValue('');
   }
@@ -93,6 +114,18 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
     textareaRef.current?.focus();
   }
 
+  function handleStopAndInsert() {
+    const id = stopRecording();
+    if (id) {
+      setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
+    }
+    setShowLivePreview(false);
+  }
+
+  function handleRecordingStopped(id: string) {
+    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
+  }
+
   // Button label: "Select" when option mode and textarea empty, otherwise "Send"
   const showSelect = onSelect && !value.trim();
   const actionDisabled = showSelect ? disabled : (!value.trim() || disabled);
@@ -101,6 +134,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
 
   return (
     <div className="relative border-t border-border p-3">
+      {/* Popups above input */}
       {showFilePicker && (
         <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
           <FilePicker
@@ -111,7 +145,43 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
         </div>
       )}
 
+      {showScriptPicker && !activeRecording && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+          <ScriptPickerPanel
+            projectId={projectId}
+            onClose={() => setShowScriptPicker(false)}
+            onStarted={() => setShowLivePreview(true)}
+          />
+        </div>
+      )}
+
+      {showLivePreview && activeRecording && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+          <RecordingPreviewPanel
+            onClose={() => setShowLivePreview(false)}
+            onStop={handleStopAndInsert}
+          />
+        </div>
+      )}
+
+      {/* Badge bar for recording tokens */}
+      <RecordingBadgeBar
+        value={value}
+        onValueChange={(newVal) => {
+          if (onTextChange) onTextChange(newVal, value);
+          setValue(newVal);
+        }}
+        onBadgeClick={(id) => setPreviewRecordingId(id)}
+      />
+
       <div className="flex items-end gap-2">
+        <TerminalRecordButton
+          onOpenScriptPicker={() => setShowScriptPicker(true)}
+          onOpenLivePreview={() => setShowLivePreview(true)}
+          onStop={handleRecordingStopped}
+          disabled={disabled}
+        />
+
         <textarea
           ref={textareaRef}
           value={value}
@@ -183,6 +253,14 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
           </button>
         )}
       </div>
+
+      {/* Full recording preview modal */}
+      {previewRecordingId && (
+        <RecordingContentModal
+          recordingId={previewRecordingId}
+          onClose={() => setPreviewRecordingId(null)}
+        />
+      )}
     </div>
   );
 }

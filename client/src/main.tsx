@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { SocketProvider } from './context/SocketContext.tsx';
+import { TerminalRecordingProvider } from './context/TerminalRecordingContext.tsx';
 import './index.css';
 
 const envMatch = window.location.pathname.match(/^\/(local|vps)/);
@@ -14,7 +15,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter basename={basename}>
       <AuthProvider>
         <SocketProvider>
-          <App />
+          <TerminalRecordingProvider>
+            <App />
+          </TerminalRecordingProvider>
         </SocketProvider>
       </AuthProvider>
     </BrowserRouter>

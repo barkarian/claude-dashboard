@@ -78,6 +78,20 @@
   .badge-muted {
     @apply badge bg-border text-text-muted;
   }
+
+  .badge-recording {
+    @apply bg-danger/15 text-danger border border-danger/30;
+  }
+}
+
+/* Recording pulse animation */
+.recording-pulse {
+  animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 /* xterm.js overrides */

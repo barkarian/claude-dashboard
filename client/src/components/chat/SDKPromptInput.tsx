@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import FilePicker from './FilePicker.tsx';
+import TerminalRecordButton from './TerminalRecordButton.tsx';
+import ScriptPickerPanel from './ScriptPickerPanel.tsx';
+import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
+import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
+import RecordingContentModal from './RecordingContentModal.tsx';
+import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
 interface SDKPromptInputProps {
@@ -13,7 +19,12 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [showScriptPicker, setShowScriptPicker] = useState(false);
+  const [showLivePreview, setShowLivePreview] = useState(false);
+  const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -46,9 +57,19 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
   }
 
   function handleSend() {
-    const trimmed = value.trim();
-    if (!trimmed || disabled || isStreaming) return;
-    onSend(trimmed);
+    let text = value.trim();
+    if (!text || disabled || isStreaming) return;
+
+    // Expand #rec:ID tokens into formatted terminal output
+    const recIds = extractRecordingIds(text);
+    for (const id of recIds) {
+      const content = getRecordingContent(id);
+      if (content) {
+        text = text.replace(`#rec:${id}`, content);
+      }
+    }
+
+    onSend(text);
     setValue('');
   }
 
@@ -62,8 +83,21 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
     textareaRef.current?.focus();
   }
 
+  function handleStopAndInsert() {
+    const id = stopRecording();
+    if (id) {
+      setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
+    }
+    setShowLivePreview(false);
+  }
+
+  function handleRecordingStopped(id: string) {
+    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
+  }
+
   return (
     <div className="flex-shrink-0 relative border-t border-border p-3">
+      {/* Popups above input */}
       {showFilePicker && (
         <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
           <FilePicker
@@ -74,7 +108,40 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
         </div>
       )}
 
+      {showScriptPicker && !activeRecording && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+          <ScriptPickerPanel
+            projectId={projectId}
+            onClose={() => setShowScriptPicker(false)}
+            onStarted={() => setShowLivePreview(true)}
+          />
+        </div>
+      )}
+
+      {showLivePreview && activeRecording && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+          <RecordingPreviewPanel
+            onClose={() => setShowLivePreview(false)}
+            onStop={handleStopAndInsert}
+          />
+        </div>
+      )}
+
+      {/* Badge bar for recording tokens */}
+      <RecordingBadgeBar
+        value={value}
+        onValueChange={setValue}
+        onBadgeClick={(id) => setPreviewRecordingId(id)}
+      />
+
       <div className="flex items-end gap-2">
+        <TerminalRecordButton
+          onOpenScriptPicker={() => setShowScriptPicker(true)}
+          onOpenLivePreview={() => setShowLivePreview(true)}
+          onStop={handleRecordingStopped}
+          disabled={disabled}
+        />
+
         <textarea
           ref={textareaRef}
           value={value}
@@ -112,6 +179,14 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
           </button>
         )}
       </div>
+
+      {/* Full recording preview modal */}
+      {previewRecordingId && (
+        <RecordingContentModal
+          recordingId={previewRecordingId}
+          onClose={() => setPreviewRecordingId(null)}
+        />
+      )}
     </div>
   );
 }
