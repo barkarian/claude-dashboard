@@ -83,11 +83,8 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
     textareaRef.current?.focus();
   }
 
-  function handleStopAndInsert() {
-    const id = stopRecording();
-    if (id) {
-      setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-    }
+  function handleStopAndInsert(id: string) {
+    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
     setShowLivePreview(false);
   }
 

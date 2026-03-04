@@ -3,7 +3,7 @@ import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface RecordingPreviewPanelProps {
   onClose: () => void;
-  onStop: () => void;
+  onStop: (recordingId: string) => void;
 }
 
 export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPreviewPanelProps) {
@@ -36,8 +36,8 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
   }
 
   function handleStop() {
-    stopRecording();
-    onStop();
+    const id = stopRecording();
+    if (id) onStop(id);
   }
 
   const scriptNames = activeRecording.scripts.map(s => s.label || s.command).join(', ');

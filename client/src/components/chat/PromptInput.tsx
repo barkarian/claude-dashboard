@@ -114,11 +114,8 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
     textareaRef.current?.focus();
   }
 
-  function handleStopAndInsert() {
-    const id = stopRecording();
-    if (id) {
-      setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-    }
+  function handleStopAndInsert(id: string) {
+    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
     setShowLivePreview(false);
   }
 
