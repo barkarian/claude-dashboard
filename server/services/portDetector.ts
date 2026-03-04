@@ -77,5 +77,7 @@ export async function detectPorts(bufferText: string): Promise<number[]> {
     candidates.map(async (port) => ({ port, listening: await isPortListening(port) }))
   );
 
-  return results.filter((r) => r.listening).map((r) => r.port);
+  const verified = results.filter((r) => r.listening).map((r) => r.port);
+  console.log(`[portDetector] candidates=${JSON.stringify(candidates)} verified=${JSON.stringify(verified)}`);
+  return verified;
 }

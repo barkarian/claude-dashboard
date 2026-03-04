@@ -180,7 +180,7 @@ async function ensureServiceTunnel(port: number, processKey: string): Promise<st
         'Content-Type': 'application/json',
         'Authorization': `users API-Key ${tunnelServiceApiKey}`,
       },
-      body: JSON.stringify({ projectUUID, port }),
+      body: JSON.stringify({ projectUUID, port, mode: config.dashboardEnv }),
     });
 
     console.log(`[tunnel:service] Register response: ${res.status} ${res.statusText}`);
