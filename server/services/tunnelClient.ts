@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import crypto from 'crypto';
 import http from 'http';
 import type {
   TunnelRequest,
@@ -113,6 +114,13 @@ function doConnect(): void {
 
     if (msg.type === 'tunnel-request') {
       handleTunnelRequest(msg as TunnelRequest);
+      return;
+    }
+
+    if (msg.type === 'offline-visit') {
+      console.log(`[tunnel-client] Someone visited workspace while offline`);
+      // Emit to Socket.IO for any connected dashboard clients (Phase 4 desktop notifications)
+      // For now, just log it
     }
   });
 
@@ -155,6 +163,30 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
 
   const { requestId, method, url, headers, body, targetPort } = tunnelReq;
 
+  // Validate HTTP method
+  const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD']);
+  if (!ALLOWED_METHODS.has(method.toUpperCase())) {
+    console.warn(`[tunnel-client] Rejected invalid method: ${method}`);
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Invalid HTTP method' });
+    return;
+  }
+
+  // Validate URL (no path traversal)
+  if (url.includes('..') || url.includes('\0')) {
+    console.warn(`[tunnel-client] Rejected suspicious URL: ${url}`);
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Invalid URL' });
+    return;
+  }
+
+  // Validate targetPort is a registered endpoint (lazy import to avoid circular dependency)
+  const { default: tunnelManager } = await import('./tunnelManager.ts');
+  const registeredPorts = tunnelManager.getRegisteredPorts();
+  if (!registeredPorts.has(targetPort)) {
+    console.warn(`[tunnel-client] Rejected request to unregistered port: ${targetPort}`);
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Port not registered' });
+    return;
+  }
+
   console.log(`[tunnel-client] Handling tunnel request: ${method} ${url} -> localhost:${targetPort} (reqId=${requestId.slice(0, 8)}..., cookie=${headers.cookie ? 'present' : 'MISSING'})`);
 
   // Build local request options
@@ -189,6 +221,28 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
     }
 
     if (shouldStream) {
+      const MAX_STREAM_DURATION = 30 * 60 * 1000; // 30 minutes
+      const IDLE_TIMEOUT = 60 * 1000; // 60 seconds
+
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      const maxTimer = setTimeout(() => {
+        localRes.destroy();
+        sendMessage({ type: 'tunnel-response-end', requestId });
+        console.log(`[tunnel-client] Stream max duration reached for ${requestId}`);
+      }, MAX_STREAM_DURATION);
+
+      const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          localRes.destroy();
+          sendMessage({ type: 'tunnel-response-end', requestId });
+          console.log(`[tunnel-client] Stream idle timeout for ${requestId}`);
+        }, IDLE_TIMEOUT);
+      };
+
+      // Start idle timer
+      resetIdleTimer();
+
       // Streaming response
       const startMsg: TunnelResponseStart = {
         type: 'tunnel-response-start',
@@ -199,6 +253,7 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       sendMessage(startMsg);
 
       localRes.on('data', (chunk: Buffer) => {
+        resetIdleTimer();
         const chunkMsg: TunnelResponseChunk = {
           type: 'tunnel-response-chunk',
           requestId,
@@ -208,6 +263,8 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       });
 
       localRes.on('end', () => {
+        clearTimeout(maxTimer);
+        if (idleTimer) clearTimeout(idleTimer);
         const endMsg: TunnelResponseEnd = {
           type: 'tunnel-response-end',
           requestId,
@@ -216,6 +273,8 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       });
 
       localRes.on('error', (err) => {
+        clearTimeout(maxTimer);
+        if (idleTimer) clearTimeout(idleTimer);
         const errMsg: TunnelResponseError = {
           type: 'tunnel-response-error',
           requestId,
@@ -279,9 +338,22 @@ function makeLocalRequest(
   });
 }
 
+function signMessage(msg: object, apiKey: string): string {
+  const payload = JSON.stringify(msg);
+  const timestamp = Date.now().toString();
+  const hmac = crypto.createHmac('sha256', apiKey)
+    .update(timestamp + '.' + payload)
+    .digest('hex');
+  return JSON.stringify({ ...msg, _ts: timestamp, _sig: hmac });
+}
+
 function sendMessage(msg: object): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
+    if (currentApiKey) {
+      ws.send(signMessage(msg, currentApiKey));
+    } else {
+      ws.send(JSON.stringify(msg));
+    }
   }
 }
 

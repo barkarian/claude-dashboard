@@ -23,6 +23,15 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
       const tunnelUrls = (entry.status === 'running' && detectedPorts.length > 0)
         ? await tunnelManager.getTunnelUrls(detectedPorts, `${projectId}:${scriptId}`)
         : {};
+
+      // Build port privacy map from service tunnels
+      const portPrivacy: Record<number, boolean> = {};
+      const serviceTunnels = tunnelManager.getServiceTunnels();
+      for (const port of detectedPorts) {
+        const tunnelEntry = serviceTunnels.get(port);
+        portPrivacy[port] = tunnelEntry?.isPublic ?? true;
+      }
+
       processes.push({
         scriptId,
         command: entry.command,
@@ -33,6 +42,7 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
         isShell,
         detectedPorts,
         tunnelUrls,
+        portPrivacy,
       });
     }
 

@@ -1,6 +1,7 @@
 import ngrok from '@ngrok/ngrok';
 import config from '../config.ts';
 import * as tunnelClient from './tunnelClient.ts';
+import db from './database.ts';
 
 // --- ngrok types ---
 interface NgrokTunnelEntry {
@@ -14,6 +15,7 @@ interface TunnelServiceEntry {
   url: string;
   endpointId: string;
   processKey: string;
+  isPublic: boolean;
 }
 
 // --- ngrok state ---
@@ -108,6 +110,94 @@ function getUserInfo(): TunnelUserInfo | null {
   return tunnelUserInfo;
 }
 
+function persistCredentials(info: TunnelUserInfo): void {
+  try {
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO tunnel_credentials (id, api_key, user_subdomain, user_id, email, username, plan, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    );
+    stmt.run(info.apiKey, info.userSubdomain, info.userId, info.email, info.username, info.plan || 'free');
+    console.log(`[tunnel] Persisted credentials for ${info.username}`);
+  } catch (err) {
+    console.error('[tunnel] Failed to persist credentials:', err);
+  }
+}
+
+function loadPersistedCredentials(): TunnelUserInfo | null {
+  try {
+    const row = db.prepare('SELECT api_key, user_subdomain, user_id, email, username, plan FROM tunnel_credentials WHERE id = 1').get() as {
+      api_key: string; user_subdomain: string; user_id: string; email: string; username: string; plan: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      apiKey: row.api_key,
+      userSubdomain: row.user_subdomain,
+      userId: row.user_id || '',
+      email: row.email || '',
+      username: row.username || '',
+      plan: row.plan === 'pro' ? 'pro' : 'free',
+    };
+  } catch (err) {
+    console.error('[tunnel] Failed to load persisted credentials:', err);
+    return null;
+  }
+}
+
+async function setPortPrivacy(port: number, isPublic: boolean): Promise<boolean> {
+  const entry = serviceTunnels.get(port);
+  if (!entry || !tunnelServiceApiKey || !config.tunnelServiceUrl) return false;
+
+  try {
+    const res = await fetch(`${config.tunnelServiceUrl}/api/endpoints/${entry.endpointId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `users API-Key ${tunnelServiceApiKey}`,
+      },
+      body: JSON.stringify({ isPublic }),
+    });
+
+    if (res.ok) {
+      entry.isPublic = isPublic;
+      console.log(`[tunnel:service] Port ${port} privacy set to ${isPublic ? 'public' : 'private'}`);
+      return true;
+    }
+    console.error(`[tunnel:service] Failed to set port privacy: ${res.status}`);
+    return false;
+  } catch (err) {
+    console.error(`[tunnel:service] Error setting port privacy:`, err);
+    return false;
+  }
+}
+
+function getServiceTunnels(): Map<number, TunnelServiceEntry> {
+  return serviceTunnels;
+}
+
+function getRegisteredPorts(): Set<number> {
+  const ports = new Set<number>();
+  // Always include the dashboard port
+  ports.add(config.port);
+  // Add all registered service tunnel ports
+  for (const port of serviceTunnels.keys()) {
+    ports.add(port);
+  }
+  // Add all ngrok tunnel ports
+  for (const port of ngrokTunnels.keys()) {
+    ports.add(port);
+  }
+  return ports;
+}
+
+function clearPersistedCredentials(): void {
+  try {
+    db.prepare('DELETE FROM tunnel_credentials WHERE id = 1').run();
+    console.log('[tunnel] Cleared persisted credentials');
+  } catch (err) {
+    console.error('[tunnel] Failed to clear persisted credentials:', err);
+  }
+}
+
 // --- ngrok implementation ---
 
 async function ensureNgrokTunnel(port: number, processKey: string): Promise<string | null> {
@@ -180,7 +270,7 @@ async function ensureServiceTunnel(port: number, processKey: string): Promise<st
         'Content-Type': 'application/json',
         'Authorization': `users API-Key ${tunnelServiceApiKey}`,
       },
-      body: JSON.stringify({ projectUUID, port, mode: config.dashboardEnv }),
+      body: JSON.stringify({ projectUUID, port, mode: config.dashboardEnv, isPublic: true }),
     });
 
     console.log(`[tunnel:service] Register response: ${res.status} ${res.statusText}`);
@@ -197,6 +287,7 @@ async function ensureServiceTunnel(port: number, processKey: string): Promise<st
       url: data.publicUrl,
       endpointId: data.id,
       processKey,
+      isPublic: true,
     });
 
     console.log(`[tunnel:service] Port ${port} -> ${data.publicUrl} (process: ${processKey})`);
@@ -390,4 +481,10 @@ export default {
   getUserInfo,
   clearUserInfo,
   resetEndpointCache,
+  persistCredentials,
+  loadPersistedCredentials,
+  clearPersistedCredentials,
+  getRegisteredPorts,
+  setPortPrivacy,
+  getServiceTunnels,
 };

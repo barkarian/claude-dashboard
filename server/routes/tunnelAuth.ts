@@ -99,6 +99,9 @@ router.get('/callback', async (req: Request, res: Response) => {
     // Cache user info server-side so tunnel-proxied requests can auto-bootstrap sessions
     tunnelManager.setUserInfo(userInfo);
 
+    // Persist credentials to SQLite for session survival across restarts
+    tunnelManager.persistCredentials(userInfo);
+
     // Check if the subdomain is changing (account switch)
     const currentCreds = tunnelManager.getCredentials();
     const isSubdomainChange = currentCreds && currentCreds.userSubdomain !== data.user.userSubdomain;
@@ -263,6 +266,7 @@ router.get('/modes', async (req: Request, res: Response) => {
 router.post('/disconnect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /disconnect hit');
   tunnelManager.clearUserInfo();
+  tunnelManager.clearPersistedCredentials();
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to disconnect' });

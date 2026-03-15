@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
@@ -11,6 +12,7 @@ interface RunningProcessCardProps {
 export default function RunningProcessCard({ process, projectId, onRefresh }: RunningProcessCardProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const [privacyLoading, setPrivacyLoading] = useState<number | null>(null);
 
   function handleStop() {
     if (!socket) return;
@@ -22,6 +24,20 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
     const url = process.tunnelUrls?.[port];
     window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
   }
+
+  const togglePortPrivacy = useCallback(async (port: number, currentIsPublic: boolean) => {
+    setPrivacyLoading(port);
+    try {
+      const res = await fetch(`/api/ports/${port}/privacy`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ isPublic: !currentIsPublic }),
+      });
+      if (res.ok) onRefresh();
+    } catch { /* ignore */ }
+    setPrivacyLoading(null);
+  }, [onRefresh]);
 
   const statusColor: Record<string, string> = {
     running: 'bg-success',
@@ -53,16 +69,35 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
         </button>
 
         {ports.length > 0 && (
-          <button
-            onClick={() => openPort(ports[0])}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors flex-shrink-0"
-            title={`Open :${ports[0]}`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-            View
-          </button>
+          <>
+            <button
+              onClick={() => openPort(ports[0])}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors flex-shrink-0"
+              title={`Open :${ports[0]}`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+              View
+            </button>
+            {ports.length === 1 && (() => {
+              const isPublic = process.portPrivacy?.[ports[0]] ?? true;
+              return (
+                <button
+                  onClick={() => togglePortPrivacy(ports[0], isPublic)}
+                  disabled={privacyLoading === ports[0]}
+                  className={`px-2 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+                    isPublic
+                      ? 'bg-success/10 text-success hover:bg-success/20'
+                      : 'bg-warning/10 text-warning hover:bg-warning/20'
+                  } ${privacyLoading === ports[0] ? 'opacity-50' : ''}`}
+                  title={isPublic ? 'Public — click to make private' : 'Private — click to make public'}
+                >
+                  {isPublic ? 'Public' : 'Private'}
+                </button>
+              );
+            })()}
+          </>
         )}
 
         {process.status === 'running' && (
@@ -79,16 +114,32 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
       </div>
 
       {ports.length > 1 && (
-        <div className="flex items-center gap-1.5 mt-2 ml-5.5">
-          {ports.map((port) => (
-            <button
-              key={port}
-              onClick={() => openPort(port)}
-              className="px-2 py-0.5 text-xs font-mono text-primary bg-primary/10 rounded hover:bg-primary/20 transition-colors"
-            >
-              :{port}
-            </button>
-          ))}
+        <div className="flex items-center gap-1.5 mt-2 ml-5.5 flex-wrap">
+          {ports.map((port) => {
+            const isPublic = process.portPrivacy?.[port] ?? true;
+            return (
+              <div key={port} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => openPort(port)}
+                  className="px-2 py-0.5 text-xs font-mono text-primary bg-primary/10 rounded-l hover:bg-primary/20 transition-colors"
+                >
+                  :{port}
+                </button>
+                <button
+                  onClick={() => togglePortPrivacy(port, isPublic)}
+                  disabled={privacyLoading === port}
+                  className={`px-1.5 py-0.5 text-xs rounded-r transition-colors ${
+                    isPublic
+                      ? 'bg-success/10 text-success hover:bg-success/20'
+                      : 'bg-warning/10 text-warning hover:bg-warning/20'
+                  } ${privacyLoading === port ? 'opacity-50' : ''}`}
+                  title={isPublic ? 'Public — click to make private' : 'Private — click to make public'}
+                >
+                  {isPublic ? 'Public' : 'Private'}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { Socket } from 'socket.io';
 import type { IncomingMessage } from 'http';
+import crypto from 'crypto';
 import config from './config.ts';
 import tunnelManager from './services/tunnelManager.ts';
 import '../shared/types/server.ts'; // session augmentation
@@ -27,15 +28,64 @@ function isRequestViaTunnel(req: Request): boolean {
  * Returns true if session now has tunnelService data (either existing or freshly bootstrapped).
  */
 function tryAutoBootstrapSession(req: Request): boolean {
-  if (!req.session) return false; // no session (path mismatch)
+  if (!req.session) return false;
   if (req.session.tunnelService) return true; // already has session
 
-  if (!isRequestViaTunnel(req)) return false;
+  // Check for cryptographic tunnel token (injected by tunnel service)
+  const tunnelToken = req.get('X-Tunnel-Token');
+  if (!tunnelToken) {
+    // Fallback: also accept X-Forwarded-Host for backwards compatibility during migration
+    if (!isRequestViaTunnel(req)) return false;
 
+    const userInfo = tunnelManager.getUserInfo();
+    if (!userInfo) return false;
+
+    req.session.tunnelService = {
+      apiKey: userInfo.apiKey,
+      userSubdomain: userInfo.userSubdomain,
+      userId: userInfo.userId,
+      email: userInfo.email,
+      username: userInfo.username,
+      plan: userInfo.plan || 'free',
+    };
+
+    req.session.save((err) => {
+      if (err) console.error('[auth] Failed to save auto-bootstrapped session:', err);
+    });
+
+    console.log(`[auth] Auto-bootstrapped session via X-Forwarded-Host (user=${userInfo.username})`);
+    return true;
+  }
+
+  // Validate the HMAC token
   const userInfo = tunnelManager.getUserInfo();
-  if (!userInfo) return false;
+  if (!userInfo || !userInfo.apiKey) return false;
 
-  // Auto-bootstrap the session with cached user info
+  // Token format: timestamp.hmac
+  const dotIndex = tunnelToken.indexOf('.');
+  if (dotIndex === -1) return false;
+  const timestamp = tunnelToken.slice(0, dotIndex);
+  const signature = tunnelToken.slice(dotIndex + 1);
+  if (!timestamp || !signature) return false;
+
+  // Reject tokens older than 5 minutes
+  const age = Date.now() - parseInt(timestamp, 10);
+  if (isNaN(age) || age > 300000 || age < -30000) return false;
+
+  // Verify HMAC
+  const expected = crypto.createHmac('sha256', userInfo.apiKey)
+    .update(timestamp + '.' + userInfo.userSubdomain)
+    .digest('hex');
+
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+      return false;
+    }
+  } catch {
+    return false; // invalid hex
+  }
+
+  // Token valid — bootstrap session
   req.session.tunnelService = {
     apiKey: userInfo.apiKey,
     userSubdomain: userInfo.userSubdomain,
@@ -45,14 +95,11 @@ function tryAutoBootstrapSession(req: Request): boolean {
     plan: userInfo.plan || 'free',
   };
 
-  // Explicitly save so the session persists (saveUninitialized: false won't auto-save)
   req.session.save((err) => {
-    if (err) {
-      console.error('[auth] Failed to save auto-bootstrapped session:', err);
-    }
+    if (err) console.error('[auth] Failed to save token-bootstrapped session:', err);
   });
 
-  console.log(`[auth] Auto-bootstrapped session for tunnel request (user=${userInfo.username}, host=${req.get('X-Forwarded-Host')})`);
+  console.log(`[auth] Auto-bootstrapped session via X-Tunnel-Token (user=${userInfo.username})`);
   return true;
 }
 

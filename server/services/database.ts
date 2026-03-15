@@ -60,6 +60,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chats_project ON chats(project_id);
   CREATE INDEX IF NOT EXISTS idx_messages_chat ON chat_messages(chat_id);
   CREATE INDEX IF NOT EXISTS idx_messages_order ON chat_messages(chat_id, sort_order);
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid TEXT PRIMARY KEY,
+    sess TEXT NOT NULL,
+    expired DATETIME NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+
+  CREATE TABLE IF NOT EXISTS tunnel_credentials (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    api_key TEXT NOT NULL,
+    user_subdomain TEXT NOT NULL,
+    user_id TEXT,
+    email TEXT,
+    username TEXT,
+    plan TEXT DEFAULT 'free',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 export default db;

@@ -81,4 +81,5 @@ export interface RunningProcess {
   isShell?: boolean;
   detectedPorts?: number[];
   tunnelUrls?: Record<number, string>;
+  portPrivacy?: Record<number, boolean>; // port -> isPublic
 }

@@ -15,6 +15,7 @@ import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import settingsRoutes from './routes/settings.ts';
 import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
+import portRoutes from './routes/ports.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
@@ -23,16 +24,19 @@ import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
+import db from './services/database.ts';
+import SqliteSessionStore from './services/sessionStore.ts';
 import '../shared/types/server.ts'; // session augmentation
 
 const app = express();
 const server = http.createServer(app);
 const env = config.dashboardEnv;
 
-// Session middleware — env-specific cookie name and path
+// Session middleware — env-specific cookie name and path, backed by SQLite
 const sessionMiddleware = session({
   name: `connect.sid.${env}`,
   secret: config.sessionSecret,
+  store: new SqliteSessionStore({ db, clearInterval: 3600000 }),
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -49,7 +53,7 @@ app.use(cors({
   origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
   credentials: true,
 }));
-app.use(express.json({ limit: '500mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(sessionMiddleware);
 app.use(authMiddleware);
 
@@ -63,6 +67,7 @@ apiRouter.use('/tunnel-auth', tunnelAuthRoutes);
 apiRouter.use('/', settingsRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/migrate', migrateRoutes);
+apiRouter.use('/ports', portRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);
@@ -149,6 +154,16 @@ process.on('SIGINT', shutdown);
 server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}, dashboardEnv: ${env}`);
+  // Try to restore persisted tunnel credentials (Phase 3: persistent sessions)
+  if (config.tunnelMode === 'tunnel-service' && !config.tunnelApiKey) {
+    const persisted = tunnelManager.loadPersistedCredentials();
+    if (persisted) {
+      console.log(`[startup] Restoring persisted tunnel credentials for ${persisted.username}`);
+      tunnelManager.setUserInfo(persisted);
+      tunnelManager.setCredentials(persisted.apiKey, persisted.userSubdomain);
+    }
+  }
+
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
     // Auto-connect using env vars — tunnel is immediately available
     tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);
