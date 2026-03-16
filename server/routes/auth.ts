@@ -31,11 +31,33 @@ router.post('/logout', (req: Request, res: Response) => {
 
 router.get('/status', (req: Request, res: Response) => {
   const tunnelService = req.session?.tunnelService;
-  const authenticated = !!tunnelService;
-
-  // Check if tunnel is already connected server-side (even without browser session)
   const creds = tunnelManager.getCredentials();
   const tunnelConnected = !!creds?.userSubdomain && config.tunnelDomain;
+
+  // Desktop mode: always authenticated, but include tunnel URL for redirect
+  if (process.env.CLAW_DESKTOP === '1') {
+    const userInfo = tunnelManager.getUserInfo();
+    const subdomain = userInfo?.userSubdomain || creds?.userSubdomain;
+    const tunnelUrl = subdomain && config.tunnelDomain
+      ? `https://${subdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`
+      : null;
+
+    return res.json({
+      authenticated: true,
+      isVps: false,
+      dashboardEnv: config.dashboardEnv,
+      user: userInfo ? {
+        username: userInfo.username,
+        email: userInfo.email,
+        userSubdomain: userInfo.userSubdomain,
+        plan: userInfo.plan || 'free',
+      } : { username: 'desktop', email: '', userSubdomain: '', plan: 'free' as const },
+      oauthUrl: null,
+      tunnelUrl,
+    });
+  }
+
+  const authenticated = !!tunnelService;
 
   // Only offer OAuth if the tunnel isn't already connected
   const oauthUrl = !tunnelConnected && config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
