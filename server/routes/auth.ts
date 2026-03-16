@@ -33,6 +33,11 @@ router.get('/status', (req: Request, res: Response) => {
   const sessionId = req.sessionID ? req.sessionID.slice(0, 8) + '...' : 'none';
   console.log(`[auth] /status check: authenticated=${authenticated}, sessionId=${sessionId}, user=${tunnelService?.username || 'none'}, cookie=${req.headers.cookie ? 'present' : 'MISSING'}`);
 
+  // Build tunnel URL for localhost→tunnel redirect
+  const tunnelUrl = authenticated && tunnelService?.userSubdomain && config.tunnelDomain
+    ? `https://${tunnelService.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`
+    : null;
+
   return res.json({
     authenticated,
     isVps: config.isVps,
@@ -44,6 +49,7 @@ router.get('/status', (req: Request, res: Response) => {
       plan: tunnelService.plan || 'free',
     } : null,
     oauthUrl,
+    tunnelUrl,
   });
 });
 

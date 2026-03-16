@@ -15,6 +15,7 @@ interface AuthContextValue {
   loading: boolean;
   user: AuthUser | null;
   oauthUrl: string | null;
+  tunnelUrl: string | null;
   logout: () => Promise<void>;
   refreshPlan: () => Promise<void>;
 }
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -41,12 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
-      const data = await api.get<{ authenticated: boolean; isVps: boolean; dashboardEnv?: 'local' | 'vps'; user: AuthUser | null; oauthUrl: string | null }>('/api/auth/status');
+      const data = await api.get<{ authenticated: boolean; isVps: boolean; dashboardEnv?: 'local' | 'vps'; user: AuthUser | null; oauthUrl: string | null; tunnelUrl: string | null }>('/api/auth/status');
       setIsAuthenticated(data.authenticated);
       setIsVps(data.isVps);
       if (data.dashboardEnv) setDashboardEnv(data.dashboardEnv);
       setUser(data.user);
       setOauthUrl(data.oauthUrl);
+      setTunnelUrl(data.tunnelUrl);
     } catch {
       setIsAuthenticated(false);
     } finally {
@@ -70,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isVps, dashboardEnv, loading, user, oauthUrl, logout, refreshPlan }}>
+    <AuthContext.Provider value={{ isAuthenticated, isVps, dashboardEnv, loading, user, oauthUrl, tunnelUrl, logout, refreshPlan }}>
       {children}
     </AuthContext.Provider>
   );

@@ -8,7 +8,7 @@ import '../../shared/types/server.ts'; // session augmentation
 const router = Router();
 
 // Pending activation data for account switches (short-lived, used by /activate)
-let pendingActivation: { apiKey: string; userSubdomain: string; timestamp: number } | null = null;
+let pendingActivation: { apiKey: string; userSubdomain: string; gateToken?: string; timestamp: number } | null = null;
 
 // GET /api/tunnel-auth/connect — redirect browser to tunnel-service OAuth
 router.get('/connect', (req: Request, res: Response) => {
@@ -64,6 +64,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     const data = await tokenRes.json() as {
       user: { id: string; email: string; username: string; userSubdomain: string };
       apiKey: string;
+      gateToken?: string;
     };
 
     console.log(`[tunnel-auth] Token exchange success. user=${data.user?.username}, subdomain=${data.user?.userSubdomain}, apiKey=${data.apiKey ? data.apiKey.slice(0, 8) + '...' : 'MISSING'}`);
@@ -115,6 +116,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       pendingActivation = {
         apiKey: data.apiKey,
         userSubdomain: data.user.userSubdomain,
+        gateToken: data.gateToken,
         timestamp: Date.now(),
       };
 
@@ -156,7 +158,14 @@ router.get('/callback', async (req: Request, res: Response) => {
       // Redirect to the tunnel URL (env-prefixed)
       let redirectUrl: string;
       if (config.tunnelDomain) {
-        redirectUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
+        const tunnelUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
+        if (data.gateToken && config.tunnelServiceUrl) {
+          // Redirect through gate/activate to set the gate cookie in one step
+          const apiSubdomain = process.env.API_SUBDOMAIN || 'tunnel-api';
+          redirectUrl = `https://${apiSubdomain}.${config.tunnelDomain}/gate/activate?token=${encodeURIComponent(data.gateToken)}&redirect=${encodeURIComponent(tunnelUrl)}`;
+        } else {
+          redirectUrl = tunnelUrl;
+        }
       } else {
         redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
       }
@@ -187,7 +196,7 @@ router.get('/activate', async (req: Request, res: Response) => {
     return res.status(400).send('Account switch expired, please try again');
   }
 
-  const { apiKey, userSubdomain } = pendingActivation;
+  const { apiKey, userSubdomain, gateToken } = pendingActivation;
   pendingActivation = null; // consume it
 
   console.log(`[tunnel-auth] Activating tunnel for subdomain=${userSubdomain}`);
@@ -209,7 +218,13 @@ router.get('/activate', async (req: Request, res: Response) => {
   // Build the new tunnel URL (env-prefixed)
   let redirectUrl: string;
   if (config.tunnelDomain) {
-    redirectUrl = `https://${userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
+    const tunnelUrl = `https://${userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
+    if (gateToken && config.tunnelServiceUrl) {
+      const apiSubdomain = process.env.API_SUBDOMAIN || 'tunnel-api';
+      redirectUrl = `https://${apiSubdomain}.${config.tunnelDomain}/gate/activate?token=${encodeURIComponent(gateToken)}&redirect=${encodeURIComponent(tunnelUrl)}`;
+    } else {
+      redirectUrl = tunnelUrl;
+    }
   } else {
     redirectUrl = config.nodeEnv === 'development' ? 'http://localhost:5173' : '/';
   }

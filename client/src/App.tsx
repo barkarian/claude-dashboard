@@ -17,7 +17,7 @@ interface ProtectedRouteProps {
 }
 
 function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, loading, oauthUrl } = useAuth();
+  const { isAuthenticated, loading, oauthUrl, tunnelUrl } = useAuth();
 
   if (loading) {
     return (
@@ -36,6 +36,19 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
           <p className="text-text-muted">Redirecting to login...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to tunnel URL when accessing locally (localhost)
+  if (tunnelUrl && window.location.hostname === 'localhost') {
+    window.location.href = tunnelUrl;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-text-muted">Redirecting to dashboard...</p>
         </div>
       </div>
     );
