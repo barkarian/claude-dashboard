@@ -26,16 +26,23 @@ router.get('/status', (req: Request, res: Response) => {
   const tunnelService = req.session?.tunnelService;
   const authenticated = !!tunnelService;
 
-  const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
+  // Check if tunnel is already connected server-side (even without browser session)
+  const creds = tunnelManager.getCredentials();
+  const tunnelConnected = !!creds?.userSubdomain && config.tunnelDomain;
+
+  // Only offer OAuth if the tunnel isn't already connected
+  const oauthUrl = !tunnelConnected && config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
     ? `/${config.dashboardEnv}/api/tunnel-auth/connect`
     : null;
 
   const sessionId = req.sessionID ? req.sessionID.slice(0, 8) + '...' : 'none';
-  console.log(`[auth] /status check: authenticated=${authenticated}, sessionId=${sessionId}, user=${tunnelService?.username || 'none'}, cookie=${req.headers.cookie ? 'present' : 'MISSING'}`);
+  console.log(`[auth] /status check: authenticated=${authenticated}, tunnelConnected=${tunnelConnected}, sessionId=${sessionId}, user=${tunnelService?.username || 'none'}, cookie=${req.headers.cookie ? 'present' : 'MISSING'}`);
 
   // Build tunnel URL for localhost→tunnel redirect
-  const tunnelUrl = authenticated && tunnelService?.userSubdomain && config.tunnelDomain
-    ? `https://${tunnelService.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`
+  // Use session subdomain if available, otherwise fall back to server-side credentials
+  const subdomain = tunnelService?.userSubdomain || creds?.userSubdomain;
+  const tunnelUrl = subdomain && config.tunnelDomain
+    ? `https://${subdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`
     : null;
 
   return res.json({
