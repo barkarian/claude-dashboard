@@ -5,7 +5,6 @@ import type { IncomingMessage } from 'http';
 import config from './config.ts';
 import tunnelManager from './services/tunnelManager.ts';
 import * as tunnelClient from './services/tunnelClient.ts';
-import '../shared/types/server.ts'; // session augmentation
 
 /**
  * Validate tunnel session token using timing-safe comparison.

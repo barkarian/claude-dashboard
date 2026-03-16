@@ -18,17 +18,3 @@ export interface ServerConfig {
   migrationSourceUrl: string | null;
   dashboardEnv: 'local' | 'vps';
 }
-
-// Augment express-session to include our custom session data
-declare module 'express-session' {
-  interface SessionData {
-    tunnelService?: {
-      apiKey: string;
-      userSubdomain: string;
-      userId: string;
-      email: string;
-      username: string;
-      plan: 'free' | 'pro';
-    };
-  }
-}

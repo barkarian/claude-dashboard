@@ -26,7 +26,6 @@ import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
-import '../shared/types/server.ts'; // session augmentation
 
 // --- SQLite session store (uses existing better-sqlite3 db) ---
 class SQLiteSessionStore extends session.Store {

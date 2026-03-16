@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import config from '../config.ts';
 import tunnelManager from '../services/tunnelManager.ts';
-import '../../shared/types/server.ts'; // session augmentation
 
 const router = Router();
 

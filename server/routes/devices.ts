@@ -1,6 +1,5 @@
 import { Router, type Request, type Response } from 'express';
 import config from '../config.ts';
-import '../../shared/types/server.ts';
 
 const router = Router();
 

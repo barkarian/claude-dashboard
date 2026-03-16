@@ -3,7 +3,6 @@ import config from '../config.ts';
 import tunnelManager from '../services/tunnelManager.ts';
 import * as tunnelClient from '../services/tunnelClient.ts';
 import { deleteTunnelCredentials } from '../services/database.ts';
-import '../../shared/types/server.ts'; // session augmentation
 
 const router = Router();
 
