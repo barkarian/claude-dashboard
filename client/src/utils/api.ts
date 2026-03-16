@@ -16,6 +16,12 @@ async function request<T = any>(method: string, path: string, body?: unknown): P
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }));
+    // Workspace offline — force full page reload so tunnel proxy serves the offline page
+    if (res.status === 503 && error.error === 'workspace_offline') {
+      window.location.reload();
+      // Never resolves — page is reloading
+      return new Promise<T>(() => {});
+    }
     throw new Error(error.error || `HTTP ${res.status}`);
   }
 
