@@ -5,6 +5,8 @@ import VpsStatusSection from '../components/settings/VpsStatusSection.tsx';
 import UpdateSection from '../components/settings/UpdateSection.tsx';
 import IntegrationsPanel from '../components/settings/IntegrationsPanel.tsx';
 import SshAccessPanel from '../components/settings/SshAccessPanel.tsx';
+import DesktopNotificationsSection from '../components/settings/DesktopNotificationsSection.tsx';
+import ConnectedDevicesSection from '../components/settings/ConnectedDevicesSection.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
 
 export default function SettingsPage() {
@@ -20,6 +22,8 @@ export default function SettingsPage() {
           </div>
           {user?.plan === 'pro' && <VpsStatusSection />}
           <UpdateSection />
+          <ConnectedDevicesSection />
+          {window.__TAURI__ && <DesktopNotificationsSection />}
           <IntegrationsPanel />
           <div>
             <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-4">VPS Only</p>

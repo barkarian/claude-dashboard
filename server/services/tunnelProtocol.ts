@@ -45,6 +45,12 @@ export interface TunnelAuth {
   apiKey: string;
 }
 
+export interface PushEvent {
+  type: 'push-event';
+  event: 'chat-reply';
+  data: Record<string, string>;
+}
+
 export type TunnelMessage =
   | TunnelRequest
   | TunnelResponse
@@ -52,4 +58,5 @@ export type TunnelMessage =
   | TunnelResponseChunk
   | TunnelResponseEnd
   | TunnelResponseError
-  | TunnelAuth;
+  | TunnelAuth
+  | PushEvent;

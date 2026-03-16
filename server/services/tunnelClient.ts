@@ -9,6 +9,7 @@ import type {
   TunnelResponseError,
 } from './tunnelProtocol.ts';
 import credentialService from './credentialService.ts';
+import { emitSidecarEvent } from './sidecarEmitter.ts';
 import config from '../config.ts';
 
 // Current active WebSocket (only this one should handle events)
@@ -88,6 +89,7 @@ function doConnect(): void {
       return;
     }
     console.log('[tunnel-client] WebSocket connected, sending auth...');
+    emitSidecarEvent({ type: 'status', tunnel: 'connecting' });
     socket.send(JSON.stringify({ type: 'auth', apiKey: currentApiKey, mode: config.dashboardEnv }));
   });
 
@@ -106,6 +108,7 @@ function doConnect(): void {
       reconnectAttempt = 0;
       currentSessionToken = msg.sessionToken || null;
       console.log(`[tunnel-client] Authenticated as subdomain: ${msg.subdomain}`);
+      emitSidecarEvent({ type: 'status', tunnel: 'connected', subdomain: msg.subdomain });
       return;
     }
 
@@ -129,6 +132,7 @@ function doConnect(): void {
     connected = false;
     ws = null;
     console.log(`[tunnel-client] WebSocket closed (code: ${code}, reason: ${reason?.toString() || 'none'})`);
+    emitSidecarEvent({ type: 'status', tunnel: 'disconnected' });
 
     // Code 4000 = replaced by VPS connection. Stop reconnecting.
     if (code === 4000) {
@@ -349,4 +353,8 @@ export function getSessionToken(): string | null {
 
 export function isConnected(): boolean {
   return connected;
+}
+
+export function sendPushEvent(event: string, data: Record<string, string>): void {
+  sendMessage({ type: 'push-event', event, data });
 }

@@ -3,6 +3,7 @@ import type { Server as SocketIOServer } from 'socket.io';
 import type { ProcessStatus } from '../../shared/types/models.ts';
 import { detectPorts } from './portDetector.ts';
 import tunnelManager from './tunnelManager.ts';
+import { emitSidecarEvent } from './sidecarEmitter.ts';
 
 const MAX_BUFFER_LINES = 5000;
 
@@ -101,6 +102,14 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
       io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
     }
+    // Notify desktop shell of build completion/failure
+    emitSidecarEvent({
+      type: 'notification',
+      title: exitCode === 0 ? 'Build Complete' : 'Build Failed',
+      body: exitCode === 0 ? `"${command}" finished successfully` : `"${command}" exited with code ${exitCode}`,
+      deepLink: `/projects/${projectId}`,
+      event: exitCode === 0 ? 'build-complete' : 'build-failed',
+    });
   });
 
   if (io) {

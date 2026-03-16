@@ -1,6 +1,8 @@
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import { migrateHistoryMessage } from '../services/sdkSessionManager.ts';
 import projectManager from '../services/projectManager.ts';
+import { emitSidecarEvent } from '../services/sidecarEmitter.ts';
+import { sendPushEvent } from '../services/tunnelClient.ts';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type {
   SDKStartPayload,
@@ -79,6 +81,23 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
             timestamp: lastAssistant.timestamp || new Date().toISOString(),
           });
         }
+
+        // Notify desktop shell of chat reply
+        const chat = projectManager.getChat(chatId);
+        emitSidecarEvent({
+          type: 'notification',
+          title: 'Chat Reply',
+          body: `Response received in "${chat?.label || 'Chat'}"`,
+          deepLink: `/projects/${session.projectId}/chat/${chatId}`,
+          event: 'chat-reply',
+        });
+
+        // Send push notification to mobile devices
+        const lastMsg = lastAssistant?.content;
+        const preview = Array.isArray(lastMsg)
+          ? (lastMsg.find((c: any) => c.type === 'text') as any)?.text?.slice(0, 100) || 'Response ready'
+          : 'Response ready';
+        sendPushEvent('chat-reply', { preview, chatId });
 
         // Persist the SDK session ID for future resume
         const updatedSession = sdkSessionManager.getSession(chatId);

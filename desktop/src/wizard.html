@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claw Dev — Setup</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wizard">
+    <!-- Step indicator -->
+    <div class="step-indicator">
+      <div class="step-dot active" data-step="1"></div>
+      <div class="step-dot" data-step="2"></div>
+      <div class="step-dot" data-step="3"></div>
+    </div>
+
+    <!-- Step 1: Welcome / Sign in -->
+    <div class="wizard-step active" id="step-1">
+      <div class="splash-logo" style="margin-bottom: 24px">C</div>
+      <h1>Welcome to Claw Dev</h1>
+      <p>Sign in to connect your dashboard to the cloud and get a public URL for your projects.</p>
+      <button class="btn btn-primary" id="btn-signin">Sign In / Sign Up</button>
+    </div>
+
+    <!-- Step 2: Connect your phone (Phase 5 placeholder) -->
+    <div class="wizard-step" id="step-2">
+      <h1>Connect Your Phone</h1>
+      <p>Control your dev environment from your phone. This feature is coming soon in a future update.</p>
+      <div>
+        <button class="btn btn-secondary" id="btn-skip-phone">Skip for Now</button>
+        <button class="btn btn-primary" id="btn-next-phone">Next</button>
+      </div>
+    </div>
+
+    <!-- Step 3: All set -->
+    <div class="wizard-step" id="step-3">
+      <h1>You're All Set!</h1>
+      <p>Your dashboard is connected and ready to go.</p>
+      <div class="status-badge connected">
+        <span class="dot"></span>
+        Connected
+      </div>
+      <div class="tunnel-url" id="tunnel-url"></div>
+      <button class="btn btn-primary" id="btn-open-dashboard">Open Dashboard</button>
+    </div>
+  </div>
+
+  <script type="module">
+    const { listen } = await import('@tauri-apps/api/event');
+
+    let currentStep = 1;
+    let dashboardPort = 2222;
+
+    // Listen for port info
+    listen('sidecar-ready', (e) => {
+      dashboardPort = e.payload?.port || 2222;
+    });
+
+    function goToStep(n) {
+      document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
+      document.getElementById(`step-${n}`).classList.add('active');
+      document.querySelectorAll('.step-dot').forEach(dot => {
+        const s = parseInt(dot.dataset.step);
+        dot.classList.toggle('active', s === n);
+        dot.classList.toggle('done', s < n);
+      });
+      currentStep = n;
+    }
+
+    // Step 1: Sign in
+    document.getElementById('btn-signin').addEventListener('click', async () => {
+      // Open the OAuth flow in this webview
+      window.location.href = `http://localhost:${dashboardPort}/api/tunnel-auth/connect`;
+
+      // After OAuth redirect, poll for auth status
+      const poll = setInterval(async () => {
+        try {
+          const res = await fetch(`http://localhost:${dashboardPort}/api/auth/status`);
+          const data = await res.json();
+          if (data.authenticated) {
+            clearInterval(poll);
+            goToStep(2);
+          }
+        } catch {
+          // Server may not be ready yet, keep polling
+        }
+      }, 2000);
+    });
+
+    // Step 2: Connect phone (placeholder)
+    document.getElementById('btn-skip-phone').addEventListener('click', () => goToStep(3));
+    document.getElementById('btn-next-phone').addEventListener('click', () => goToStep(3));
+
+    // Step 3: Listen for tunnel connection
+    listen('tunnel-status', (e) => {
+      if (e.payload?.tunnel === 'connected' && e.payload?.subdomain) {
+        const url = `https://${e.payload.subdomain}.claw-dev.com`;
+        document.getElementById('tunnel-url').textContent = url;
+      }
+    });
+
+    // Step 3: Open Dashboard
+    document.getElementById('btn-open-dashboard').addEventListener('click', () => {
+      window.location.href = `http://localhost:${dashboardPort}`;
+    });
+  </script>
+</body>
+</html>

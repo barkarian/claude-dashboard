@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claw Dev</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="splash">
+    <div class="splash-logo">C</div>
+    <h1>Claw Dev</h1>
+    <p>Starting server&hellip;</p>
+    <div class="spinner"></div>
+    <div class="splash-error" id="error">
+      <p id="error-text">Failed to start the server.</p>
+      <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+    </div>
+  </div>
+
+  <script type="module">
+    // Listen for sidecar events from Tauri backend
+    const { listen } = await import('@tauri-apps/api/event');
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+
+    const appWindow = getCurrentWindow();
+
+    listen('sidecar-ready', async (event) => {
+      const port = event.payload?.port || 2222;
+      // Navigate to the Express dashboard
+      window.location.href = `http://localhost:${port}`;
+      await appWindow.show();
+      await appWindow.setFocus();
+    });
+
+    listen('sidecar-first-run', async () => {
+      window.location.href = 'wizard.html';
+      await appWindow.show();
+      await appWindow.setFocus();
+    });
+
+    listen('sidecar-crashed', async (event) => {
+      document.querySelector('.spinner').style.display = 'none';
+      const errorDiv = document.getElementById('error');
+      const errorText = document.getElementById('error-text');
+      errorText.textContent = event.payload?.error || 'Failed to start the server.';
+      errorDiv.style.display = 'block';
+    });
+  </script>
+</body>
+</html>

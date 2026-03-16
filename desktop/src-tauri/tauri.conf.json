@@ -1,0 +1,57 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicklasmoeller/tauri-v2-schema/main/tauri.conf.json",
+  "productName": "Claw Dev",
+  "version": "0.1.0",
+  "identifier": "com.claw-dev.desktop",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Claw Dev",
+        "url": "splash.html",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "visible": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:2222 http://localhost:2223 http://localhost:2224 ws://localhost:2222 wss://*.claw-dev.com https://*.claw-dev.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:2222; frame-src http://localhost:2222"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/node",
+      "resources/server/**"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/claw-dev/desktop/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -15,6 +15,7 @@ import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import settingsRoutes from './routes/settings.ts';
 import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
+import devicesRoutes from './routes/devices.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
@@ -24,6 +25,7 @@ import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials } from './services/database.ts';
+import { emitSidecarEvent } from './services/sidecarEmitter.ts';
 import '../shared/types/server.ts'; // session augmentation
 
 // --- SQLite session store (uses existing better-sqlite3 db) ---
@@ -120,6 +122,7 @@ apiRouter.use('/tunnel-auth', tunnelAuthRoutes);
 apiRouter.use('/', settingsRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/migrate', migrateRoutes);
+apiRouter.use('/devices', devicesRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);
@@ -218,6 +221,7 @@ process.on('SIGINT', shutdown);
 server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}, dashboardEnv: ${env}`);
+  emitSidecarEvent({ type: 'ready', port: config.port });
   // Restore persisted credentials (local mode only)
   if (config.dashboardEnv === 'local' && !config.tunnelApiKey) {
     const saved = getTunnelCredentials();
@@ -239,7 +243,12 @@ server.listen(config.port, async () => {
           plan: (saved.plan === 'pro' ? 'pro' : 'free') as 'free' | 'pro',
         });
       }
+    } else {
+      // No saved credentials — signal first-run wizard to desktop shell
+      emitSidecarEvent({ type: 'first-run' });
     }
+  } else if (process.env.CLAW_DESKTOP === '1' && !config.tunnelApiKey) {
+    emitSidecarEvent({ type: 'first-run' });
   }
 
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
