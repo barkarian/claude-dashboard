@@ -26,6 +26,7 @@ import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
+import appActivityMonitor from './services/appActivityMonitor.ts';
 
 // --- SQLite session store (uses existing better-sqlite3 db) ---
 class SQLiteSessionStore extends session.Store {
@@ -142,6 +143,9 @@ io.use(socketAuthMiddleware);
 
 // Register socket handlers
 registerSocketHandlers(io);
+
+// Initialize app activity monitor with Socket.IO
+appActivityMonitor.init(io);
 
 // Serve static files in production
 if (config.nodeEnv === 'production') {

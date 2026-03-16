@@ -11,6 +11,7 @@ import type {
 import credentialService from './credentialService.ts';
 import { emitSidecarEvent } from './sidecarEmitter.ts';
 import config from '../config.ts';
+import appActivityMonitor from './appActivityMonitor.ts';
 
 // Current active WebSocket (only this one should handle events)
 let ws: WebSocket | null = null;
@@ -186,6 +187,28 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
     return;
   }
 
+  // --- App Activity Monitor: intercept /__appmonitor/events POSTs ---
+  if (url === '/__appmonitor/events' && method.toUpperCase() === 'POST') {
+    try {
+      const bodyStr = body ? Buffer.from(body, 'base64').toString('utf-8') : '{}';
+      const payload = JSON.parse(bodyStr);
+      if (payload.port && Array.isArray(payload.events)) {
+        appActivityMonitor.ingestEvents(payload.port, payload.events);
+      }
+    } catch (err) {
+      console.error('[tunnel-client] Failed to parse app-monitor events:', err);
+    }
+    // Respond with 204 No Content
+    const responseMsg: TunnelResponse = {
+      type: 'tunnel-response',
+      requestId,
+      statusCode: 204,
+      headers: {},
+    };
+    sendMessage(responseMsg);
+    return;
+  }
+
   console.log(`[tunnel-client] Handling tunnel request: ${method} ${url} -> localhost:${targetPort} (reqId=${requestId.slice(0, 8)}..., cookie=${headers.cookie ? 'present' : 'MISSING'})`);
 
   // Build local request options
@@ -268,8 +291,31 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       const chunks: Buffer[] = [];
       localRes.on('data', (chunk: Buffer) => chunks.push(chunk));
       localRes.on('end', () => {
-        const responseBody = chunks.length > 0
-          ? Buffer.concat(chunks).toString('base64')
+        let finalBody: Buffer | undefined = chunks.length > 0
+          ? Buffer.concat(chunks)
+          : undefined;
+
+        // Inject app activity monitor script into HTML responses when port is monitored
+        if (finalBody && contentType.includes('text/html') && appActivityMonitor.isMonitored(targetPort)) {
+          let html = finalBody.toString('utf-8');
+          const monitorScript = appActivityMonitor.getMonitorScript(targetPort);
+          // Inject before </head> if present, otherwise before </body>, otherwise at end
+          if (html.includes('</head>')) {
+            html = html.replace('</head>', monitorScript + '</head>');
+          } else if (html.includes('</body>')) {
+            html = html.replace('</body>', monitorScript + '</body>');
+          } else {
+            html = monitorScript + html;
+          }
+          finalBody = Buffer.from(html, 'utf-8');
+          // Update content-length if it was set
+          if (resHeaders['content-length']) {
+            resHeaders['content-length'] = String(finalBody.length);
+          }
+        }
+
+        const responseBody = finalBody
+          ? finalBody.toString('base64')
           : undefined;
 
         const responseMsg: TunnelResponse = {
