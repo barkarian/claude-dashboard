@@ -17,7 +17,14 @@ router.post('/logout', (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to logout' });
     }
     res.clearCookie(`connect.sid.${config.dashboardEnv}`);
-    console.log('[auth] Session destroyed, user info cleared (tunnel stays open for re-login)');
+
+    // Clear the gate cookie so the browser is fully logged out
+    const tunnelDomain = config.tunnelDomain;
+    if (tunnelDomain) {
+      res.setHeader('Set-Cookie', `claw-gate=; Domain=.${tunnelDomain}; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+    }
+
+    console.log('[auth] Session destroyed, user info + gate cookie cleared (tunnel stays open for re-login)');
     return res.json({ success: true });
   });
 });

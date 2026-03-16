@@ -58,7 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = useCallback(async () => {
-    await api.post('/api/auth/logout');
+    if (window.__TAURI__) {
+      // Desktop app: clear SQLite credentials + session so next reopen asks for login
+      await api.post('/api/tunnel-auth/disconnect');
+    } else {
+      // Browser: clear session + gate cookie only (tunnel stays alive)
+      await api.post('/api/auth/logout');
+    }
     setIsAuthenticated(false);
     setUser(null);
   }, []);
