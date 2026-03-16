@@ -184,19 +184,31 @@ async function autostartScripts(): Promise<void> {
 }
 
 // Graceful shutdown
+let isShuttingDown = false;
 async function shutdown(): Promise<void> {
+  if (isShuttingDown) {
+    console.log('Force exit.');
+    process.exit(1);
+  }
+  isShuttingDown = true;
   console.log('Shutting down...');
-  await tunnelManager.deactivateAllEndpoints();
+
+  // Kill local processes first (fast, no network)
   processManager.killAll();
   sdkSessionManager.endAllSessions();
   fileService.stopAllWatching();
-  await tunnelManager.closeAll();
+
+  // Disconnect tunnel (don't await remote calls — they may hang)
+  tunnelManager.deactivateAllEndpoints().catch(() => {});
+  tunnelManager.closeAll().catch(() => {});
+
   io.close();
   server.close(() => {
     console.log('Server stopped.');
     process.exit(0);
   });
-  setTimeout(() => process.exit(1), 5000);
+  // Force exit after 2 seconds if server.close() hangs
+  setTimeout(() => process.exit(0), 2000);
 }
 
 process.on('SIGTERM', shutdown);
@@ -213,6 +225,10 @@ server.listen(config.port, async () => {
       console.log(`[startup] Restoring persisted tunnel credentials for subdomain=${saved.userSubdomain}`);
       config.tunnelApiKey = saved.apiKey;
       config.tunnelUserSubdomain = saved.userSubdomain;
+      // Ensure tunnelMode is set so the connection block below fires
+      if (config.tunnelMode === 'none' && config.tunnelServiceUrl) {
+        config.tunnelMode = 'tunnel-service';
+      }
       if (saved.userId) {
         tunnelManager.setUserInfo({
           apiKey: saved.apiKey,
