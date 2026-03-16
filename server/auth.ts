@@ -107,6 +107,21 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
+  // If tunnel is already connected server-side, redirect to tunnel URL
+  // (gate auth on the tunnel proxy will handle browser-level login)
+  const creds = tunnelManager.getCredentials();
+  if (creds?.userSubdomain && config.tunnelDomain) {
+    const tunnelUrl = `https://${creds.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
+
+    if (pathToCheck.startsWith('/api/')) {
+      res.status(401).json({ error: 'Unauthorized', tunnelUrl });
+      return;
+    }
+
+    res.redirect(tunnelUrl);
+    return;
+  }
+
   // Build OAuth URL for redirect (env-prefixed)
   const oauthUrl = config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
     ? `/${config.dashboardEnv}/api/tunnel-auth/connect`
