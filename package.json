@@ -8,7 +8,10 @@
     "dev:client": "cd client && npx vite",
     "build": "cd client && npx vite build",
     "start": "cd server && NODE_ENV=production npx tsx index.ts",
-    "install:all": "npm install"
+    "install:all": "npm install",
+    "desktop:dev": "npm run build && bash desktop/build-scripts/prepare-resources.sh && concurrently --kill-others \"cd server && CLAW_DESKTOP=1 NODE_ENV=production npx tsx index.ts\" \"cd desktop && pnpm tauri dev\"",
+    "desktop:build": "bash desktop/build-scripts/download-node.sh && npm run build && bash desktop/build-scripts/prepare-resources.sh && cd desktop && pnpm tauri build",
+    "desktop:run": "open desktop/src-tauri/target/release/bundle/macos/Claw\\ Dev.app"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
