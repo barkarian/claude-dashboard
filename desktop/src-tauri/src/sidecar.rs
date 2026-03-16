@@ -79,12 +79,14 @@ impl SidecarManager {
         let node = &self.node_path;
 
         log::info!(
-            "Spawning sidecar: {} {}",
+            "Spawning sidecar: {} --import tsx {}",
             node.display(),
             entry.display()
         );
 
         let mut child = Command::new(node)
+            .arg("--import")
+            .arg("tsx")
             .arg(entry.to_str().unwrap_or("index.ts"))
             .env("CLAW_DESKTOP", "1")
             .env("NODE_ENV", "production")

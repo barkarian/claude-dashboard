@@ -1,9 +1,11 @@
 /node_modules
+server/node_modules/
+client/node_modules/
+desktop/node_modules/
 .env
 server/data/
+server/public/
 
 # Desktop (Tauri)
 desktop/src-tauri/target/
 desktop/src-tauri/resources/
-desktop/node_modules/
-client/node_modules/
