@@ -1,36 +1,49 @@
+import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { Socket } from 'socket.io';
 import type { IncomingMessage } from 'http';
 import config from './config.ts';
 import tunnelManager from './services/tunnelManager.ts';
+import * as tunnelClient from './services/tunnelClient.ts';
 import '../shared/types/server.ts'; // session augmentation
 
 /**
- * Check if a request is coming through the tunnel (X-Forwarded-Host matches tunnel domain).
+ * Validate tunnel session token using timing-safe comparison.
+ * Replaces the old X-Forwarded-Host trust approach with a cryptographic token
+ * generated during WebSocket authentication.
  */
-function isRequestViaTunnel(req: Request): boolean {
-  const forwardedHost = req.get('X-Forwarded-Host');
-  return !!(forwardedHost && config.tunnelDomain && forwardedHost.endsWith(config.tunnelDomain));
+function validateTunnelToken(req: Request): boolean {
+  const token = req.headers['x-tunnel-token'];
+  if (!token || typeof token !== 'string') return false;
+
+  const expectedToken = tunnelClient.getSessionToken();
+  if (!expectedToken) return false;
+
+  // Constant-time comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(expectedToken),
+    );
+  } catch {
+    return false; // different lengths
+  }
 }
 
 /**
  * Auto-bootstrap session for requests arriving through the authenticated tunnel.
  *
- * When a user completes OAuth on localhost, the session cookie is set on localhost.
- * When the browser is then redirected to the tunnel URL (e.g. barkarian-2.claw-dev.com),
- * there's no cookie for that domain. Instead of forcing a second OAuth loop, we check:
- *   1. The request came through the tunnel (X-Forwarded-Host)
- *   2. The tunnel is authenticated (tunnelManager has credentials + user info)
- * If true, we auto-create the session. This is safe because the tunnel WebSocket
- * itself required API key authentication.
+ * When a request arrives with a valid X-Tunnel-Token (injected by the tunnel proxy),
+ * and there's no session yet, we auto-create one from cached user info.
+ * This is safe because the token is generated per-connection during WebSocket auth.
  *
  * Returns true if session now has tunnelService data (either existing or freshly bootstrapped).
  */
 function tryAutoBootstrapSession(req: Request): boolean {
-  if (!req.session) return false; // no session (path mismatch)
+  if (!req.session) return false;
   if (req.session.tunnelService) return true; // already has session
 
-  if (!isRequestViaTunnel(req)) return false;
+  if (!validateTunnelToken(req)) return false;
 
   const userInfo = tunnelManager.getUserInfo();
   if (!userInfo) return false;
@@ -52,7 +65,7 @@ function tryAutoBootstrapSession(req: Request): boolean {
     }
   });
 
-  console.log(`[auth] Auto-bootstrapped session for tunnel request (user=${userInfo.username}, host=${req.get('X-Forwarded-Host')})`);
+  console.log(`[auth] Auto-bootstrapped session via tunnel token (user=${userInfo.username})`);
   return true;
 }
 

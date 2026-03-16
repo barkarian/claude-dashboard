@@ -60,6 +60,85 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chats_project ON chats(project_id);
   CREATE INDEX IF NOT EXISTS idx_messages_chat ON chat_messages(chat_id);
   CREATE INDEX IF NOT EXISTS idx_messages_order ON chat_messages(chat_id, sort_order);
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid TEXT PRIMARY KEY,
+    sess TEXT NOT NULL,
+    expired DATETIME NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+
+  CREATE TABLE IF NOT EXISTS tunnel_credentials (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    api_key TEXT NOT NULL,
+    user_subdomain TEXT NOT NULL,
+    user_id TEXT,
+    email TEXT,
+    username TEXT,
+    plan TEXT DEFAULT 'free',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+// --- Session purge ---
+export function purgeExpiredSessions(): void {
+  db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();
+}
+
+// --- Tunnel credential persistence (local mode only) ---
+export interface TunnelCredentials {
+  apiKey: string;
+  userSubdomain: string;
+  userId?: string;
+  email?: string;
+  username?: string;
+  plan?: string;
+}
+
+export function saveTunnelCredentials(creds: {
+  apiKey: string;
+  userSubdomain: string;
+  userId?: string;
+  email?: string;
+  username?: string;
+  plan?: string;
+}): void {
+  db.prepare(`
+    INSERT INTO tunnel_credentials (id, api_key, user_subdomain, user_id, email, username, plan, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      api_key = excluded.api_key,
+      user_subdomain = excluded.user_subdomain,
+      user_id = COALESCE(excluded.user_id, tunnel_credentials.user_id),
+      email = COALESCE(excluded.email, tunnel_credentials.email),
+      username = COALESCE(excluded.username, tunnel_credentials.username),
+      plan = COALESCE(excluded.plan, tunnel_credentials.plan),
+      updated_at = datetime('now')
+  `).run(
+    creds.apiKey,
+    creds.userSubdomain,
+    creds.userId || null,
+    creds.email || null,
+    creds.username || null,
+    creds.plan || 'free',
+  );
+}
+
+export function getTunnelCredentials(): TunnelCredentials | null {
+  const row = db.prepare('SELECT * FROM tunnel_credentials WHERE id = 1').get() as any;
+  if (!row) return null;
+  return {
+    apiKey: row.api_key,
+    userSubdomain: row.user_subdomain,
+    userId: row.user_id || undefined,
+    email: row.email || undefined,
+    username: row.username || undefined,
+    plan: row.plan || undefined,
+  };
+}
+
+export function deleteTunnelCredentials(): void {
+  db.prepare('DELETE FROM tunnel_credentials WHERE id = 1').run();
+}
 
 export default db;

@@ -21,6 +21,9 @@ let currentWsUrl: string | null = null;
 let currentApiKey: string | null = null;
 let currentSubdomain: string | null = null;
 
+// Session token received from tunnel-service on auth-ok
+let currentSessionToken: string | null = null;
+
 // Generation counter: incremented on each connect() call.
 // Stale WebSocket event handlers check this to avoid corrupting new connections.
 let generation = 0;
@@ -101,6 +104,7 @@ function doConnect(): void {
     if (msg.type === 'auth-ok') {
       connected = true;
       reconnectAttempt = 0;
+      currentSessionToken = msg.sessionToken || null;
       console.log(`[tunnel-client] Authenticated as subdomain: ${msg.subdomain}`);
       return;
     }
@@ -147,6 +151,8 @@ function doConnect(): void {
   });
 }
 
+const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'];
+
 async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.log(`[tunnel-client] handleTunnelRequest: WebSocket not ready (ws=${!!ws}, readyState=${ws?.readyState})`);
@@ -154,6 +160,27 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
   }
 
   const { requestId, method, url, headers, body, targetPort } = tunnelReq;
+
+  // --- Input validation ---
+  // Validate targetPort against registered endpoints (lazy import to avoid circular dep)
+  const { default: tunnelManager } = await import('./tunnelManager.ts');
+  const registeredPorts = tunnelManager.getRegisteredPorts();
+  if (!registeredPorts.has(targetPort)) {
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Port not registered' });
+    return;
+  }
+
+  // Validate URL
+  if (url.includes('..') || url.includes('\0')) {
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Invalid URL' });
+    return;
+  }
+
+  // Validate method
+  if (!ALLOWED_METHODS.includes(method.toUpperCase())) {
+    sendMessage({ type: 'tunnel-response-error', requestId, error: 'Method not allowed' });
+    return;
+  }
 
   console.log(`[tunnel-client] Handling tunnel request: ${method} ${url} -> localhost:${targetPort} (reqId=${requestId.slice(0, 8)}..., cookie=${headers.cookie ? 'present' : 'MISSING'})`);
 
@@ -189,7 +216,14 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
     }
 
     if (shouldStream) {
-      // Streaming response
+      // Streaming response with max-duration timeout
+      const MAX_STREAM_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+      const maxDurationTimer = setTimeout(() => {
+        localRes.destroy();
+        const endMsg: TunnelResponseEnd = { type: 'tunnel-response-end', requestId };
+        sendMessage(endMsg);
+      }, MAX_STREAM_DURATION_MS);
+
       const startMsg: TunnelResponseStart = {
         type: 'tunnel-response-start',
         requestId,
@@ -208,6 +242,7 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       });
 
       localRes.on('end', () => {
+        clearTimeout(maxDurationTimer);
         const endMsg: TunnelResponseEnd = {
           type: 'tunnel-response-end',
           requestId,
@@ -216,6 +251,7 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       });
 
       localRes.on('error', (err) => {
+        clearTimeout(maxDurationTimer);
         const errMsg: TunnelResponseError = {
           type: 'tunnel-response-error',
           requestId,
@@ -302,8 +338,13 @@ export function disconnect(): void {
   currentWsUrl = null;
   currentApiKey = null;
   currentSubdomain = null;
+  currentSessionToken = null;
   reconnectAttempt = 0;
   console.log('[tunnel-client] Disconnected');
+}
+
+export function getSessionToken(): string | null {
+  return currentSessionToken;
 }
 
 export function isConnected(): boolean {

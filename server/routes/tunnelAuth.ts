@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import config from '../config.ts';
 import tunnelManager from '../services/tunnelManager.ts';
 import * as tunnelClient from '../services/tunnelClient.ts';
+import { deleteTunnelCredentials } from '../services/database.ts';
 import '../../shared/types/server.ts'; // session augmentation
 
 const router = Router();
@@ -263,6 +264,9 @@ router.get('/modes', async (req: Request, res: Response) => {
 router.post('/disconnect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /disconnect hit');
   tunnelManager.clearUserInfo();
+  if (config.dashboardEnv === 'local') {
+    deleteTunnelCredentials();
+  }
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to disconnect' });

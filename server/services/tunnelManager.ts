@@ -1,6 +1,7 @@
 import ngrok from '@ngrok/ngrok';
 import config from '../config.ts';
 import * as tunnelClient from './tunnelClient.ts';
+import { saveTunnelCredentials, deleteTunnelCredentials } from './database.ts';
 
 // --- ngrok types ---
 interface NgrokTunnelEntry {
@@ -54,6 +55,11 @@ function setCredentials(apiKey: string, userSubdomain: string): void {
   tunnelServiceApiKey = apiKey;
   tunnelServiceSubdomain = userSubdomain;
 
+  // Persist credentials locally so they survive restarts
+  if (config.dashboardEnv === 'local') {
+    saveTunnelCredentials({ apiKey, userSubdomain });
+  }
+
   // Connect WebSocket tunnel client
   if (config.tunnelServiceUrl) {
     const wsUrl = config.tunnelServiceUrl.replace(/^http/, 'ws') + '/tunnel/ws';
@@ -79,6 +85,11 @@ function clearCredentials(): void {
   tunnelServiceApiKey = null;
   tunnelServiceSubdomain = null;
   tunnelClient.disconnect();
+
+  if (config.dashboardEnv === 'local') {
+    deleteTunnelCredentials();
+  }
+
   console.log('[tunnel] Tunnel service credentials cleared');
 }
 
@@ -92,6 +103,18 @@ function getCredentials(): { apiKey: string; userSubdomain: string } | null {
 function setUserInfo(info: TunnelUserInfo): void {
   tunnelUserInfo = info;
   console.log(`[tunnel] User info cached: user=${info.username}, subdomain=${info.userSubdomain}`);
+
+  // Persist user info alongside credentials
+  if (config.dashboardEnv === 'local') {
+    saveTunnelCredentials({
+      apiKey: info.apiKey,
+      userSubdomain: info.userSubdomain,
+      userId: info.userId,
+      email: info.email,
+      username: info.username,
+      plan: info.plan,
+    });
+  }
 }
 
 function clearUserInfo(): void {
@@ -375,6 +398,15 @@ async function closeAll(): Promise<void> {
   serviceTunnels.clear();
 }
 
+function getRegisteredPorts(): Set<number> {
+  const ports = new Set<number>();
+  ports.add(config.port); // dashboard port always allowed
+  for (const [port] of serviceTunnels) {
+    ports.add(port);
+  }
+  return ports;
+}
+
 export default {
   isEnabled,
   ensureTunnel,
@@ -390,4 +422,5 @@ export default {
   getUserInfo,
   clearUserInfo,
   resetEndpointCache,
+  getRegisteredPorts,
 };

@@ -23,14 +23,71 @@ import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
+import db, { purgeExpiredSessions, getTunnelCredentials } from './services/database.ts';
 import '../shared/types/server.ts'; // session augmentation
+
+// --- SQLite session store (uses existing better-sqlite3 db) ---
+class SQLiteSessionStore extends session.Store {
+  private getStmt = db.prepare('SELECT sess FROM sessions WHERE sid = ? AND expired > datetime(\'now\')');
+  private setStmt = db.prepare('INSERT OR REPLACE INTO sessions (sid, sess, expired) VALUES (?, ?, datetime(?, \'unixepoch\'))');
+  private destroyStmt = db.prepare('DELETE FROM sessions WHERE sid = ?');
+  private touchStmt = db.prepare('UPDATE sessions SET expired = datetime(?, \'unixepoch\') WHERE sid = ?');
+
+  get(sid: string, callback: (err?: any, session?: session.SessionData | null) => void): void {
+    try {
+      const row = this.getStmt.get(sid) as { sess: string } | undefined;
+      if (!row) return callback(null, null);
+      callback(null, JSON.parse(row.sess));
+    } catch (err) {
+      callback(err);
+    }
+  }
+
+  set(sid: string, sess: session.SessionData, callback?: (err?: any) => void): void {
+    try {
+      const maxAge = sess.cookie?.maxAge || 7 * 24 * 60 * 60 * 1000;
+      const expiredEpoch = Math.floor((Date.now() + maxAge) / 1000);
+      this.setStmt.run(sid, JSON.stringify(sess), expiredEpoch);
+      callback?.();
+    } catch (err) {
+      callback?.(err);
+    }
+  }
+
+  destroy(sid: string, callback?: (err?: any) => void): void {
+    try {
+      this.destroyStmt.run(sid);
+      callback?.();
+    } catch (err) {
+      callback?.(err);
+    }
+  }
+
+  touch(sid: string, sess: session.SessionData, callback?: (err?: any) => void): void {
+    try {
+      const maxAge = sess.cookie?.maxAge || 7 * 24 * 60 * 60 * 1000;
+      const expiredEpoch = Math.floor((Date.now() + maxAge) / 1000);
+      this.touchStmt.run(expiredEpoch, sid);
+      callback?.();
+    } catch (err) {
+      callback?.(err);
+    }
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
 const env = config.dashboardEnv;
 
-// Session middleware — env-specific cookie name and path
+// Purge expired sessions on startup
+purgeExpiredSessions();
+
+// Purge expired sessions every hour
+setInterval(() => purgeExpiredSessions(), 60 * 60 * 1000);
+
+// Session middleware — env-specific cookie name and path, backed by SQLite
 const sessionMiddleware = session({
+  store: new SQLiteSessionStore(),
   name: `connect.sid.${env}`,
   secret: config.sessionSecret,
   resave: false,
@@ -49,7 +106,7 @@ app.use(cors({
   origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
   credentials: true,
 }));
-app.use(express.json({ limit: '500mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(sessionMiddleware);
 app.use(authMiddleware);
 
@@ -149,6 +206,26 @@ process.on('SIGINT', shutdown);
 server.listen(config.port, async () => {
   console.log(`Claude Dashboard running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}, dashboardEnv: ${env}`);
+  // Restore persisted credentials (local mode only)
+  if (config.dashboardEnv === 'local' && !config.tunnelApiKey) {
+    const saved = getTunnelCredentials();
+    if (saved) {
+      console.log(`[startup] Restoring persisted tunnel credentials for subdomain=${saved.userSubdomain}`);
+      config.tunnelApiKey = saved.apiKey;
+      config.tunnelUserSubdomain = saved.userSubdomain;
+      if (saved.userId) {
+        tunnelManager.setUserInfo({
+          apiKey: saved.apiKey,
+          userSubdomain: saved.userSubdomain,
+          userId: saved.userId,
+          email: saved.email || '',
+          username: saved.username || '',
+          plan: (saved.plan === 'pro' ? 'pro' : 'free') as 'free' | 'pro',
+        });
+      }
+    }
+  }
+
   if (config.tunnelMode === 'tunnel-service' && config.tunnelApiKey && config.tunnelUserSubdomain) {
     // Auto-connect using env vars — tunnel is immediately available
     tunnelManager.setCredentials(config.tunnelApiKey, config.tunnelUserSubdomain);
