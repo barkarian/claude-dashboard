@@ -30,10 +30,15 @@ for dir in routes services sockets data public; do
   fi
 done
 
-# Copy node_modules (needed at runtime)
-if [ -d "$DASHBOARD_DIR/server/node_modules" ]; then
-  cp -R "$DASHBOARD_DIR/server/node_modules" "$RESOURCES_DIR/server/"
-fi
+# Install a flat node_modules (pnpm's symlink structure isn't portable)
+echo "→ Installing production dependencies (flat node_modules)..."
+cd "$RESOURCES_DIR/server"
+npm install --omit=dev --ignore-scripts 2>&1 | tail -3
+# Rebuild native modules for the current platform
+echo "→ Rebuilding native modules..."
+npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3 --release 2>&1 | tail -2
+npx --yes node-gyp rebuild --directory=node_modules/node-pty --release 2>&1 | tail -2
+cd "$DASHBOARD_DIR"
 
 # --- Copy shared/ ---
 echo "→ Copying shared/..."

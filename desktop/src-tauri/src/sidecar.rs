@@ -88,6 +88,7 @@ impl SidecarManager {
             .arg("--import")
             .arg("tsx")
             .arg(entry.to_str().unwrap_or("index.ts"))
+            .current_dir(&self.server_path)
             .env("CLAW_DESKTOP", "1")
             .env("NODE_ENV", "production")
             .stdout(Stdio::piped())

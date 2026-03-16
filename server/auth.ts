@@ -76,6 +76,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
+  // Desktop mode: skip auth for localhost (no remote access possible)
+  if (process.env.CLAW_DESKTOP === '1') {
+    next();
+    return;
+  }
+
   // Auto-bootstrap session for tunnel-proxied requests FIRST,
   // before any whitelist or auth checks, so that even whitelisted endpoints
   // like /api/auth/status see the bootstrapped session data.
@@ -145,6 +151,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 export function socketAuthMiddleware(socket: Socket, next: (err?: Error) => void): void {
   // Dev escape hatch
   if (config.nodeEnv === 'development' && process.env.DEV_SKIP_AUTH === 'true') {
+    next();
+    return;
+  }
+
+  // Desktop mode: skip auth for localhost
+  if (process.env.CLAW_DESKTOP === '1') {
     next();
     return;
   }
