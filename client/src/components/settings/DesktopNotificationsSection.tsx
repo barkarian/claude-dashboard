@@ -26,19 +26,30 @@ export default function DesktopNotificationsSection() {
     loadToggles();
   }, []);
 
+  // Hide module specifier from Rollup's static analysis so the web build
+  // doesn't fail when @tauri-apps/plugin-store isn't installed.
+  const STORE_MODULE = '@tauri-apps/' + 'plugin-store';
+
+  async function getStore() {
+    const { Store } = await import(/* @vite-ignore */ STORE_MODULE);
+    return Store.load('settings.json');
+  }
+
   async function loadToggles() {
     try {
-      const { Store } = await import('@tauri-apps/plugin-store');
-      const store = await Store.load('settings.json');
+      const store = await getStore();
       const newToggles: Record<string, boolean> = {};
       for (const nt of NOTIFICATION_TYPES) {
-        const val = await store.get<boolean>(`notifications.${nt.key}`);
+        const val = await (store as any).get(`notifications.${nt.key}`);
         newToggles[nt.key] = val !== false; // default: enabled
       }
       setToggles(newToggles);
       setLoaded(true);
     } catch {
-      // Not in Tauri environment
+      // Not in Tauri environment — default all on
+      const defaults: Record<string, boolean> = {};
+      NOTIFICATION_TYPES.forEach(nt => { defaults[nt.key] = true; });
+      setToggles(defaults);
       setLoaded(true);
     }
   }
@@ -47,10 +58,9 @@ export default function DesktopNotificationsSection() {
     const newValue = !toggles[key];
     setToggles(prev => ({ ...prev, [key]: newValue }));
     try {
-      const { Store } = await import('@tauri-apps/plugin-store');
-      const store = await Store.load('settings.json');
-      await store.set(`notifications.${key}`, newValue);
-      await store.save();
+      const store = await getStore();
+      await (store as any).set(`notifications.${key}`, newValue);
+      await (store as any).save();
     } catch {
       // Ignore store errors
     }

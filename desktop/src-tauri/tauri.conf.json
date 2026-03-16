@@ -34,8 +34,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/node",
-      "resources/server/**"
+      "resources/**/*"
     ],
     "macOS": {
       "minimumSystemVersion": "11.0"

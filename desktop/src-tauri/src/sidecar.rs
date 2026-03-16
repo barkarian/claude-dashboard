@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::io::BufRead;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -46,7 +46,7 @@ pub enum SidecarState {
 // ── Manager ────────────────────────────────────────────────────────
 
 pub struct SidecarManager {
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<std::process::Child>>>,
     state_tx: watch::Sender<SidecarState>,
     state_rx: watch::Receiver<SidecarState>,
     node_path: PathBuf,
@@ -84,7 +84,7 @@ impl SidecarManager {
             entry.display()
         );
 
-        let child = Command::new(node)
+        let mut child = Command::new(node)
             .arg(entry.to_str().unwrap_or("index.ts"))
             .env("CLAW_DESKTOP", "1")
             .env("NODE_ENV", "production")
@@ -93,19 +93,7 @@ impl SidecarManager {
             .spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Failed to capture stdout".to_string());
-
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "Failed to capture stderr".to_string());
-
-        // We need to move the child into the mutex but also need stdout/stderr
-        // before the move, so we destructure here
-        let mut child = child;
+        // Take stdout/stderr before moving child into mutex
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
@@ -133,11 +121,9 @@ impl SidecarManager {
                     }
                     match serde_json::from_str::<SidecarEvent>(&line) {
                         Ok(event) => {
-                            // Update state based on event
                             match &event {
                                 SidecarEvent::Ready { port } => {
                                     let _ = state_tx.send(SidecarState::Ready { port: *port });
-                                    // Reset restart count on successful ready
                                     *restart_count.lock().unwrap() = 0;
                                 }
                                 SidecarEvent::FirstRun => {
@@ -145,7 +131,6 @@ impl SidecarManager {
                                 }
                                 _ => {}
                             }
-                            // Dispatch to event handler
                             events::handle_sidecar_event(&app_handle, event);
                         }
                         Err(e) => {
@@ -204,7 +189,6 @@ impl SidecarManager {
 
                                 let new_manager =
                                     SidecarManager::new(node_path.clone(), server_path.clone());
-                                // Reuse our restart_count
                                 *new_manager.restart_count.lock().unwrap() =
                                     *restart_count.lock().unwrap();
                                 if let Err(e) = new_manager.spawn(app_for_monitor.clone()) {
@@ -232,7 +216,6 @@ impl SidecarManager {
                         }
                     }
                 } else {
-                    // No child, manager was shut down
                     break;
                 }
             }
@@ -240,14 +223,13 @@ impl SidecarManager {
 
         // Health check fallback: poll /api/auth/status
         let state_tx_health = self.state_tx.clone();
-        let mut state_rx_health = self.state_rx.clone();
-        tokio::spawn(async move {
+        let state_rx_health = self.state_rx.clone();
+        tauri::async_runtime::spawn(async move {
             let client = reqwest::Client::new();
-            let max_polls = 60; // 30 seconds at 500ms
+            let max_polls = 60;
             for _ in 0..max_polls {
                 tokio::time::sleep(Duration::from_millis(500)).await;
 
-                // If we already got Ready from stdout, stop polling
                 if matches!(*state_rx_health.borrow(), SidecarState::Ready { .. }) {
                     return;
                 }
@@ -258,7 +240,6 @@ impl SidecarManager {
                     .await
                 {
                     Ok(res) if res.status().is_success() => {
-                        // Server is up — if we haven't gotten Ready event yet, force it
                         if !matches!(*state_rx_health.borrow(), SidecarState::Ready { .. }) {
                             log::info!("Health check detected server ready (fallback)");
                             let _ = state_tx_health.send(SidecarState::Ready { port: 2222 });
@@ -277,14 +258,16 @@ impl SidecarManager {
     pub fn shutdown(&self) {
         let mut lock = self.child.lock().unwrap();
         if let Some(ref mut child) = *lock {
-            log::info!("Shutting down sidecar (SIGTERM)...");
+            log::info!("Shutting down sidecar...");
 
+            // Send SIGTERM on Unix via nix-style raw syscall
             #[cfg(unix)]
             {
-                use std::os::unix::process::CommandExt;
-                unsafe {
-                    libc::kill(child.id() as i32, libc::SIGTERM);
-                }
+                let pid = child.id() as i32;
+                let _ = std::process::Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .output();
             }
 
             #[cfg(windows)]
@@ -299,7 +282,7 @@ impl SidecarManager {
                     Ok(Some(_)) => break,
                     Ok(None) => {
                         if start.elapsed() > Duration::from_secs(5) {
-                            log::warn!("Sidecar didn't stop in 5s, sending SIGKILL");
+                            log::warn!("Sidecar didn't stop in 5s, force killing");
                             let _ = child.kill();
                             break;
                         }

@@ -3,7 +3,8 @@ mod sidecar;
 mod tray;
 
 use std::sync::Arc;
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -64,7 +65,6 @@ pub fn run() {
                         }
                         sidecar::SidecarState::FirstRun => {
                             if let Some(window) = app_handle.get_webview_window("main") {
-                                // wizard.html is served from the frontend dist
                                 let _ = window.navigate("tauri://localhost/wizard.html".parse().unwrap());
                                 let _ = window.show();
                                 let _ = window.set_focus();
@@ -99,7 +99,6 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Close-to-tray behavior
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Check store for close-to-tray preference (default: true)
                 let should_hide = true; // TODO: read from tauri-plugin-store
                 if should_hide {
                     api.prevent_close();
@@ -111,7 +110,6 @@ pub fn run() {
         .expect("Error building Tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // Shutdown sidecar on app exit
                 if let Some(manager) = app.try_state::<Arc<sidecar::SidecarManager>>() {
                     manager.shutdown();
                 }
@@ -120,7 +118,14 @@ pub fn run() {
 }
 
 async fn check_for_update(app: &tauri::AppHandle) {
-    match app.updater().check().await {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("Failed to create updater: {}", e);
+            return;
+        }
+    };
+    match updater.check().await {
         Ok(Some(update)) => {
             log::info!("Update available: {}", update.version);
             let _ = app.emit(

@@ -6,3 +6,4 @@ server/data/
 desktop/src-tauri/target/
 desktop/src-tauri/resources/
 desktop/node_modules/
+client/node_modules/

@@ -1,4 +1,5 @@
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 
 use crate::sidecar::SidecarEvent;
 use crate::tray;
@@ -27,6 +28,9 @@ pub fn handle_sidecar_event(app: &AppHandle, event: SidecarEvent) {
             );
             // Update tray icon based on tunnel status
             tray::update_status(app, tunnel);
+            if subdomain.is_some() {
+                tray::set_subdomain(subdomain.clone());
+            }
         }
 
         SidecarEvent::Notification {
@@ -47,16 +51,6 @@ fn send_notification(
     deep_link: Option<&str>,
     event_name: &str,
 ) {
-    // Check store for per-event notification toggle
-    let store = app
-        .try_state::<tauri_plugin_store::StoreCollection<tauri::Wry>>();
-    if let Some(_store_collection) = store {
-        // Check if this notification type is disabled
-        // Store key format: "notifications.{event_name}"
-        // Default: enabled
-        // For now, we always send — store check can be refined when frontend sets values
-    }
-
     // Send native notification
     if let Err(e) = app
         .notification()
