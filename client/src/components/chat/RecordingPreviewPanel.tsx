@@ -51,6 +51,7 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
           <span className="text-sm font-medium truncate">{scriptNames}</span>
           <span className="text-xs text-text-muted flex-shrink-0">
             {formatTime(elapsed)} &middot; {activeRecording.lineCount} lines
+            {activeRecording.activityCount > 0 && ` · ${activeRecording.activityCount} activity`}
           </span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">

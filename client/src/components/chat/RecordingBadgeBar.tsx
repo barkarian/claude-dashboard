@@ -34,6 +34,7 @@ export default function RecordingBadgeBar({ value, onValueChange, onBadgeClick }
       {ids.map(id => {
         const rec = recordings.get(id);
         const lineCount = rec ? rec.lines.length : 0;
+        const activityCount = rec?.activityEvents?.length || 0;
         return (
           <span
             key={id}
@@ -44,7 +45,7 @@ export default function RecordingBadgeBar({ value, onValueChange, onBadgeClick }
               <rect x="3" y="3" width="18" height="18" rx="3" />
             </svg>
             <span className="font-medium">Terminal Record</span>
-            {lineCount > 0 && <span className="text-[10px] opacity-70">({lineCount} lines)</span>}
+            {lineCount > 0 && <span className="text-[10px] opacity-70">({lineCount} lines{activityCount > 0 ? ` + ${activityCount} activity` : ''})</span>}
             <button
               onClick={(e) => { e.stopPropagation(); handleRemove(id); }}
               className="ml-0.5 p-0.5 rounded hover:bg-white/10 transition-colors"
