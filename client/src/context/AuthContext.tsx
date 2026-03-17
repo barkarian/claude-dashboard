@@ -50,7 +50,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
       setOauthUrl(data.oauthUrl);
       setTunnelUrl(data.tunnelUrl);
+
+      // If not authenticated on a tunnel URL, redirect to gate login
+      if (!data.authenticated && !window.__TAURI__ && window.location.hostname.endsWith('.claw-dev.com')) {
+        const currentUrl = window.location.href;
+        const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
+        window.location.href = `https://tunnel-api.${tunnelDomain}/gate/login?redirect=${encodeURIComponent(currentUrl)}`;
+        return;
+      }
     } catch {
+      // If the auth check fails on a tunnel URL (e.g. CORS from gate redirect), redirect to gate login
+      if (!window.__TAURI__ && window.location.hostname.endsWith('.claw-dev.com')) {
+        const currentUrl = window.location.href;
+        const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
+        window.location.href = `https://tunnel-api.${tunnelDomain}/gate/login?redirect=${encodeURIComponent(currentUrl)}`;
+        return;
+      }
       setIsAuthenticated(false);
     } finally {
       setLoading(false);
@@ -61,12 +76,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (window.__TAURI__) {
       // Desktop app: clear SQLite credentials + session so next reopen asks for login
       await api.post('/api/tunnel-auth/disconnect');
+      setIsAuthenticated(false);
+      setUser(null);
     } else {
-      // Browser: clear session + gate cookie only (tunnel stays alive)
-      await api.post('/api/auth/logout');
+      // Browser: fire logout API (don't await — redirect immediately to avoid CORS loop)
+      api.post('/api/auth/logout').catch(() => {});
+      // Build gate login redirect URL
+      const isTunnel = window.location.hostname.endsWith('.claw-dev.com');
+      if (isTunnel) {
+        const dashboardUrl = window.location.origin + '/' + (window.location.pathname.match(/^\/(local|vps)/)?.[1] || 'local') + '/';
+        const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
+        window.location.href = `https://tunnel-api.${tunnelDomain}/gate/login?redirect=${encodeURIComponent(dashboardUrl)}`;
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+      }
     }
-    setIsAuthenticated(false);
-    setUser(null);
   }, []);
 
   const refreshPlan = useCallback(async () => {
