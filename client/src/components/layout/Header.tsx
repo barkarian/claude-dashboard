@@ -79,7 +79,7 @@ export default function Header({
             </button>
             {backTo && (
               <button
-                onClick={() => navigate(backTo)}
+                onClick={() => navigate(-1)}
                 className="p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
               >
                 <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

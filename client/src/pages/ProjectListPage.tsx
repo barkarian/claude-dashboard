@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import Header from '../components/layout/Header.tsx';
+import { useSidebar } from '../context/SidebarContext.tsx';
 import ProjectCard from '../components/projects/ProjectCard.tsx';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
 
@@ -9,6 +10,24 @@ export default function ProjectListPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { openSidebar } = useSidebar();
+
+  // On mobile: trap the back gesture on the root page to open sidebar
+  useEffect(() => {
+    if (window.innerWidth >= 768) return;
+
+    // Push a sentinel state so the back gesture has something to pop
+    window.history.pushState({ sidebarTrap: true }, '', window.location.href);
+
+    function handlePopState() {
+      // Re-push sentinel and open sidebar
+      window.history.pushState({ sidebarTrap: true }, '', window.location.href);
+      openSidebar();
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [openSidebar]);
 
   useEffect(() => {
     loadProjects();
