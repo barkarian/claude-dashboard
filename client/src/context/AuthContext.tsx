@@ -10,12 +10,12 @@ interface AuthUser {
 
 interface AuthContextValue {
   isAuthenticated: boolean;
-  /** True when the frontend is running inside the Tauri desktop shell.
-   *  Determined server-side via CLAW_DESKTOP env var and communicated through
-   *  the /api/auth/status response. We can't rely on window.__TAURI__ because
-   *  the Tauri webview navigates to http://localhost (the Express server),
-   *  which is a different origin from tauri://localhost where __TAURI__ is
-   *  injected. */
+  /** True when the client is the Tauri desktop webview accessing the Express
+   *  server directly on localhost. Detected entirely server-side: the server
+   *  checks CLAW_DESKTOP=1 (set by Tauri sidecar) AND absence of
+   *  X-Forwarded-Host (meaning the request didn't come through the tunnel
+   *  proxy). Mobile/browser users always go through the tunnel, so they get
+   *  isDesktop=false even though the same server has CLAW_DESKTOP=1. */
   isDesktop: boolean;
   isVps: boolean;
   dashboardEnv: 'local' | 'vps';
@@ -63,6 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const data = await api.get<AuthStatusResponse>('/api/auth/status');
       setIsAuthenticated(data.authenticated);
+      // Trust the server's isDesktop flag — it checks CLAW_DESKTOP=1 AND
+      // absence of X-Forwarded-Host (direct access = Tauri webview).
       setIsDesktop(!!data.isDesktop);
       setIsVps(data.isVps);
       if (data.dashboardEnv) setDashboardEnv(data.dashboardEnv);
@@ -81,8 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       // If the auth check fails on a tunnel URL (e.g. CORS from gate redirect),
-      // redirect to gate login. In desktop mode this catch won't fire because
-      // localhost requests don't fail with CORS, but guard against it anyway.
+      // redirect to gate login.
       if (window.location.hostname.endsWith('.claw-dev.com')) {
         const currentUrl = window.location.href;
         const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
@@ -97,16 +98,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     if (isDesktop) {
-      // Desktop app: full teardown — deactivates tunnel endpoints, disconnects
-      // WebSocket, wipes SQLite credentials, and destroys the Express session.
-      // Afterward, hard-navigate to "/" so any /vps or /local path preference
-      // is forgotten; the next app launch starts fresh with a login prompt.
-      await api.post('/api/tunnel-auth/disconnect');
+      // Desktop app (Tauri webview on localhost): full teardown.
+      // The disconnect endpoint sends its response first, then tears down
+      // the tunnel WebSocket on a 500ms delay so the response can travel
+      // back to us through the tunnel before it goes down.
+      // After receiving the response, redirect to localhost so the webview
+      // lands on the local Express server and shows the login screen.
+      try {
+        await api.post('/api/tunnel-auth/disconnect');
+      } catch {
+        // Best-effort — tunnel may already be down
+      }
       setIsAuthenticated(false);
       setUser(null);
-      window.location.href = '/';
+      window.location.href = `http://localhost:2222/`;
     } else {
-      // Browser: fire logout API (don't await — redirect immediately to avoid CORS loop)
+      // Browser/mobile: fire logout API (don't await — redirect immediately to avoid CORS loop)
       api.post('/api/auth/logout').catch(() => {});
       // Build gate login redirect URL
       const isTunnel = window.location.hostname.endsWith('.claw-dev.com');

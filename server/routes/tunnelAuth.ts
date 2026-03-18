@@ -153,9 +153,17 @@ router.get('/callback', async (req: Request, res: Response) => {
         });
       });
 
-      // Redirect to the tunnel URL (env-prefixed)
+      // Desktop mode (Tauri webview): redirect back to localhost so the webview
+      // stays on localhost. This is critical because isDesktop detection on the
+      // client combines the server's CLAW_DESKTOP flag with an isOnLocalhost()
+      // check — if we redirected to the tunnel URL, the webview would be on a
+      // tunnel hostname and isDesktop would be false, hiding desktop-only UI.
+      // The tunnel is still connected in the background for mobile/browser access.
       let redirectUrl: string;
-      if (config.tunnelDomain) {
+      if (process.env.CLAW_DESKTOP === '1') {
+        redirectUrl = `http://localhost:${config.port}/`;
+        console.log('[tunnel-auth] Desktop mode: redirecting to localhost instead of tunnel URL');
+      } else if (config.tunnelDomain) {
         const tunnelUrl = `https://${data.user.userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
         if (data.gateToken && config.tunnelServiceUrl) {
           // Redirect through gate/activate to set the gate cookie in one step
@@ -213,9 +221,12 @@ router.get('/activate', async (req: Request, res: Response) => {
   }
   console.log(`[tunnel-auth] New tunnel connected=${tunnelClient.isConnected()} after ${waited}ms`);
 
-  // Build the new tunnel URL (env-prefixed)
+  // Desktop mode: same as callback — stay on localhost so isDesktop detection works.
   let redirectUrl: string;
-  if (config.tunnelDomain) {
+  if (process.env.CLAW_DESKTOP === '1') {
+    redirectUrl = `http://localhost:${config.port}/`;
+    console.log('[tunnel-auth] Desktop mode: account switch redirecting to localhost');
+  } else if (config.tunnelDomain) {
     const tunnelUrl = `https://${userSubdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`;
     if (gateToken && config.tunnelServiceUrl) {
       const apiSubdomain = process.env.API_SUBDOMAIN || 'tunnel-api';
@@ -278,28 +289,42 @@ router.get('/modes', async (req: Request, res: Response) => {
 // WebSocket, wipes cached user info and persisted SQLite credentials, and
 // destroys the Express session.  The next app launch will require a fresh
 // login and tunnel connection.
-router.post('/disconnect', async (req: Request, res: Response) => {
-  console.log('[tunnel-auth] /disconnect hit — full teardown');
+//
+// IMPORTANT: The disconnect request typically arrives through the tunnel
+// WebSocket (the Tauri webview is on a tunnel URL after OAuth). We must
+// send the JSON response BEFORE tearing down the WebSocket, otherwise the
+// response can never travel back to the client. The actual teardown is
+// scheduled on a short delay after the response is flushed.
+router.post('/disconnect', (req: Request, res: Response) => {
+  console.log('[tunnel-auth] /disconnect hit — scheduling full teardown');
 
-  // 1. Deactivate all tunnel-service endpoints BEFORE clearing credentials,
-  //    because the deactivation call needs the API key that clearCredentials wipes.
-  await tunnelManager.deactivateAllEndpoints();
-
-  // 2. Clear cached user info so auto-bootstrap stops re-authenticating requests.
-  tunnelManager.clearUserInfo();
-
-  // 3. Clear credentials: nulls API key, disconnects WebSocket, deletes
-  //    SQLite tunnel_credentials row (local mode).
-  tunnelManager.clearCredentials();
-
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to disconnect' });
+  // Destroy session best-effort (cookie may not be present if cross-origin).
+  try {
+    if (req.session) {
+      req.session.destroy(() => {});
     }
-    res.clearCookie(`connect.sid.${config.dashboardEnv}`);
-    console.log('[tunnel-auth] Full teardown complete: endpoints deactivated, tunnel closed, session destroyed');
-    return res.json({ success: true });
-  });
+  } catch {
+    // Ignore — session may already be gone
+  }
+  res.clearCookie(`connect.sid.${config.dashboardEnv}`);
+
+  // Send response immediately so it travels back through the tunnel WebSocket.
+  res.json({ success: true });
+
+  // Delay the actual teardown so the response has time to reach the client
+  // before we disconnect the WebSocket that carries it.
+  setTimeout(async () => {
+    console.log('[tunnel-auth] Executing delayed teardown');
+    // 1. Deactivate all tunnel-service endpoints BEFORE clearing credentials,
+    //    because the deactivation call needs the API key that clearCredentials wipes.
+    await tunnelManager.deactivateAllEndpoints();
+    // 2. Clear cached user info so auto-bootstrap stops re-authenticating requests.
+    tunnelManager.clearUserInfo();
+    // 3. Clear credentials: nulls API key, disconnects WebSocket, deletes
+    //    SQLite tunnel_credentials row (local mode).
+    tunnelManager.clearCredentials();
+    console.log('[tunnel-auth] Full teardown complete: endpoints deactivated, tunnel closed, credentials wiped');
+  }, 500);
 });
 
 export default router;

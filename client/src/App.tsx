@@ -39,7 +39,7 @@ interface ProtectedRouteProps {
 }
 
 function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, loading, oauthUrl, tunnelUrl } = useAuth();
+  const { isAuthenticated, isDesktop, loading, oauthUrl, tunnelUrl } = useAuth();
   const [redirecting, setRedirecting] = useState(false);
 
   // When authenticated on tunnel with no env prefix, redirect to LOCAL (priority) or VPS
@@ -68,9 +68,11 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <BrandedLoader />;
   }
 
-  // Redirect to tunnel URL when it's available (tunnel already connected server-side)
-  // This covers both: authenticated on localhost AND not-authenticated-but-tunnel-connected
-  if (tunnelUrl && window.location.hostname === 'localhost') {
+  // Redirect to tunnel URL when on localhost in a browser (not the Tauri webview).
+  // The Tauri webview must stay on localhost so that isDesktop=true (server detects
+  // direct access via absence of X-Forwarded-Host). Browser users who hit localhost
+  // directly should be bounced to the tunnel URL for proper session handling.
+  if (tunnelUrl && window.location.hostname === 'localhost' && !isDesktop) {
     window.location.href = tunnelUrl;
     return <BrandedLoader message="Redirecting to dashboard..." />;
   }

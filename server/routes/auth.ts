@@ -33,23 +33,45 @@ router.get('/status', (req: Request, res: Response) => {
   const creds = tunnelManager.getCredentials();
   const tunnelConnected = !!creds?.userSubdomain && config.tunnelDomain;
 
-  // Desktop mode (Tauri app): always authenticated, include tunnel URL for redirect.
-  // isDesktop tells the frontend it's running inside the desktop shell so it can
-  // show desktop-specific UI (close-tunnel logout, notifications, updates) without
-  // relying on window.__TAURI__ which is unavailable when the webview loads
-  // content from http://localhost rather than tauri://localhost.
-  const isDesktop = process.env.CLAW_DESKTOP === '1';
+  // Desktop mode detection: the server has CLAW_DESKTOP=1 (set by Tauri sidecar),
+  // but we also need to distinguish the Tauri webview (direct localhost access)
+  // from mobile/browser users (who access through the tunnel proxy).
+  //
+  // Tunnel-proxied requests have X-Forwarded-Host set by the proxy. Direct
+  // requests to localhost:2222 from the Tauri webview do NOT have this header.
+  // So: isDesktop = CLAW_DESKTOP=1 AND no tunnel proxy (direct access).
+  //
+  // This replaces the old client-side isOnLocalhost() check which was unreliable
+  // because window.__TAURI__ is unavailable when loading http://localhost content.
+  const isDesktopServer = process.env.CLAW_DESKTOP === '1';
+  const isDirectAccess = !req.get('X-Forwarded-Host');
+  const isDesktop = isDesktopServer && isDirectAccess;
 
-  if (isDesktop) {
+  console.log(`[auth] /status desktop detection: CLAW_DESKTOP=${process.env.CLAW_DESKTOP}, X-Forwarded-Host=${req.get('X-Forwarded-Host') || 'none'}, isDesktop=${isDesktop}`);
+
+  if (isDesktopServer) {
     const userInfo = tunnelManager.getUserInfo();
     const subdomain = userInfo?.userSubdomain || creds?.userSubdomain;
     const tunnelUrl = subdomain && config.tunnelDomain
       ? `https://${subdomain}.${config.tunnelDomain}/${config.dashboardEnv}/`
       : null;
 
+    // Only report authenticated if we have real user info or persisted
+    // credentials (which means the tunnel is connected or connecting).
+    // Without either, the user needs to go through the OAuth flow to
+    // connect the tunnel — returning a fake "desktop" user would trap
+    // them in a logged-in state with no way to actually use the app.
+    const hasRealUser = !!(userInfo || creds);
+
+    // Provide the OAuth URL when not authenticated so the login screen
+    // can show the "Connect" button.
+    const oauthUrl = !hasRealUser && config.tunnelMode === 'tunnel-service' && config.tunnelServiceUrl
+      ? `/api/tunnel-auth/connect`
+      : null;
+
     return res.json({
-      authenticated: true,
-      isDesktop: true,
+      authenticated: hasRealUser,
+      isDesktop,  // true only for direct localhost access (Tauri webview), false for tunnel-proxied (mobile/browser)
       isVps: false,
       dashboardEnv: config.dashboardEnv,
       user: userInfo ? {
@@ -57,8 +79,8 @@ router.get('/status', (req: Request, res: Response) => {
         email: userInfo.email,
         userSubdomain: userInfo.userSubdomain,
         plan: userInfo.plan || 'free',
-      } : { username: 'desktop', email: '', userSubdomain: '', plan: 'free' as const },
-      oauthUrl: null,
+      } : null,
+      oauthUrl,
       tunnelUrl,
     });
   }
