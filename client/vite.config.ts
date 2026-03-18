@@ -23,9 +23,11 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/\/api\//],
+        // Exclude HTML from precache — Express injects <base href> at runtime,
+        // so the SW must not serve a cached copy without it.
+        globPatterns: ['**/*.{js,css,ico,png,svg}'],
+        // No navigateFallback — let Express handle navigation requests
+        // (it injects the correct <base href="/${env}/"> tag).
         runtimeCaching: [
           {
             urlPattern: /\/api\//,

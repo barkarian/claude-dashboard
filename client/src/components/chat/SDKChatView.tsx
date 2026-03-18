@@ -35,6 +35,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   } = useSDKMessages(socket, chatId);
 
   const [connecting, setConnecting] = useState(true);
+  const [isNewChat, setIsNewChat] = useState(false);
 
   // Publish status to ProjectContext for the header
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     if (!socket || !chatId) return;
 
     setConnecting(true);
+    setIsNewChat(false);
 
     socket.emit('sdk:check-session', { chatId }, (result: { exists: boolean; status?: SDKSessionStatus }) => {
       setConnecting(false);
@@ -56,6 +58,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
         // Session already running, attach to get current state
         socket.emit('sdk:attach', { chatId });
       } else {
+        setIsNewChat(true);
         // Start new session
         socket.emit('sdk:start', { projectId, chatId });
       }
@@ -143,6 +146,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             status={status}
             onSend={sendPrompt}
             onInterrupt={interrupt}
+            autoFocus={isNewChat}
           />
         </>
       )}

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 
@@ -11,14 +12,19 @@ interface SidebarProps {
   onClose: () => void;
 }
 
+const PAGE_SIZE = 20;
+
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
-    loadProjects();
+    loadInitial();
   }, []);
 
   // Auto-close drawer on navigation
@@ -26,14 +32,34 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     onClose();
   }, [location.pathname]);
 
-  async function loadProjects() {
+  async function loadInitial() {
     try {
-      const data = await api.get<{ projects: ProjectSummary[] }>('/api/projects');
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0`);
       setProjects(data.projects || []);
+      setOffset(data.projects?.length || 0);
+      setHasMore((data.projects?.length || 0) < (data.total || 0));
     } catch {
       // ignore
     }
   }
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${offset}`);
+      const newProjects = data.projects || [];
+      setProjects(prev => [...prev, ...newProjects]);
+      setOffset(prev => prev + newProjects.length);
+      setHasMore(offset + newProjects.length < (data.total || 0));
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [offset, hasMore, loadingMore]);
+
+  const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
   const sidebarContent = (
     <>
@@ -81,6 +107,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <span className="truncate">{project.name}</span>
           </NavLink>
         ))}
+
+        {/* Infinite scroll sentinel */}
+        <div ref={sentinelRef} />
+        {loadingMore && (
+          <div className="flex justify-center py-2">
+            <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        )}
 
         <Button
           variant="ghost"

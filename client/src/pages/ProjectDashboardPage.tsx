@@ -15,6 +15,25 @@ import DiffOverview from '../components/diff/DiffOverview.tsx';
 import api from '../utils/api.ts';
 import type { Chat, RunningProcess } from '../../../shared/types/models.ts';
 
+function useKeyboardVisible() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    function onResize() {
+      const keyboardOpen = window.innerHeight - vv!.height > 150;
+      setVisible(keyboardOpen);
+    }
+
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+
+  return visible;
+}
+
 export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -26,6 +45,7 @@ export default function ProjectDashboardPage() {
   const [diffCount, setDiffCount] = useState(0);
   const [runningCount, setRunningCount] = useState(0);
   const [processesWithPorts, setProcessesWithPorts] = useState<RunningProcess[]>([]);
+  const isKeyboardVisible = useKeyboardVisible();
 
   useEffect(() => {
     loadProject(id!);
@@ -155,32 +175,15 @@ export default function ProjectDashboardPage() {
   // Use running process count for badge
   const scriptCount = runningCount;
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div className="text-center py-20">
-        <h3 className="text-lg font-medium text-text mb-1">Project not found</h3>
-        <p className="text-text-muted">This project may have been deleted</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <Toaster />
       <Header
-        projectName={project.name}
+        projectName={project?.name || id || '...'}
         projectId={id}
         chatName={activeChat?.label || (activeChatId ? 'New Chat' : undefined)}
         chatId={activeChatId || undefined}
-        onNewChat={handleNewChat}
+        onNewChat={project ? handleNewChat : undefined}
         onEditChatName={activeChatId ? handleEditChatName : undefined}
         onPowerOff={activeChatId ? handlePowerOff : undefined}
         showPowerOff={!!isActive}
@@ -188,36 +191,50 @@ export default function ProjectDashboardPage() {
         statusLabel={statusLabel}
       />
 
-      {/* Tab content */}
-      <Routes>
-        <Route path="/" element={<Navigate to="chats" replace />} />
-        <Route path="scripts" element={
-          <div className="flex-1 overflow-y-auto">
-            <ScriptList projectId={id!} project={project} />
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      ) : !project ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-text mb-1">Project not found</h3>
+            <p className="text-text-muted">This project may have been deleted</p>
           </div>
-        } />
-        <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id!} />} />
-        <Route path="chats" element={
-          <div className="flex-1 overflow-y-auto">
-            <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />
-          </div>
-        } />
-        <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
-        <Route path="diff" element={
-          <div className="flex-1 overflow-y-auto">
-            <DiffOverview projectId={id!} />
-          </div>
-        } />
-      </Routes>
+        </div>
+      ) : (
+        <Routes>
+          <Route path="/" element={<Navigate to="chats" replace />} />
+          <Route path="scripts" element={
+            <div className="flex-1 overflow-y-auto">
+              <ScriptList projectId={id!} project={project} />
+            </div>
+          } />
+          <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id!} />} />
+          <Route path="chats" element={
+            <div className="flex-1 overflow-y-auto">
+              <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />
+            </div>
+          } />
+          <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
+          <Route path="diff" element={
+            <div className="flex-1 overflow-y-auto">
+              <DiffOverview projectId={id!} />
+            </div>
+          } />
+        </Routes>
+      )}
 
-      {/* Mobile bottom nav */}
-      <MobileNav
-        projectId={id}
-        currentTab={currentTab}
-        scriptCount={scriptCount}
-        changeCount={diffCount}
-        processesWithPorts={processesWithPorts}
-      />
+      {/* Mobile bottom nav — hidden when keyboard is open */}
+      {!isKeyboardVisible && (
+        <MobileNav
+          projectId={id}
+          currentTab={currentTab}
+          scriptCount={scriptCount}
+          changeCount={diffCount}
+          processesWithPorts={processesWithPorts}
+        />
+      )}
     </div>
   );
 }

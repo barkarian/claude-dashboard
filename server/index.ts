@@ -143,25 +143,28 @@ io.use(socketAuthMiddleware);
 // Register socket handlers
 registerSocketHandlers(io);
 
-// Serve static files in production
-if (config.nodeEnv === 'production') {
-  // Read index.html once at startup and inject <base href> for env-prefixed routes
-  const rawIndexHtml = fs.readFileSync(path.join(config.publicPath, 'index.html'), 'utf-8');
+// Serve static files + SPA fallback whenever built client exists
+const indexPath = path.join(config.publicPath, 'index.html');
+if (fs.existsSync(indexPath)) {
+  const rawIndexHtml = fs.readFileSync(indexPath, 'utf-8');
   const indexHtmlWithBase = rawIndexHtml.replace('<head>', `<head><base href="/${env}/">`);
 
   // Env-prefixed static files + SPA fallback
   app.use(`/${env}`, express.static(config.publicPath));
-  app.get(`/${env}/*`, (req, res) => {
-    if (!req.path.startsWith(`/${env}/api/`)) {
-      res.type('html').send(indexHtmlWithBase);
-    }
+  app.get(`/${env}/*`, (req, res, next) => {
+    // Only serve SPA fallback for navigation requests (no file extension)
+    // Requests for .js/.css/.png etc. that weren't found by express.static should 404
+    if (path.extname(req.path)) return next();
+    if (req.path.startsWith(`/${env}/api/`) || req.path.startsWith(`/${env}/socket.io`)) return next();
+    res.set('Cache-Control', 'no-cache').type('html').send(indexHtmlWithBase);
   });
-  // Also serve at root for direct/dev access (no base tag needed)
+
+  // Root fallback (for direct/localhost access)
   app.use(express.static(config.publicPath));
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api/') && !req.path.startsWith(`/${env}/`)) {
-      res.sendFile(path.join(config.publicPath, 'index.html'));
-    }
+  app.get('*', (req, res, next) => {
+    if (path.extname(req.path)) return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith(`/${env}/`) || req.path.startsWith('/socket.io')) return next();
+    res.set('Cache-Control', 'no-cache').sendFile(indexPath);
   });
 }
 

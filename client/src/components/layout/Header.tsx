@@ -66,8 +66,8 @@ export default function Header({
   if (!projectName) {
     return (
       <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
-        <div className="flex items-center justify-between h-14 px-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between h-12 px-4">
+          <div className="flex items-center gap-2">
             <button
               onClick={openSidebar}
               className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
@@ -79,7 +79,7 @@ export default function Header({
             </button>
             {backTo && (
               <button
-                onClick={() => navigate(-1)}
+                onClick={() => window.history.length > 1 ? navigate(-1) : navigate(backTo)}
                 className="p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
               >
                 <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -87,7 +87,7 @@ export default function Header({
                 </svg>
               </button>
             )}
-            <h2 className="text-lg font-semibold truncate">{title}</h2>
+            <h2 className="text-sm font-semibold truncate">{title}</h2>
           </div>
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </div>
@@ -121,7 +121,7 @@ export default function Header({
           </button>
         </div>
 
-        <h2 className="text-base font-semibold truncate mx-4">{projectName}</h2>
+        <h2 className="text-sm font-semibold truncate mx-4 flex-1 text-center">{projectName}</h2>
 
         {onNewChat ? (
           <button

@@ -13,9 +13,10 @@ interface SDKPromptInputProps {
   status: SDKSessionStatus | 'disconnected';
   onSend: (prompt: string) => void;
   onInterrupt: () => void;
+  autoFocus?: boolean;
 }
 
-export default function SDKPromptInput({ projectId, status, onSend, onInterrupt }: SDKPromptInputProps) {
+export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus }: SDKPromptInputProps) {
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -32,6 +33,13 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt 
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [value]);
+
+  // Auto-focus textarea for new chats
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
 
   const isStreaming = status === 'streaming' || status === 'tool-use' || status === 'waiting-permission';
   const disabled = status === 'disconnected' || status === 'exited' || status === 'error';

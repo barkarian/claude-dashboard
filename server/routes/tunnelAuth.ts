@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from 'express';
 import config from '../config.ts';
 import tunnelManager from '../services/tunnelManager.ts';
 import * as tunnelClient from '../services/tunnelClient.ts';
-import { deleteTunnelCredentials } from '../services/database.ts';
 
 const router = Router();
 
@@ -274,19 +273,16 @@ router.get('/modes', async (req: Request, res: Response) => {
   res.json({ modes: [] });
 });
 
-// POST /api/tunnel-auth/disconnect — destroy user session (tunnel stays open for re-login)
+// POST /api/tunnel-auth/disconnect — destroy user session and close tunnel WebSocket
 router.post('/disconnect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /disconnect hit');
-  tunnelManager.clearUserInfo();
-  if (config.dashboardEnv === 'local') {
-    deleteTunnelCredentials();
-  }
+  tunnelManager.clearCredentials();
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to disconnect' });
     }
     res.clearCookie(`connect.sid.${config.dashboardEnv}`);
-    console.log('[tunnel-auth] Session destroyed, user info cleared (tunnel stays open)');
+    console.log('[tunnel-auth] Session destroyed, credentials cleared, tunnel disconnected');
     return res.json({ success: true });
   });
 });

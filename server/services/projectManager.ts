@@ -29,6 +29,32 @@ function listProjects(): ProjectSummary[] {
   }));
 }
 
+function listProjectsPaginated(limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
+  const { total } = db.prepare('SELECT COUNT(*) as total FROM projects').get() as any;
+
+  const rows = db.prepare(`
+    SELECT
+      p.id, p.name, p.path, p.repo, p.created_at,
+      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
+      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+    FROM projects p
+    ORDER BY p.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as any[];
+
+  const projects = rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    repo: r.repo || null,
+    createdAt: r.created_at,
+    scriptsCount: r.scriptsCount,
+    chatsCount: r.chatsCount,
+  }));
+
+  return { projects, total };
+}
+
 function getProject(projectId: string): Project | null {
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
   if (!row) return null;
@@ -195,6 +221,30 @@ function listChats(projectId: string): Chat[] {
   }));
 }
 
+function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: number; search?: string } = {}): { chats: Chat[]; total: number } {
+  const limit = opts.limit ?? 20;
+  const offset = opts.offset ?? 0;
+  const search = opts.search ? `%${opts.search}%` : '%';
+
+  const { total } = db.prepare(
+    'SELECT COUNT(*) as total FROM chats WHERE project_id = ? AND label LIKE ?'
+  ).get(projectId, search) as any;
+
+  const rows = db.prepare(
+    'SELECT * FROM chats WHERE project_id = ? AND label LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+  ).all(projectId, search, limit, offset) as any[];
+
+  const chats = rows.map(r => ({
+    id: r.id,
+    label: r.label,
+    createdAt: r.created_at,
+    history: getChatMessages(r.id),
+    sdkSessionId: r.sdk_session_id || null,
+  }));
+
+  return { chats, total };
+}
+
 function listChatsWithHistory(projectId: string): Chat[] {
   const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
   return chatRows.map(r => ({
@@ -285,6 +335,7 @@ function getChatMessages(chatId: string): ChatHistoryEntry[] {
 export default {
   // Projects
   listProjects,
+  listProjectsPaginated,
   getProject,
   createProject,
   registerProject,
@@ -299,6 +350,7 @@ export default {
   getScript,
   // Chats
   listChats,
+  listChatsPaginated,
   createChat,
   getChat,
   updateChat,

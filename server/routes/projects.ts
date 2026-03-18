@@ -8,8 +8,16 @@ const router = Router();
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const projects = projectManager.listProjects();
-    res.json({ projects });
+    const limit = parseInt(req.query.limit as string) || 0;
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    if (limit > 0) {
+      const result = projectManager.listProjectsPaginated(limit, offset);
+      res.json({ projects: result.projects, total: result.total });
+    } else {
+      const projects = projectManager.listProjects();
+      res.json({ projects });
+    }
   } catch (err) {
     console.error('Error listing projects:', err);
     res.status(500).json({ error: 'Failed to list projects' });
@@ -129,26 +137,31 @@ router.post('/:id/commit', async (req: Request<{ id: string }>, res: Response) =
 // Chat endpoints
 router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const project = projectManager.getProject(req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
+    const limit = parseInt(req.query.limit as string) || 0;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const search = (req.query.search as string) || '';
+
+    // Clean up empty chats (only on first page / no search — avoid during paginated browsing)
+    if (offset === 0 && !search) {
+      const allChats = projectManager.listChats(req.params.id);
+      const emptyChats = allChats.filter(c => c.label === 'New Chat' && (!projectManager.getChatMessages(c.id) || projectManager.getChatMessages(c.id).length === 0));
+      for (const chat of emptyChats) {
+        sdkSessionManager.endSession(chat.id);
+        projectManager.deleteChat(chat.id);
+      }
     }
 
-    // Clean up empty chats (label still "New Chat" and no history)
-    const chats = project.chats || [];
-    const emptyChats = chats.filter(c => c.label === 'New Chat' && (!c.history || c.history.length === 0));
-    for (const chat of emptyChats) {
-      sdkSessionManager.endSession(chat.id);
-      projectManager.deleteChat(chat.id);
+    if (limit > 0) {
+      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined });
+      res.json({ chats: result.chats, total: result.total });
+    } else {
+      const updatedChats = projectManager.listChats(req.params.id);
+      const chatsWithHistory = updatedChats.map(c => ({
+        ...c,
+        history: projectManager.getChatMessages(c.id),
+      }));
+      res.json({ chats: chatsWithHistory });
     }
-
-    const updatedChats = projectManager.listChats(req.params.id);
-    // Load history for each chat for response
-    const chatsWithHistory = updatedChats.map(c => ({
-      ...c,
-      history: projectManager.getChatMessages(c.id),
-    }));
-    res.json({ chats: chatsWithHistory });
   } catch (err) {
     console.error('Error listing chats:', err);
     res.status(500).json({ error: 'Failed to list chats' });
