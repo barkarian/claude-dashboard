@@ -10,6 +10,38 @@ const execFileAsync = promisify(execFile);
 
 const router = Router();
 
+// POST /api/open-external — open a URL in the system browser (desktop mode only).
+// The Tauri webview can't use target="_blank" or window.open() to launch the
+// system browser, so the server does it via the OS "open" command.
+router.post('/open-external', (req: Request, res: Response) => {
+  if (process.env.CLAW_DESKTOP !== '1') {
+    return res.status(403).json({ error: 'Only available in desktop mode' });
+  }
+
+  const { url } = req.body;
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ error: 'url is required' });
+  }
+
+  // Only allow opening URLs on our tunnel domain for safety
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith('.claw-dev.com')) {
+      return res.status(400).json({ error: 'Only claw-dev.com URLs are allowed' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+
+  // Use platform-appropriate command to open in default browser
+  const cmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  execFile(cmd, [url], (err) => {
+    if (err) console.error('[settings] Failed to open external URL:', err);
+  });
+
+  res.json({ success: true });
+});
+
 // --- Dashboard self-update state ---
 let updating = false;
 let updateError: string | null = null;

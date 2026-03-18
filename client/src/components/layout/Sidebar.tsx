@@ -15,7 +15,24 @@ interface SidebarProps {
 const PAGE_SIZE = 20;
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { user, logout, isDesktop } = useAuth();
+  const { user, logout, isDesktop, tunnelUrl } = useAuth();
+
+  // On desktop (localhost), "Account Settings" and "Upgrade to Pro" need the
+  // full tunnel-service URL since /settings is served by the tunnel service,
+  // not the local Express server. On mobile/browser (tunnel URL), a plain
+  // /settings href already resolves to the tunnel service.
+  const accountSettingsUrl = tunnelUrl
+    ? new URL('/settings', tunnelUrl).href
+    : '/settings';
+
+  // Desktop: open external URLs in the system browser via server endpoint,
+  // because Tauri's webview blocks target="_blank" and window.open().
+  function openAccountSettings(e: React.MouseEvent) {
+    if (isDesktop && tunnelUrl) {
+      e.preventDefault();
+      api.post('/api/open-external', { url: accountSettingsUrl }).catch(() => {});
+    }
+  }
   const navigate = useNavigate();
   const location = useLocation();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -135,7 +152,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         <a
-          href="/settings"
+          href={accountSettingsUrl}
+          onClick={openAccountSettings}
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-text-muted hover:text-text hover:bg-bg-hover"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -179,7 +197,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
           {user.plan !== 'pro' && (
             <a
-              href="/settings"
+              href={accountSettingsUrl}
+              onClick={openAccountSettings}
               className="text-[11px] text-primary hover:underline mt-1 ml-4 block"
             >
               Upgrade to Pro &rarr;

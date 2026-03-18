@@ -10,7 +10,7 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue | null>(null);
 
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, dashboardEnv } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
 
@@ -24,8 +24,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const envMatch = window.location.pathname.match(/^\/(local|vps)/);
-    const socketPath = envMatch ? `${envMatch[0]}/socket.io` : '/socket.io';
+    // Always use the env-prefixed path because the Socket.IO server only
+    // listens on /${env}/socket.io. On localhost (Tauri desktop) the URL
+    // doesn't have an env prefix, so we can't derive it from the pathname.
+    const socketPath = `/${dashboardEnv}/socket.io`;
 
     const s = io({
       path: socketPath,
