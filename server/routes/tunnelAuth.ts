@@ -9,6 +9,9 @@ const router = Router();
 // Pending activation data for account switches (short-lived, used by /activate)
 let pendingActivation: { apiKey: string; userSubdomain: string; gateToken?: string; timestamp: number } | null = null;
 
+// Track pending teardown so we can cancel it if a new /connect arrives
+let pendingTeardownTimer: ReturnType<typeof setTimeout> | null = null;
+
 // In-memory OAuth state store (avoids session dependency issues in desktop mode)
 const pendingOAuthStates = new Map<string, number>(); // state → timestamp
 
@@ -23,6 +26,15 @@ setInterval(() => {
 // GET /api/tunnel-auth/connect — redirect browser to tunnel-service OAuth
 router.get('/connect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /connect hit');
+
+  // Cancel any pending teardown from a previous /disconnect — otherwise it
+  // can fire mid-OAuth and wipe the freshly-set credentials.
+  if (pendingTeardownTimer) {
+    clearTimeout(pendingTeardownTimer);
+    pendingTeardownTimer = null;
+    console.log('[tunnel-auth] Cancelled pending teardown (new /connect)');
+  }
+
   if (config.tunnelMode !== 'tunnel-service' || !config.tunnelServiceUrl) {
     console.log('[tunnel-auth] Tunnel service not configured, returning 400');
     return res.status(400).json({ error: 'Tunnel service not configured' });
@@ -310,18 +322,17 @@ router.get('/modes', async (req: Request, res: Response) => {
 });
 
 // POST /api/tunnel-auth/disconnect — full teardown for desktop app logout.
-// Deactivates all tunnel endpoints on the tunnel service, disconnects the
-// WebSocket, wipes cached user info and persisted SQLite credentials, and
-// destroys the Express session.  The next app launch will require a fresh
-// login and tunnel connection.
-//
-// IMPORTANT: The disconnect request typically arrives through the tunnel
-// WebSocket (the Tauri webview is on a tunnel URL after OAuth). We must
-// send the JSON response BEFORE tearing down the WebSocket, otherwise the
-// response can never travel back to the client. The actual teardown is
-// scheduled on a short delay after the response is flushed.
+// Wipes cached user info, credentials, and session immediately so that
+// /api/auth/status returns authenticated=false on the next page load.
+// Endpoint deactivation on the tunnel service happens in the background.
 router.post('/disconnect', (req: Request, res: Response) => {
-  console.log('[tunnel-auth] /disconnect hit — scheduling full teardown');
+  console.log('[tunnel-auth] /disconnect hit');
+
+  // Cancel any previous pending teardown to avoid double-teardown races.
+  if (pendingTeardownTimer) {
+    clearTimeout(pendingTeardownTimer);
+    pendingTeardownTimer = null;
+  }
 
   // Destroy session best-effort (cookie may not be present if cross-origin).
   try {
@@ -333,23 +344,42 @@ router.post('/disconnect', (req: Request, res: Response) => {
   }
   res.clearCookie(`connect.sid.${config.dashboardEnv}`);
 
-  // Send response immediately so it travels back through the tunnel WebSocket.
+  // Clear user info and credentials IMMEDIATELY so that /api/auth/status
+  // returns authenticated=false on the next check (e.g. page reload).
+  // Save the API key first — we need it for endpoint deactivation.
+  const savedApiKey = tunnelManager.getCredentials()?.apiKey ?? null;
+  tunnelManager.clearUserInfo();
+  tunnelManager.clearCredentials();
+
+  // Send response immediately.
   res.json({ success: true });
 
-  // Delay the actual teardown so the response has time to reach the client
-  // before we disconnect the WebSocket that carries it.
-  setTimeout(async () => {
-    console.log('[tunnel-auth] Executing delayed teardown');
-    // 1. Deactivate all tunnel-service endpoints BEFORE clearing credentials,
-    //    because the deactivation call needs the API key that clearCredentials wipes.
-    await tunnelManager.deactivateAllEndpoints();
-    // 2. Clear cached user info so auto-bootstrap stops re-authenticating requests.
-    tunnelManager.clearUserInfo();
-    // 3. Clear credentials: nulls API key, disconnects WebSocket, deletes
-    //    SQLite tunnel_credentials row (local mode).
-    tunnelManager.clearCredentials();
-    console.log('[tunnel-auth] Full teardown complete: endpoints deactivated, tunnel closed, credentials wiped');
-  }, 500);
+  // Deactivate tunnel-service endpoints in the background using the saved key.
+  // This is fire-and-forget — credentials are already wiped so re-login works
+  // immediately without waiting for deactivation.
+  if (savedApiKey && config.tunnelServiceUrl) {
+    pendingTeardownTimer = setTimeout(async () => {
+      pendingTeardownTimer = null;
+      console.log('[tunnel-auth] Deactivating endpoints (background)');
+      try {
+        const deactivateRes = await fetch(`${config.tunnelServiceUrl}/api/endpoints/deactivate-all`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `users API-Key ${savedApiKey}`,
+          },
+        });
+        if (deactivateRes.ok) {
+          const data = await deactivateRes.json() as { deactivated: number };
+          console.log(`[tunnel-auth] Deactivated ${data.deactivated} endpoint(s)`);
+        }
+      } catch (err) {
+        console.error('[tunnel-auth] Endpoint deactivation failed:', err);
+      }
+    }, 100);
+  }
+
+  console.log('[tunnel-auth] Disconnect complete: session destroyed, credentials wiped');
 });
 
 export default router;
