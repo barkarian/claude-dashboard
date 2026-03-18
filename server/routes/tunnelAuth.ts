@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, type Request, type Response } from 'express';
 import config from '../config.ts';
 import tunnelManager from '../services/tunnelManager.ts';
@@ -22,21 +23,40 @@ router.get('/connect', (req: Request, res: Response) => {
   const host = forwardedHost || req.get('host') || `localhost:${config.port}`;
   const callbackUrl = `${protocol}://${host}/${config.dashboardEnv}/api/tunnel-auth/callback`;
 
+  // Generate OAuth state parameter to prevent login CSRF
+  const state = crypto.randomBytes(16).toString('hex');
+  req.session.oauthState = state;
+
   console.log(`[tunnel-auth] Redirecting to OAuth. callbackUrl=${callbackUrl}, forwardedHost=${forwardedHost}, host=${host}`);
 
-  const authorizeUrl = `${config.tunnelServiceUrl}/oauth/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&client_id=claude-dashboard`;
+  const authorizeUrl = `${config.tunnelServiceUrl}/oauth/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&client_id=claude-dashboard&state=${encodeURIComponent(state)}`;
 
-  res.redirect(authorizeUrl);
+  // Save session before redirect so state persists
+  req.session.save((err) => {
+    if (err) {
+      console.error('[tunnel-auth] Failed to save session with OAuth state:', err);
+      return res.status(500).send('Failed to initiate OAuth');
+    }
+    res.redirect(authorizeUrl);
+  });
 });
 
 // GET /api/tunnel-auth/callback — receive auth code from tunnel-service OAuth
 router.get('/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
+  const state = req.query.state as string;
   console.log(`[tunnel-auth] /callback hit. code=${code ? code.slice(0, 8) + '...' : 'MISSING'}`);
 
   if (!code) {
     return res.status(400).send('Missing authorization code');
   }
+
+  // Validate OAuth state parameter
+  if (!state || state !== req.session.oauthState) {
+    console.error(`[tunnel-auth] OAuth state mismatch: expected=${req.session.oauthState}, got=${state}`);
+    return res.status(400).send('OAuth state mismatch — possible CSRF attack. Please try again.');
+  }
+  delete req.session.oauthState;
 
   if (!config.tunnelServiceUrl) {
     return res.status(400).send('Tunnel service not configured');

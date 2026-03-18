@@ -10,5 +10,6 @@ declare module 'express-session' {
       username: string;
       plan: 'free' | 'pro';
     };
+    oauthState?: string;
   }
 }

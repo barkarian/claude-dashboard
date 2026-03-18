@@ -68,6 +68,45 @@ function tryAutoBootstrapSession(req: Request): boolean {
   return true;
 }
 
+export function csrfProtection(req: Request, res: Response, next: NextFunction): void {
+  // Only check state-changing methods
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+
+  const origin = req.headers['origin'];
+  // No Origin header → same-origin (browsers always send Origin on cross-origin POSTs)
+  if (!origin) {
+    return next();
+  }
+
+  // Validate origin matches expected sources
+  try {
+    const url = new URL(origin);
+
+    // localhost (direct access / Tauri)
+    if (url.hostname === 'localhost' && url.port === String(config.port)) return next();
+
+    // Dev Vite server
+    if (config.nodeEnv === 'development' && origin === 'http://localhost:5173') return next();
+
+    // Tunnel URL: must match the user's own subdomain
+    if (config.tunnelDomain && url.protocol === 'https:' && url.hostname.endsWith(`.${config.tunnelDomain}`)) {
+      const originSubdomain = url.hostname.slice(0, -(config.tunnelDomain.length + 1));
+      // Check against session subdomain or server-cached credentials
+      const sessionSubdomain = req.session?.tunnelService?.userSubdomain;
+      const cachedSubdomain = tunnelManager.getCredentials()?.userSubdomain;
+      if (originSubdomain && (originSubdomain === sessionSubdomain || originSubdomain === cachedSubdomain)) {
+        return next();
+      }
+    }
+  } catch {
+    // Invalid origin URL — block
+  }
+
+  res.status(403).json({ error: 'CSRF: origin not allowed' });
+}
+
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Dev escape hatch
   if (config.nodeEnv === 'development' && process.env.DEV_SKIP_AUTH === 'true') {
@@ -75,10 +114,15 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  // Desktop mode: skip auth for localhost (no remote access possible)
+  // Desktop mode: skip auth for direct localhost access only.
+  // Tunnel-proxied requests (identified by x-tunnel-token) must go through normal auth.
   if (process.env.CLAW_DESKTOP === '1') {
-    next();
-    return;
+    const isTunnelRequest = !!req.headers['x-tunnel-token'];
+    if (!isTunnelRequest) {
+      next();
+      return;
+    }
+    // Fall through to normal auth for tunnel-proxied requests
   }
 
   // Auto-bootstrap session for tunnel-proxied requests FIRST,
@@ -154,10 +198,15 @@ export function socketAuthMiddleware(socket: Socket, next: (err?: Error) => void
     return;
   }
 
-  // Desktop mode: skip auth for localhost
+  // Desktop mode: skip auth for direct localhost connections only.
+  // Tunnel-proxied WebSocket requests must go through normal session auth.
   if (process.env.CLAW_DESKTOP === '1') {
-    next();
-    return;
+    const isTunnelRequest = !!socket.request.headers['x-tunnel-token'];
+    if (!isTunnelRequest) {
+      next();
+      return;
+    }
+    // Fall through to normal auth for tunnel-proxied requests
   }
 
   const session = (socket.request as IncomingMessage & { session?: { tunnelService?: unknown } }).session;

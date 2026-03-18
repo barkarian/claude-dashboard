@@ -6,7 +6,7 @@ import session from 'express-session';
 import cors from 'cors';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config.ts';
-import { authMiddleware, socketAuthMiddleware } from './auth.ts';
+import { authMiddleware, socketAuthMiddleware, csrfProtection } from './auth.ts';
 import authRoutes from './routes/auth.ts';
 import projectRoutes from './routes/projects.ts';
 import scriptRoutes from './routes/scripts.ts';
@@ -24,8 +24,11 @@ import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
-import db, { purgeExpiredSessions, getTunnelCredentials } from './services/database.ts';
+import db, { purgeExpiredSessions, getTunnelCredentials, getOrCreateSessionSecret } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
+
+// Override default session secret with auto-generated one
+config.sessionSecret = getOrCreateSessionSecret();
 
 // --- SQLite session store (uses existing better-sqlite3 db) ---
 class SQLiteSessionStore extends session.Store {
@@ -102,13 +105,35 @@ const sessionMiddleware = session({
   },
 });
 
+// CORS origin validation
+function isAllowedOrigin(origin: string): boolean {
+  if (config.nodeEnv === 'development') {
+    if (origin === 'http://localhost:5173' || origin === `http://localhost:${config.port}`) return true;
+  }
+  // Tauri desktop webview (always localhost)
+  if (origin === `http://localhost:${config.port}`) return true;
+  // Tunnel URLs: https://*.{tunnelDomain}
+  if (config.tunnelDomain) {
+    try {
+      const url = new URL(origin);
+      if (url.protocol === 'https:' && url.hostname.endsWith(`.${config.tunnelDomain}`)) return true;
+    } catch { /* invalid URL */ }
+  }
+  return false;
+}
+
 // Middleware
 app.use(cors({
-  origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // same-origin / server-to-server
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    callback(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(sessionMiddleware);
+app.use(csrfProtection);
 app.use(authMiddleware);
 
 // Collect all routes into one router
@@ -131,7 +156,11 @@ app.use('/api', apiRouter);
 const io = new SocketIOServer(server, {
   path: `/${env}/socket.io`,
   cors: {
-    origin: config.nodeEnv === 'development' ? 'http://localhost:5173' : undefined,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      callback(new Error('CORS: origin not allowed'));
+    },
     credentials: true,
   },
 });

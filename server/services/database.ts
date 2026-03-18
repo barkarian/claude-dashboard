@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
@@ -67,6 +68,11 @@ db.exec(`
     expired DATETIME NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 
   CREATE TABLE IF NOT EXISTS tunnel_credentials (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -139,6 +145,25 @@ export function getTunnelCredentials(): TunnelCredentials | null {
 
 export function deleteTunnelCredentials(): void {
   db.prepare('DELETE FROM tunnel_credentials WHERE id = 1').run();
+}
+
+// --- Settings helpers ---
+export function getSetting(key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setSetting(key: string, value: string): void {
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+}
+
+export function getOrCreateSessionSecret(): string {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  const existing = getSetting('session_secret');
+  if (existing) return existing;
+  const secret = crypto.randomBytes(32).toString('hex');
+  setSetting('session_secret', secret);
+  return secret;
 }
 
 export default db;
