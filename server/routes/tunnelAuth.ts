@@ -25,17 +25,22 @@ router.get('/connect', (req: Request, res: Response) => {
 
   // Generate OAuth state parameter to prevent login CSRF
   const state = crypto.randomBytes(16).toString('hex');
-  req.session.oauthState = state;
 
   console.log(`[tunnel-auth] Redirecting to OAuth. callbackUrl=${callbackUrl}, forwardedHost=${forwardedHost}, host=${host}`);
 
   const authorizeUrl = `${config.tunnelServiceUrl}/oauth/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&client_id=claude-dashboard&state=${encodeURIComponent(state)}`;
 
-  // Save session before redirect so state persists
+  // Store state in session and save before redirect
+  // Guard: req.session may not exist yet if saveUninitialized is false
+  if (!req.session) {
+    return res.redirect(authorizeUrl);
+  }
+  req.session.oauthState = state;
   req.session.save((err) => {
     if (err) {
       console.error('[tunnel-auth] Failed to save session with OAuth state:', err);
-      return res.status(500).send('Failed to initiate OAuth');
+      // Still redirect — state validation will fail on callback but user can retry
+      return res.redirect(authorizeUrl);
     }
     res.redirect(authorizeUrl);
   });
@@ -52,8 +57,8 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 
   // Validate OAuth state parameter
-  if (!state || state !== req.session.oauthState) {
-    console.error(`[tunnel-auth] OAuth state mismatch: expected=${req.session.oauthState}, got=${state}`);
+  if (!state || !req.session?.oauthState || state !== req.session.oauthState) {
+    console.error(`[tunnel-auth] OAuth state mismatch: expected=${req.session?.oauthState}, got=${state}`);
     return res.status(400).send('OAuth state mismatch — possible CSRF attack. Please try again.');
   }
   delete req.session.oauthState;
