@@ -44,7 +44,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
   // Non-project mode: just show Projects link (rendered from App.tsx for non-project pages)
   if (!projectId) {
     return (
-      <nav className="flex-shrink-0 bg-bg-surface border-t border-border safe-area-inset-bottom">
+      <nav className="flex-shrink-0 bg-bg-surface border-t border-border">
         <div className="flex items-center justify-around h-14 max-w-lg mx-auto">
           <button
             onClick={() => navigate('/')}

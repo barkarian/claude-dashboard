@@ -242,9 +242,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         <div className="absolute inset-0 bg-black/50" onClick={onClose} />
         {/* Drawer panel */}
         <aside
-          className={`absolute inset-y-0 left-0 w-72 bg-bg-surface flex flex-col shadow-xl transition-transform duration-300 safe-area-top safe-area-inset-bottom ${
+          className={`absolute left-0 bottom-0 w-72 bg-bg-surface flex flex-col shadow-xl transition-transform duration-300 ${
             isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
+          style={{ top: 'env(safe-area-inset-top, 0px)' }}
         >
           {sidebarContent}
         </aside>

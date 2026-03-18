@@ -138,7 +138,7 @@ export default function App() {
         <ProtectedRoute>
           <ProjectProvider>
             <SidebarContext.Provider value={{ openSidebar }}>
-              <div className="h-[100dvh] flex flex-col md:flex-row overflow-hidden safe-area-top">
+              <div className="app-layout flex flex-col md:flex-row overflow-hidden">
                 <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                 <main className="flex-1 flex flex-col overflow-hidden">
                   <Routes>
