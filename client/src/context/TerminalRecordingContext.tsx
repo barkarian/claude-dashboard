@@ -14,6 +14,7 @@ export interface Recording {
   scripts: RecordingScript[];
   lines: string[];       // ANSI-stripped (for prompt expansion)
   rawLines: string[];    // raw (for live preview)
+  browserLines: string[];
   startedAt: number;
   stoppedAt: number | null;
 }
@@ -23,6 +24,8 @@ export interface ActiveRecording {
   scripts: RecordingScript[];
   lines: string[];
   rawLines: string[];
+  browserLines: string[];
+  browserPorts: number[];
   startedAt: number;
   lineCount: number;
 }
@@ -30,7 +33,7 @@ export interface ActiveRecording {
 export interface TerminalRecordingContextValue {
   activeRecording: ActiveRecording | null;
   recordings: Map<string, Recording>;
-  startRecording: (projectId: string, scripts: RecordingScript[]) => void;
+  startRecording: (projectId: string, scripts: RecordingScript[], browserPorts?: number[]) => void;
   stopRecording: () => string | null;
   deleteRecording: (id: string) => void;
   getRecordingContent: (id: string) => string | null;
@@ -46,24 +49,36 @@ function generateId(): string {
   return String(nextId++).padStart(4, '0');
 }
 
+function formatBrowserLogLevel(level: string): string {
+  switch (level) {
+    case 'error': return '[ERROR]';
+    case 'warn': return '[WARN]';
+    case 'info': return '[INFO]';
+    case 'debug': return '[DEBUG]';
+    default: return '[LOG]';
+  }
+}
+
 export function TerminalRecordingProvider({ children }: { children: ReactNode }) {
   const { socket } = useSocket();
   const [activeRecording, setActiveRecording] = useState<ActiveRecording | null>(null);
   const [recordings, setRecordings] = useState<Map<string, Recording>>(new Map());
 
   // Mutable buffer for capturing output without triggering renders on every line
-  const bufferRef = useRef<{ lines: string[]; rawLines: string[] }>({ lines: [], rawLines: [] });
-  const activeRef = useRef<{ id: string; projectId: string; scriptIds: Set<string>; scripts: RecordingScript[]; startedAt: number; skipNext: Map<string, boolean> } | null>(null);
+  const bufferRef = useRef<{ lines: string[]; rawLines: string[]; browserLines: string[] }>({ lines: [], rawLines: [], browserLines: [] });
+  const activeRef = useRef<{ id: string; projectId: string; scriptIds: Set<string>; scripts: RecordingScript[]; startedAt: number; skipNext: Map<string, boolean>; browserPorts: number[] } | null>(null);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushBuffer = useCallback(() => {
     if (!activeRef.current) return;
-    const { lines, rawLines } = bufferRef.current;
+    const { lines, rawLines, browserLines } = bufferRef.current;
     setActiveRecording({
       id: activeRef.current.id,
       scripts: activeRef.current.scripts,
       lines: [...lines],
       rawLines: [...rawLines],
+      browserLines: [...browserLines],
+      browserPorts: activeRef.current.browserPorts,
       startedAt: activeRef.current.startedAt,
       lineCount: lines.length,
     });
@@ -113,24 +128,58 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
     };
   }, [socket, flushBuffer]);
 
-  const startRecording = useCallback((projectId: string, scripts: RecordingScript[]) => {
+  // Socket listener for browser console logs
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleBrowserLog = ({ port, level, message }: { port: number; level: string; message: string; timestamp: number }) => {
+      if (!activeRef.current || !activeRef.current.browserPorts.includes(port)) return;
+
+      const buf = bufferRef.current;
+      const formatted = `${formatBrowserLogLevel(level)} ${message}`;
+      if (buf.browserLines.length < MAX_LINES) {
+        buf.browserLines.push(formatted);
+      }
+
+      // Throttled state update
+      if (!throttleTimerRef.current) {
+        throttleTimerRef.current = setTimeout(() => {
+          throttleTimerRef.current = null;
+          flushBuffer();
+        }, THROTTLE_MS);
+      }
+    };
+
+    socket.on('browser:log', handleBrowserLog);
+    return () => {
+      socket.off('browser:log', handleBrowserLog);
+    };
+  }, [socket, flushBuffer]);
+
+  const startRecording = useCallback((projectId: string, scripts: RecordingScript[], browserPorts?: number[]) => {
     if (!socket || activeRef.current) return;
 
     const id = generateId();
     const scriptIds = new Set(scripts.map(s => s.scriptId));
     const skipNext = new Map<string, boolean>();
     const now = Date.now();
+    const ports = browserPorts || [];
     for (const s of scripts) {
       // "From Now": skip the first terminal:output event (the buffer replay)
       skipNext.set(s.scriptId, !s.fromStart);
     }
 
-    activeRef.current = { id, projectId, scriptIds, scripts, startedAt: now, skipNext };
-    bufferRef.current = { lines: [], rawLines: [] };
+    activeRef.current = { id, projectId, scriptIds, scripts, startedAt: now, skipNext, browserPorts: ports };
+    bufferRef.current = { lines: [], rawLines: [], browserLines: [] };
 
     // Attach to terminal rooms for each script
     for (const s of scripts) {
       socket.emit('terminal:attach', { projectId, scriptId: s.scriptId });
+    }
+
+    // Enable browser monitoring for selected ports
+    for (const port of ports) {
+      socket.emit('browser-monitor:enable', { port });
     }
 
     setActiveRecording({
@@ -138,6 +187,8 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
       scripts,
       lines: [],
       rawLines: [],
+      browserLines: [],
+      browserPorts: ports,
       startedAt: Date.now(),
       lineCount: 0,
     });
@@ -146,11 +197,16 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
   const stopRecording = useCallback((): string | null => {
     if (!activeRef.current || !socket) return null;
 
-    const { id, projectId, scriptIds, scripts, startedAt } = activeRef.current;
+    const { id, projectId, scriptIds, scripts, startedAt, browserPorts } = activeRef.current;
 
     // Detach from terminal rooms
     for (const scriptId of scriptIds) {
       socket.emit('terminal:detach', { projectId, scriptId });
+    }
+
+    // Disable browser monitoring
+    for (const port of browserPorts) {
+      socket.emit('browser-monitor:disable', { port });
     }
 
     // Clear throttle timer and flush
@@ -164,6 +220,7 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
       scripts,
       lines: [...bufferRef.current.lines],
       rawLines: [...bufferRef.current.rawLines],
+      browserLines: [...bufferRef.current.browserLines],
       startedAt,
       stoppedAt: Date.now(),
     };
@@ -175,7 +232,7 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
     });
 
     activeRef.current = null;
-    bufferRef.current = { lines: [], rawLines: [] };
+    bufferRef.current = { lines: [], rawLines: [], browserLines: [] };
     setActiveRecording(null);
 
     return id;
@@ -200,7 +257,15 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
 
     const header = `[Terminal Recording: ${scriptNames} | ${rec.lines.length} lines | ${duration}]`;
     const content = rec.lines.join('\n');
-    return `${header}\n\`\`\`\n${content}\n\`\`\``;
+    let result = `${header}\n\`\`\`\n${content}\n\`\`\``;
+
+    if (rec.browserLines.length > 0) {
+      const browserHeader = `[Browser Console Logs: ${rec.browserLines.length} entries]`;
+      const browserContent = rec.browserLines.join('\n');
+      result += `\n\n${browserHeader}\n\`\`\`\n${browserContent}\n\`\`\``;
+    }
+
+    return result;
   }, [recordings]);
 
   return (

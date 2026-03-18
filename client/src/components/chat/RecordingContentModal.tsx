@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface RecordingContentModalProps {
@@ -9,17 +9,20 @@ interface RecordingContentModalProps {
 export default function RecordingContentModal({ recordingId, onClose }: RecordingContentModalProps) {
   const { recordings, activeRecording } = useTerminalRecording();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<'terminal' | 'browser'>('terminal');
 
   // Use active recording if ID matches, otherwise look in completed recordings
   const isLive = activeRecording?.id === recordingId;
   const rec = isLive ? activeRecording : recordings.get(recordingId);
+
+  const hasBrowser = rec ? rec.browserLines.length > 0 || (isLive && 'browserPorts' in rec && (rec as any).browserPorts?.length > 0) : false;
 
   // Auto-scroll for live recordings
   useEffect(() => {
     if (isLive && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [isLive, rec?.rawLines.length]);
+  }, [isLive, rec?.rawLines.length, rec?.browserLines.length, tab]);
 
   // Close on Escape
   useEffect(() => {
@@ -38,6 +41,8 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
   const stoppedAt = !isLive && 'stoppedAt' in rec && rec.stoppedAt
     ? new Date(rec.stoppedAt).toLocaleTimeString()
     : null;
+
+  const displayLines = tab === 'browser' ? rec.browserLines : rec.rawLines;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -68,10 +73,28 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
           </button>
         </div>
 
+        {/* Tab toggle */}
+        {hasBrowser && (
+          <div className="flex border-b border-border">
+            <button
+              onClick={() => setTab('terminal')}
+              className={`flex-1 text-xs py-2 text-center transition-colors ${tab === 'terminal' ? 'text-text font-medium border-b-2 border-primary' : 'text-text-muted hover:text-text'}`}
+            >
+              Terminal ({rec.rawLines.length})
+            </button>
+            <button
+              onClick={() => setTab('browser')}
+              className={`flex-1 text-xs py-2 text-center transition-colors ${tab === 'browser' ? 'text-text font-medium border-b-2 border-primary' : 'text-text-muted hover:text-text'}`}
+            >
+              Browser ({rec.browserLines.length})
+            </button>
+          </div>
+        )}
+
         {/* Content */}
         <div ref={scrollRef} className="overflow-y-auto flex-1 p-4 bg-[#0f1117]">
           <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
-            {rec.rawLines.join('\n')}
+            {displayLines.join('\n') || (tab === 'browser' ? 'No browser logs captured.' : '')}
           </pre>
         </div>
       </div>

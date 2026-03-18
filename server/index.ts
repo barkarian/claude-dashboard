@@ -19,6 +19,7 @@ import devicesRoutes from './routes/devices.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
+import { setSocketIO as setTunnelClientIO } from './services/tunnelClient.ts';
 import sshKeyService from './services/sshKeyService.ts';
 import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
@@ -168,6 +169,9 @@ const io = new SocketIOServer(server, {
 // Share session with Socket.IO
 io.engine.use(sessionMiddleware);
 io.use(socketAuthMiddleware);
+
+// Pass io to tunnelClient for browser monitor log emission
+setTunnelClientIO(io);
 
 // Register socket handlers
 registerSocketHandlers(io);

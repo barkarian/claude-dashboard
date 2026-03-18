@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import http from 'http';
+import type { Server as SocketIOServer } from 'socket.io';
 import type {
   TunnelRequest,
   TunnelResponse,
@@ -10,7 +11,26 @@ import type {
 } from './tunnelProtocol.ts';
 import credentialService from './credentialService.ts';
 import { emitSidecarEvent } from './sidecarEmitter.ts';
+import { BROWSER_MONITOR_SCRIPT } from './browserMonitorScript.ts';
 import config from '../config.ts';
+
+// Browser monitor state
+const monitoredPorts = new Set<number>();
+let ioRef: SocketIOServer | null = null;
+
+export function setSocketIO(io: SocketIOServer): void {
+  ioRef = io;
+}
+
+export function enableBrowserMonitor(port: number): void {
+  monitoredPorts.add(port);
+  console.log(`[tunnel-client] Browser monitor enabled for port ${port}`);
+}
+
+export function disableBrowserMonitor(port: number): void {
+  monitoredPorts.delete(port);
+  console.log(`[tunnel-client] Browser monitor disabled for port ${port}`);
+}
 
 // Current active WebSocket (only this one should handle events)
 let ws: WebSocket | null = null;
@@ -165,6 +185,23 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
 
   const { requestId, method, url, headers, body, targetPort } = tunnelReq;
 
+  // --- Intercept /__claw_console__ POSTs (browser monitor logs) ---
+  if (url === '/__claw_console__' && method.toUpperCase() === 'POST' && body) {
+    try {
+      const decoded = Buffer.from(body, 'base64').toString('utf-8');
+      const logs = JSON.parse(decoded) as Array<{ l: string; m: string; t: number }>;
+      if (ioRef && Array.isArray(logs)) {
+        for (const entry of logs) {
+          ioRef.emit('browser:log', { port: targetPort, level: entry.l, message: entry.m, timestamp: entry.t });
+        }
+      }
+    } catch {
+      // Ignore malformed payloads
+    }
+    sendMessage({ type: 'tunnel-response', requestId, statusCode: 204, headers: {}, body: undefined });
+    return;
+  }
+
   // --- Input validation ---
   // Validate targetPort against registered endpoints (lazy import to avoid circular dep)
   const { default: tunnelManager } = await import('./tunnelManager.ts');
@@ -268,9 +305,38 @@ async function handleTunnelRequest(tunnelReq: TunnelRequest): Promise<void> {
       const chunks: Buffer[] = [];
       localRes.on('data', (chunk: Buffer) => chunks.push(chunk));
       localRes.on('end', () => {
-        const responseBody = chunks.length > 0
+        let responseBody = chunks.length > 0
           ? Buffer.concat(chunks).toString('base64')
           : undefined;
+
+        // Inject browser monitor script into HTML responses for monitored ports
+        if (responseBody && monitoredPorts.has(targetPort) && contentType.includes('text/html')) {
+          try {
+            let html = Buffer.from(responseBody, 'base64').toString('utf-8');
+
+            // Remove or relax CSP header that would block inline scripts
+            if (resHeaders['content-security-policy']) {
+              delete resHeaders['content-security-policy'];
+            }
+
+            // Inject before </head>, </body>, or append at end
+            if (html.includes('</head>')) {
+              html = html.replace('</head>', BROWSER_MONITOR_SCRIPT + '</head>');
+            } else if (html.includes('</body>')) {
+              html = html.replace('</body>', BROWSER_MONITOR_SCRIPT + '</body>');
+            } else {
+              html += BROWSER_MONITOR_SCRIPT;
+            }
+
+            responseBody = Buffer.from(html, 'utf-8').toString('base64');
+            // Update content-length if present
+            if (resHeaders['content-length']) {
+              resHeaders['content-length'] = String(Buffer.from(html, 'utf-8').length);
+            }
+          } catch {
+            // If injection fails, send original response
+          }
+        }
 
         const responseMsg: TunnelResponse = {
           type: 'tunnel-response',

@@ -10,13 +10,16 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
   const { activeRecording, stopRecording } = useTerminalRecording();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [tab, setTab] = useState<'terminal' | 'browser'>('terminal');
+
+  const hasBrowser = (activeRecording?.browserPorts.length ?? 0) > 0;
 
   // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [activeRecording?.rawLines.length]);
+  }, [activeRecording?.rawLines.length, activeRecording?.browserLines.length, tab]);
 
   // Elapsed timer
   useEffect(() => {
@@ -41,6 +44,7 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
   }
 
   const scriptNames = activeRecording.scripts.map(s => s.label || s.command).join(', ');
+  const displayLines = tab === 'browser' ? activeRecording.browserLines : activeRecording.rawLines;
 
   return (
     <div className="card shadow-xl flex flex-col border-border-light max-h-64">
@@ -66,10 +70,28 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
         </div>
       </div>
 
-      {/* Terminal output */}
+      {/* Tab toggle */}
+      {hasBrowser && (
+        <div className="flex border-b border-border">
+          <button
+            onClick={() => setTab('terminal')}
+            className={`flex-1 text-xs py-1.5 text-center transition-colors ${tab === 'terminal' ? 'text-text font-medium border-b-2 border-primary' : 'text-text-muted hover:text-text'}`}
+          >
+            Terminal
+          </button>
+          <button
+            onClick={() => setTab('browser')}
+            className={`flex-1 text-xs py-1.5 text-center transition-colors ${tab === 'browser' ? 'text-text font-medium border-b-2 border-primary' : 'text-text-muted hover:text-text'}`}
+          >
+            Browser{activeRecording.browserLines.length > 0 ? ` (${activeRecording.browserLines.length})` : ''}
+          </button>
+        </div>
+      )}
+
+      {/* Output */}
       <div ref={scrollRef} className="overflow-y-auto flex-1 p-3 bg-[#0f1117] rounded-b-xl">
         <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
-          {activeRecording.rawLines.join('\n')}
+          {displayLines.join('\n') || (tab === 'browser' ? 'Waiting for browser logs... Refresh your app tab to start capture.' : '')}
         </pre>
       </div>
 

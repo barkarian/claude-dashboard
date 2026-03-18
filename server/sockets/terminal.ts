@@ -2,6 +2,7 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import os from 'os';
 import processManager from '../services/processManager.ts';
 import projectManager from '../services/projectManager.ts';
+import { enableBrowserMonitor, disableBrowserMonitor } from '../services/tunnelClient.ts';
 import type {
   TerminalStartPayload,
   TerminalStopPayload,
@@ -105,5 +106,13 @@ export default function registerTerminalEvents(socket: Socket, io: SocketIOServe
   socket.on('terminal:detach', ({ projectId, scriptId }: TerminalDetachPayload) => {
     const room = `terminal:${projectId}:${scriptId}`;
     socket.leave(room);
+  });
+
+  socket.on('browser-monitor:enable', ({ port }: { port: number }) => {
+    enableBrowserMonitor(port);
+  });
+
+  socket.on('browser-monitor:disable', ({ port }: { port: number }) => {
+    disableBrowserMonitor(port);
   });
 }
