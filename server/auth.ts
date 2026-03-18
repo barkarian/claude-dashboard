@@ -5,6 +5,7 @@ import type { IncomingMessage } from 'http';
 import config from './config.ts';
 import tunnelManager from './services/tunnelManager.ts';
 import * as tunnelClient from './services/tunnelClient.ts';
+import { getTunnelCredentials } from './services/database.ts';
 
 /**
  * Validate tunnel session token using timing-safe comparison.
@@ -44,7 +45,31 @@ function tryAutoBootstrapSession(req: Request): boolean {
 
   if (!validateTunnelToken(req)) return false;
 
-  const userInfo = tunnelManager.getUserInfo();
+  let userInfo = tunnelManager.getUserInfo();
+
+  // If user info is missing but tunnel has credentials, recover from SQLite.
+  // This handles the case where clearUserInfo() was called (e.g. browser logout)
+  // but the tunnel WebSocket is still connected.
+  if (!userInfo) {
+    const creds = tunnelManager.getCredentials();
+    if (creds) {
+      const saved = getTunnelCredentials();
+      if (saved?.userId) {
+        const recovered = {
+          apiKey: saved.apiKey,
+          userSubdomain: saved.userSubdomain,
+          userId: saved.userId,
+          email: saved.email || '',
+          username: saved.username || '',
+          plan: (saved.plan === 'pro' ? 'pro' : 'free') as 'free' | 'pro',
+        };
+        tunnelManager.setUserInfo(recovered);
+        userInfo = recovered;
+        console.log(`[auth] Recovered user info from SQLite for session bootstrap (user=${recovered.username})`);
+      }
+    }
+  }
+
   if (!userInfo) return false;
 
   // Auto-bootstrap the session with cached user info
@@ -164,6 +189,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 
     if (pathToCheck.startsWith('/api/')) {
       res.status(401).json({ error: 'Unauthorized', tunnelUrl });
+      return;
+    }
+
+    // Detect self-redirect: if this request already came through the tunnel
+    // (has tunnel token) and auth still failed, don't redirect back to the
+    // same tunnel URL — that would cause an infinite redirect loop.
+    const isTunnelRequest = !!req.headers['x-tunnel-token'];
+    if (isTunnelRequest) {
+      console.error('[auth] Tunnel-proxied request failed auth — cannot redirect (would loop). Serving 503.');
+      res.status(503).send('Session bootstrap failed. Please try refreshing or clearing cookies.');
       return;
     }
 

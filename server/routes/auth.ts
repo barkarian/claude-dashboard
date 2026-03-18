@@ -7,9 +7,10 @@ const router = Router();
 router.post('/logout', (req: Request, res: Response) => {
   console.log('[auth] Logout requested');
 
-  // Clear cached user info so auto-bootstrap stops re-authenticating tunnel requests.
-  // The tunnel itself stays connected so the user can re-login through the tunnel URL.
-  tunnelManager.clearUserInfo();
+  // Only destroy THIS session — do NOT clear tunnelManager.userInfo here!
+  // clearUserInfo() wipes the global cached user info which breaks session
+  // auto-bootstrap for ALL tunnel-proxied requests (other browsers, mobile).
+  // User info should only be cleared on full tunnel disconnect (tunnelAuth /disconnect).
 
   req.session.destroy((err) => {
     if (err) {
