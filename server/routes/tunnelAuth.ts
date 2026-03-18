@@ -9,6 +9,17 @@ const router = Router();
 // Pending activation data for account switches (short-lived, used by /activate)
 let pendingActivation: { apiKey: string; userSubdomain: string; gateToken?: string; timestamp: number } | null = null;
 
+// In-memory OAuth state store (avoids session dependency issues in desktop mode)
+const pendingOAuthStates = new Map<string, number>(); // state → timestamp
+
+// Cleanup expired states (older than 5 minutes) periodically
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [s, ts] of pendingOAuthStates) {
+    if (ts < cutoff) pendingOAuthStates.delete(s);
+  }
+}, 60 * 1000);
+
 // GET /api/tunnel-auth/connect — redirect browser to tunnel-service OAuth
 router.get('/connect', (req: Request, res: Response) => {
   console.log('[tunnel-auth] /connect hit');
@@ -25,25 +36,13 @@ router.get('/connect', (req: Request, res: Response) => {
 
   // Generate OAuth state parameter to prevent login CSRF
   const state = crypto.randomBytes(16).toString('hex');
+  pendingOAuthStates.set(state, Date.now());
 
   console.log(`[tunnel-auth] Redirecting to OAuth. callbackUrl=${callbackUrl}, forwardedHost=${forwardedHost}, host=${host}`);
 
   const authorizeUrl = `${config.tunnelServiceUrl}/oauth/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&client_id=claude-dashboard&state=${encodeURIComponent(state)}`;
 
-  // Store state in session and save before redirect
-  // Guard: req.session may not exist yet if saveUninitialized is false
-  if (!req.session) {
-    return res.redirect(authorizeUrl);
-  }
-  req.session.oauthState = state;
-  req.session.save((err) => {
-    if (err) {
-      console.error('[tunnel-auth] Failed to save session with OAuth state:', err);
-      // Still redirect — state validation will fail on callback but user can retry
-      return res.redirect(authorizeUrl);
-    }
-    res.redirect(authorizeUrl);
-  });
+  res.redirect(authorizeUrl);
 });
 
 // GET /api/tunnel-auth/callback — receive auth code from tunnel-service OAuth
@@ -56,12 +55,13 @@ router.get('/callback', async (req: Request, res: Response) => {
     return res.status(400).send('Missing authorization code');
   }
 
-  // Validate OAuth state parameter
-  if (!state || !req.session?.oauthState || state !== req.session.oauthState) {
-    console.error(`[tunnel-auth] OAuth state mismatch: expected=${req.session?.oauthState}, got=${state}`);
+  // Validate OAuth state parameter (stored in memory, not session)
+  const stateTimestamp = state ? pendingOAuthStates.get(state) : undefined;
+  if (!state || !stateTimestamp || Date.now() - stateTimestamp > 5 * 60 * 1000) {
+    console.error(`[tunnel-auth] OAuth state invalid or expired: got=${state}`);
     return res.status(400).send('OAuth state mismatch — possible CSRF attack. Please try again.');
   }
-  delete req.session.oauthState;
+  pendingOAuthStates.delete(state);
 
   if (!config.tunnelServiceUrl) {
     return res.status(400).send('Tunnel service not configured');
