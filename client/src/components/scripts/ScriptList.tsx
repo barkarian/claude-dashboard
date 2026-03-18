@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api.ts';
 import { useSocket } from '../../context/SocketContext.tsx';
 import ScriptCard from './ScriptCard.tsx';
 import RunningProcessCard from './RunningProcessCard.tsx';
+import ExitedProcessCard from './ExitedProcessCard.tsx';
 import AddScriptModal from './AddScriptModal.tsx';
 import AIScriptGenerator from './AIScriptGenerator.tsx';
 import type { Project, ScriptWithStatus, RunningProcess } from '../../../../shared/types/models.ts';
@@ -16,6 +17,13 @@ interface ScriptListProps {
 export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [scripts, setScripts] = useState<ScriptWithStatus[]>([]);
   const [runningProcesses, setRunningProcesses] = useState<RunningProcess[]>([]);
+  const [exitedProcesses, setExitedProcesses] = useState<RunningProcess[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(`dismissed-processes:${projectId}`);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showAIGenerator, setShowAIGenerator] = useState(false);
@@ -47,8 +55,9 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   async function loadProcesses(): Promise<void> {
     try {
       const data = await api.get<{ processes: RunningProcess[]; runningCount: number }>(`/api/projects/${projectId}/scripts/processes`);
-      const running = (data.processes || []).filter((p: RunningProcess) => p.status === 'running');
-      setRunningProcesses(running);
+      const all = data.processes || [];
+      setRunningProcesses(all.filter((p: RunningProcess) => p.status === 'running'));
+      setExitedProcesses(all.filter((p: RunningProcess) => p.status === 'exited'));
     } catch (err) {
       console.error('[ScriptList] Failed to load processes:', err);
     }
@@ -57,6 +66,15 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   function handleRefresh() {
     loadAll();
   }
+
+  const handleDismiss = useCallback((scriptId: string) => {
+    setDismissedIds(prev => {
+      const next = new Set(prev);
+      next.add(scriptId);
+      localStorage.setItem(`dismissed-processes:${projectId}`, JSON.stringify([...next]));
+      return next;
+    });
+  }, [projectId]);
 
   async function handleDelete(scriptId: string) {
     try {
@@ -99,6 +117,8 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   }
 
   const hasRunning = runningProcesses.length > 0;
+  const visibleExited = exitedProcesses.filter(p => !dismissedIds.has(p.scriptId));
+  const hasExited = visibleExited.length > 0;
 
   return (
     <div className="p-4 space-y-3">
@@ -118,13 +138,29 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
         </>
       )}
 
-      {hasRunning && scripts.length > 0 && (
+      {hasExited && (
+        <>
+          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider pt-2">
+            Previously Run ({visibleExited.length})
+          </h3>
+          {visibleExited.map((proc) => (
+            <ExitedProcessCard
+              key={proc.scriptId}
+              process={proc}
+              projectId={projectId}
+              onDismiss={handleDismiss}
+            />
+          ))}
+        </>
+      )}
+
+      {(hasRunning || hasExited) && scripts.length > 0 && (
         <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider pt-2">
           Defined Scripts
         </h3>
       )}
 
-      {scripts.length === 0 && !hasRunning ? (
+      {scripts.length === 0 && !hasRunning && !hasExited ? (
         <div className="text-center py-12">
           <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />

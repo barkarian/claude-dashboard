@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
+import { stripAnsi } from '../../utils/ansi.ts';
+import SendToChatDialog from './SendToChatDialog.tsx';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface RunningProcessCardProps {
@@ -14,6 +17,18 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
   const navigate = useNavigate();
   const { socket } = useSocket();
   const { isDesktop } = useAuth();
+  const [showSendDialog, setShowSendDialog] = useState(false);
+  const [sendContent, setSendContent] = useState('');
+
+  async function handleSendToChat() {
+    try {
+      const data = await api.get<{ buffer: string }>(`/api/projects/${projectId}/scripts/processes/${process.scriptId}/buffer`);
+      setSendContent(stripAnsi(data.buffer));
+      setShowSendDialog(true);
+    } catch (err) {
+      console.error('Failed to fetch buffer:', err);
+    }
+  }
 
   function handleStop() {
     if (!socket) return;
@@ -72,6 +87,16 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
           </button>
         )}
 
+        <button
+          onClick={handleSendToChat}
+          className="p-2 rounded-lg hover:bg-bg-hover text-text-dim transition-colors flex-shrink-0"
+          title="Send to Chat"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+          </svg>
+        </button>
+
         {process.status === 'running' && (
           <button
             onClick={handleStop}
@@ -97,6 +122,15 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
             </button>
           ))}
         </div>
+      )}
+
+      {showSendDialog && (
+        <SendToChatDialog
+          projectId={projectId}
+          content={sendContent}
+          contentLabel={process.label || process.command}
+          onClose={() => setShowSendDialog(false)}
+        />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.tsx';
 import api from './utils/api.ts';
@@ -11,7 +11,7 @@ import SettingsPage from './pages/SettingsPage.tsx';
 import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
 import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
-import Sidebar from './components/layout/Sidebar.tsx';
+import Sidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -130,16 +130,20 @@ function useSwipeToOpenSidebar(onOpen: () => void) {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
+  const sidebarRef = useRef<SidebarHandle>(null);
+  const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
   useSwipeToOpenSidebar(openSidebar);
+
+  const sidebarCtx = useMemo(() => ({ openSidebar, refreshProjects }), [openSidebar, refreshProjects]);
 
   return (
     <Routes>
       <Route path="/*" element={
         <ProtectedRoute>
           <ProjectProvider>
-            <SidebarContext.Provider value={{ openSidebar }}>
+            <SidebarContext.Provider value={sidebarCtx}>
               <div className="app-layout flex flex-col md:flex-row overflow-hidden">
-                <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+                <Sidebar ref={sidebarRef} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                 <main className="flex-1 flex flex-col overflow-hidden">
                   <Routes>
                     <Route path="/" element={<ProjectListPage />} />

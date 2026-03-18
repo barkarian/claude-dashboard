@@ -44,6 +44,16 @@ router.get('/processes', async (req: Request<{ id: string }>, res: Response) => 
   }
 });
 
+router.get('/processes/:scriptId/buffer', (req: Request<{ id: string; scriptId: string }>, res: Response) => {
+  try {
+    const buffer = processManager.getBuffer(req.params.id, req.params.scriptId);
+    res.json({ buffer });
+  } catch (err) {
+    console.error('Error getting process buffer:', err);
+    res.status(500).json({ error: 'Failed to get buffer' });
+  }
+});
+
 router.get('/', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const scripts = projectManager.listScripts(req.params.id);

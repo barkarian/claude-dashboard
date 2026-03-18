@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import FilePicker from './FilePicker.tsx';
 import TerminalRecordButton from './TerminalRecordButton.tsx';
 import ScriptPickerPanel from './ScriptPickerPanel.tsx';
@@ -17,6 +18,7 @@ interface SDKPromptInputProps {
 }
 
 export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus }: SDKPromptInputProps) {
+  const location = useLocation();
   const [value, setValue] = useState('');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -34,12 +36,35 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
     }
   }, [value]);
 
-  // Auto-focus textarea for new chats
+  // Auto-focus textarea for new chats.
+  // Mobile WebViews won't open the keyboard from async callbacks (the user-gesture
+  // context has expired by the time the connecting spinner resolves). We use a
+  // short setTimeout chain which is the most reliable cross-platform workaround.
   useEffect(() => {
     if (autoFocus && textareaRef.current) {
-      textareaRef.current.focus();
+      const el = textareaRef.current;
+      // Immediate focus (works on desktop)
+      el.focus();
+      // Delayed retry for mobile WebViews
+      const t1 = setTimeout(() => el.focus(), 100);
+      const t2 = setTimeout(() => {
+        el.focus();
+        // Some mobile browsers need a selection range set to trigger the keyboard
+        el.setSelectionRange(el.value.length, el.value.length);
+      }, 300);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [autoFocus]);
+
+  // Prefill from navigation state (e.g. Send to Chat from scripts)
+  useEffect(() => {
+    const prefill = (location.state as { prefillContent?: string } | null)?.prefillContent;
+    if (prefill) {
+      setValue(prefill);
+      // Clear the state so it doesn't re-prefill on re-renders
+      window.history.replaceState({}, '');
+    }
+  }, []);
 
   const isStreaming = status === 'streaming' || status === 'tool-use' || status === 'waiting-permission';
   const disabled = status === 'disconnected' || status === 'exited' || status === 'error';
@@ -152,6 +177,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          autoFocus={autoFocus}
           className="input resize-none min-h-[42px] max-h-[200px] py-2.5 flex-1"
           placeholder={
             disabled

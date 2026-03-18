@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { useSocket } from '../context/SocketContext.tsx';
+import { useSidebar } from '../context/SidebarContext.tsx';
 import Header from '../components/layout/Header.tsx';
 import RepoSelector from '../components/projects/RepoSelector.tsx';
 import SetupTerminal from '../components/projects/SetupTerminal.tsx';
@@ -10,6 +11,7 @@ import type { GitHubRepo, Project } from '../../../shared/types/models.ts';
 export default function NewProjectPage() {
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const { refreshProjects } = useSidebar();
   const [step, setStep] = useState(1);
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [customUrl, setCustomUrl] = useState('');
@@ -49,6 +51,7 @@ export default function NewProjectPage() {
       setSetupSessionId(data.setupSessionId);
       setCreatedProjectId(data.project.id);
       setSetupDone(true);
+      refreshProjects();
     } catch (err: any) {
       setError(err.message);
       setCreating(false);
@@ -65,6 +68,7 @@ export default function NewProjectPage() {
       });
       setCreatedProjectId(data.project.id);
       setSetupDone(true);
+      refreshProjects();
     } catch (err: any) {
       setError(err.message);
       setCreating(false);

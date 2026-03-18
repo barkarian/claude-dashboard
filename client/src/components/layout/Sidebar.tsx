@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
@@ -12,9 +12,13 @@ interface SidebarProps {
   onClose: () => void;
 }
 
+export interface SidebarHandle {
+  refreshProjects: () => void;
+}
+
 const PAGE_SIZE = 20;
 
-export default function Sidebar({ isOpen, onClose }: SidebarProps) {
+const Sidebar = forwardRef<SidebarHandle, SidebarProps>(function Sidebar({ isOpen, onClose }, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
 
   // On desktop (localhost), "Account Settings" and "Upgrade to Pro" need the
@@ -60,6 +64,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       // ignore
     }
   }
+
+  useImperativeHandle(ref, () => ({
+    refreshProjects: loadInitial,
+  }));
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -252,4 +260,6 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       </div>
     </>
   );
-}
+});
+
+export default Sidebar;
