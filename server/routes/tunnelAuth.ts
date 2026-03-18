@@ -273,16 +273,31 @@ router.get('/modes', async (req: Request, res: Response) => {
   res.json({ modes: [] });
 });
 
-// POST /api/tunnel-auth/disconnect — destroy user session and close tunnel WebSocket
-router.post('/disconnect', (req: Request, res: Response) => {
-  console.log('[tunnel-auth] /disconnect hit');
+// POST /api/tunnel-auth/disconnect — full teardown for desktop app logout.
+// Deactivates all tunnel endpoints on the tunnel service, disconnects the
+// WebSocket, wipes cached user info and persisted SQLite credentials, and
+// destroys the Express session.  The next app launch will require a fresh
+// login and tunnel connection.
+router.post('/disconnect', async (req: Request, res: Response) => {
+  console.log('[tunnel-auth] /disconnect hit — full teardown');
+
+  // 1. Deactivate all tunnel-service endpoints BEFORE clearing credentials,
+  //    because the deactivation call needs the API key that clearCredentials wipes.
+  await tunnelManager.deactivateAllEndpoints();
+
+  // 2. Clear cached user info so auto-bootstrap stops re-authenticating requests.
+  tunnelManager.clearUserInfo();
+
+  // 3. Clear credentials: nulls API key, disconnects WebSocket, deletes
+  //    SQLite tunnel_credentials row (local mode).
   tunnelManager.clearCredentials();
+
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to disconnect' });
     }
     res.clearCookie(`connect.sid.${config.dashboardEnv}`);
-    console.log('[tunnel-auth] Session destroyed, credentials cleared, tunnel disconnected');
+    console.log('[tunnel-auth] Full teardown complete: endpoints deactivated, tunnel closed, session destroyed');
     return res.json({ success: true });
   });
 });

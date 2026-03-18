@@ -33,8 +33,14 @@ router.get('/status', (req: Request, res: Response) => {
   const creds = tunnelManager.getCredentials();
   const tunnelConnected = !!creds?.userSubdomain && config.tunnelDomain;
 
-  // Desktop mode: always authenticated, but include tunnel URL for redirect
-  if (process.env.CLAW_DESKTOP === '1') {
+  // Desktop mode (Tauri app): always authenticated, include tunnel URL for redirect.
+  // isDesktop tells the frontend it's running inside the desktop shell so it can
+  // show desktop-specific UI (close-tunnel logout, notifications, updates) without
+  // relying on window.__TAURI__ which is unavailable when the webview loads
+  // content from http://localhost rather than tauri://localhost.
+  const isDesktop = process.env.CLAW_DESKTOP === '1';
+
+  if (isDesktop) {
     const userInfo = tunnelManager.getUserInfo();
     const subdomain = userInfo?.userSubdomain || creds?.userSubdomain;
     const tunnelUrl = subdomain && config.tunnelDomain
@@ -43,6 +49,7 @@ router.get('/status', (req: Request, res: Response) => {
 
     return res.json({
       authenticated: true,
+      isDesktop: true,
       isVps: false,
       dashboardEnv: config.dashboardEnv,
       user: userInfo ? {
@@ -75,6 +82,7 @@ router.get('/status', (req: Request, res: Response) => {
 
   return res.json({
     authenticated,
+    isDesktop: false,
     isVps: config.isVps,
     dashboardEnv: config.dashboardEnv,
     user: tunnelService ? {

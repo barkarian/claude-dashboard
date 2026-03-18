@@ -1,14 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import Header from '../components/layout/Header.tsx';
 import { useSidebar } from '../context/SidebarContext.tsx';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll.ts';
 import ProjectCard from '../components/projects/ProjectCard.tsx';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
+
+const PAGE_SIZE = 20;
 
 export default function ProjectListPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const offsetRef = useRef(0);
   const navigate = useNavigate();
   const { openSidebar } = useSidebar();
 
@@ -30,19 +36,42 @@ export default function ProjectListPage() {
   }, [openSidebar]);
 
   useEffect(() => {
-    loadProjects();
+    loadInitial();
   }, []);
 
-  async function loadProjects() {
+  async function loadInitial() {
     try {
-      const data = await api.get<{ projects: ProjectSummary[] }>('/api/projects');
-      setProjects(data.projects || []);
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0`);
+      const fetched = data.projects || [];
+      setProjects(fetched);
+      offsetRef.current = fetched.length;
+      setHasMore(fetched.length < (data.total || 0));
     } catch (err) {
       console.error('Failed to load projects:', err);
     } finally {
       setLoading(false);
     }
   }
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const currentOffset = offsetRef.current;
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${currentOffset}`);
+      const newProjects = data.projects || [];
+      setProjects(prev => [...prev, ...newProjects]);
+      const newOffset = currentOffset + newProjects.length;
+      offsetRef.current = newOffset;
+      setHasMore(newOffset < (data.total || 0));
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore]);
+
+  const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -77,11 +106,21 @@ export default function ProjectListPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {projects.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+            </div>
+
+            {/* Infinite scroll sentinel */}
+            <div ref={sentinelRef} />
+            {loadingMore && (
+              <div className="flex justify-center py-4">
+                <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -27,8 +27,8 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   // Paginated state
   const [chats, setChats] = useState<Chat[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const offsetRef = useRef(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -44,14 +44,17 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   }, [projectId, debouncedSearch]);
 
   async function loadChats(reset: boolean) {
-    const newOffset = reset ? 0 : offset;
+    const currentOffset = reset ? 0 : offsetRef.current;
     if (!reset) setLoadingMore(true);
-    if (reset) setInitialLoading(true);
+    if (reset) {
+      setInitialLoading(true);
+      setHasMore(false);
+    }
 
     try {
       const searchParam = debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : '';
       const data = await api.get<{ chats: Chat[]; total: number }>(
-        `/api/projects/${projectId}/chats?limit=${PAGE_SIZE}&offset=${newOffset}${searchParam}`
+        `/api/projects/${projectId}/chats?limit=${PAGE_SIZE}&offset=${currentOffset}${searchParam}`
       );
       const newChats = data.chats || [];
       if (reset) {
@@ -59,9 +62,10 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
       } else {
         setChats(prev => [...prev, ...newChats]);
       }
+      const newOffset = currentOffset + newChats.length;
       setTotal(data.total || 0);
-      setOffset(newOffset + newChats.length);
-      setHasMore(newOffset + newChats.length < (data.total || 0));
+      offsetRef.current = newOffset;
+      setHasMore(newOffset < (data.total || 0));
     } catch {
       // ignore
     } finally {
@@ -74,7 +78,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
     if (!loadingMore && hasMore) {
       loadChats(false);
     }
-  }, [loadingMore, hasMore, offset, projectId, debouncedSearch]);
+  }, [loadingMore, hasMore, projectId, debouncedSearch]);
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 

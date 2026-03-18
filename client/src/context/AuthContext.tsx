@@ -10,6 +10,13 @@ interface AuthUser {
 
 interface AuthContextValue {
   isAuthenticated: boolean;
+  /** True when the frontend is running inside the Tauri desktop shell.
+   *  Determined server-side via CLAW_DESKTOP env var and communicated through
+   *  the /api/auth/status response. We can't rely on window.__TAURI__ because
+   *  the Tauri webview navigates to http://localhost (the Express server),
+   *  which is a different origin from tauri://localhost where __TAURI__ is
+   *  injected. */
+  isDesktop: boolean;
   isVps: boolean;
   dashboardEnv: 'local' | 'vps';
   loading: boolean;
@@ -18,6 +25,16 @@ interface AuthContextValue {
   tunnelUrl: string | null;
   logout: () => Promise<void>;
   refreshPlan: () => Promise<void>;
+}
+
+interface AuthStatusResponse {
+  authenticated: boolean;
+  isDesktop?: boolean;
+  isVps: boolean;
+  dashboardEnv?: 'local' | 'vps';
+  user: AuthUser | null;
+  oauthUrl: string | null;
+  tunnelUrl: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -30,6 +47,7 @@ function getEnvFromUrl(): 'local' | 'vps' {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isVps, setIsVps] = useState(false);
   const [dashboardEnv, setDashboardEnv] = useState<'local' | 'vps'>(getEnvFromUrl());
   const [loading, setLoading] = useState(true);
@@ -43,24 +61,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
-      const data = await api.get<{ authenticated: boolean; isVps: boolean; dashboardEnv?: 'local' | 'vps'; user: AuthUser | null; oauthUrl: string | null; tunnelUrl: string | null }>('/api/auth/status');
+      const data = await api.get<AuthStatusResponse>('/api/auth/status');
       setIsAuthenticated(data.authenticated);
+      setIsDesktop(!!data.isDesktop);
       setIsVps(data.isVps);
       if (data.dashboardEnv) setDashboardEnv(data.dashboardEnv);
       setUser(data.user);
       setOauthUrl(data.oauthUrl);
       setTunnelUrl(data.tunnelUrl);
 
-      // If not authenticated on a tunnel URL, redirect to gate login
-      if (!data.authenticated && !window.__TAURI__ && window.location.hostname.endsWith('.claw-dev.com')) {
+      // If not authenticated on a tunnel URL, redirect to gate login.
+      // Skip this redirect in desktop mode — the desktop app handles auth
+      // locally through the tunnel-auth OAuth flow, not through the gate.
+      if (!data.authenticated && !data.isDesktop && window.location.hostname.endsWith('.claw-dev.com')) {
         const currentUrl = window.location.href;
         const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
         window.location.href = `https://tunnel-api.${tunnelDomain}/gate/login?redirect=${encodeURIComponent(currentUrl)}`;
         return;
       }
     } catch {
-      // If the auth check fails on a tunnel URL (e.g. CORS from gate redirect), redirect to gate login
-      if (!window.__TAURI__ && window.location.hostname.endsWith('.claw-dev.com')) {
+      // If the auth check fails on a tunnel URL (e.g. CORS from gate redirect),
+      // redirect to gate login. In desktop mode this catch won't fire because
+      // localhost requests don't fail with CORS, but guard against it anyway.
+      if (window.location.hostname.endsWith('.claw-dev.com')) {
         const currentUrl = window.location.href;
         const tunnelDomain = window.location.hostname.split('.').slice(-2).join('.');
         window.location.href = `https://tunnel-api.${tunnelDomain}/gate/login?redirect=${encodeURIComponent(currentUrl)}`;
@@ -73,11 +96,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = useCallback(async () => {
-    if (window.__TAURI__) {
-      // Desktop app: clear SQLite credentials + session so next reopen asks for login
+    if (isDesktop) {
+      // Desktop app: full teardown — deactivates tunnel endpoints, disconnects
+      // WebSocket, wipes SQLite credentials, and destroys the Express session.
+      // Afterward, hard-navigate to "/" so any /vps or /local path preference
+      // is forgotten; the next app launch starts fresh with a login prompt.
       await api.post('/api/tunnel-auth/disconnect');
       setIsAuthenticated(false);
       setUser(null);
+      window.location.href = '/';
     } else {
       // Browser: fire logout API (don't await — redirect immediately to avoid CORS loop)
       api.post('/api/auth/logout').catch(() => {});
@@ -92,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
     }
-  }, []);
+  }, [isDesktop]);
 
   const refreshPlan = useCallback(async () => {
     try {
@@ -104,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isVps, dashboardEnv, loading, user, oauthUrl, tunnelUrl, logout, refreshPlan }}>
+    <AuthContext.Provider value={{ isAuthenticated, isDesktop, isVps, dashboardEnv, loading, user, oauthUrl, tunnelUrl, logout, refreshPlan }}>
       {children}
     </AuthContext.Provider>
   );

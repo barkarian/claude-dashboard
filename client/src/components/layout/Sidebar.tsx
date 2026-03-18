@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
@@ -15,13 +15,13 @@ interface SidebarProps {
 const PAGE_SIZE = 20;
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, isDesktop } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
 
   useEffect(() => {
     loadInitial();
@@ -35,9 +35,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   async function loadInitial() {
     try {
       const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0`);
-      setProjects(data.projects || []);
-      setOffset(data.projects?.length || 0);
-      setHasMore((data.projects?.length || 0) < (data.total || 0));
+      const fetched = data.projects || [];
+      setProjects(fetched);
+      offsetRef.current = fetched.length;
+      setHasMore(fetched.length < (data.total || 0));
     } catch {
       // ignore
     }
@@ -47,17 +48,19 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${offset}`);
+      const currentOffset = offsetRef.current;
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${currentOffset}`);
       const newProjects = data.projects || [];
       setProjects(prev => [...prev, ...newProjects]);
-      setOffset(prev => prev + newProjects.length);
-      setHasMore(offset + newProjects.length < (data.total || 0));
+      const newOffset = currentOffset + newProjects.length;
+      offsetRef.current = newOffset;
+      setHasMore(newOffset < (data.total || 0));
     } catch {
       // ignore
     } finally {
       setLoadingMore(false);
     }
-  }, [offset, hasMore, loadingMore]);
+  }, [hasMore, loadingMore]);
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
@@ -142,7 +145,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           Account Settings
         </a>
 
-        {!!window.__TAURI__ && (
+        {isDesktop && (
           <NavLink
             to="/settings"
             className={({ isActive }) =>
@@ -185,6 +188,9 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
       )}
 
+      {/* In the desktop app (Tauri), logout also tears down the tunnel
+          connection and deactivates all endpoints, so the label reflects that.
+          In the browser, logout only clears the session. */}
       <div className="p-3 border-t border-border">
         <Button
           variant="ghost"
@@ -194,7 +200,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
           </svg>
-          Logout
+          {isDesktop ? 'Logout & Close Tunnel' : 'Logout'}
         </Button>
       </div>
     </>
