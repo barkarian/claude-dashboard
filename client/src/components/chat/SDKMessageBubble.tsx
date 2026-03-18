@@ -17,7 +17,7 @@ export default function SDKMessageBubble({ message }: SDKMessageBubbleProps) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-4 py-3 overflow-hidden break-words ${
           isUser
             ? 'bg-primary text-white rounded-br-md'
             : message.isError

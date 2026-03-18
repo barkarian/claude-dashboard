@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext.tsx';
+import api from '../../utils/api.ts';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface MobileNavProps {
@@ -12,6 +14,7 @@ interface MobileNavProps {
 
 export default function MobileNav({ projectId, currentTab, scriptCount = 0, changeCount = 0, processesWithPorts = [] }: MobileNavProps) {
   const navigate = useNavigate();
+  const { isDesktop } = useAuth();
   const [showPortsPopover, setShowPortsPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -30,8 +33,12 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
   }, [showPortsPopover]);
 
   function openPort(port: number, proc?: RunningProcess) {
-    const url = proc?.tunnelUrls?.[port];
-    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
+    const url = proc?.tunnelUrls?.[port] || `http://${window.location.hostname}:${port}`;
+    if (isDesktop) {
+      api.post('/api/open-external', { url }).catch(() => {});
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
   // Non-project mode: just show Projects link (rendered from App.tsx for non-project pages)

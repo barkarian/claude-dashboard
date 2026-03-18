@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
+import { useAuth } from '../../context/AuthContext.tsx';
 import { useTerminal } from '../../hooks/useTerminal.ts';
 import TerminalInputBar from './TerminalInputBar.tsx';
 import api from '../../utils/api.ts';
@@ -14,6 +15,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const { scriptId } = useParams<{ scriptId: string }>();
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const { isDesktop } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const [detectedPorts, setDetectedPorts] = useState<number[]>([]);
   const [tunnelUrls, setTunnelUrls] = useState<Record<number, string>>({});
@@ -58,8 +60,12 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   }, [socket, projectId, scriptId]);
 
   function openPort(port: number) {
-    const url = tunnelUrls[port];
-    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
+    const url = tunnelUrls[port] || `http://${window.location.hostname}:${port}`;
+    if (isDesktop) {
+      api.post('/api/open-external', { url }).catch(() => {});
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
   const statusLabel = isShell ? 'Terminal' : status;

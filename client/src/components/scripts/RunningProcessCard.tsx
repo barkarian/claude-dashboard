@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
+import { useAuth } from '../../context/AuthContext.tsx';
+import api from '../../utils/api.ts';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface RunningProcessCardProps {
@@ -11,6 +13,7 @@ interface RunningProcessCardProps {
 export default function RunningProcessCard({ process, projectId, onRefresh }: RunningProcessCardProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const { isDesktop } = useAuth();
 
   function handleStop() {
     if (!socket) return;
@@ -19,8 +22,12 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
   }
 
   function openPort(port: number) {
-    const url = process.tunnelUrls?.[port];
-    window.open(url || `http://${window.location.hostname}:${port}`, '_blank');
+    const url = process.tunnelUrls?.[port] || `http://${window.location.hostname}:${port}`;
+    if (isDesktop) {
+      api.post('/api/open-external', { url }).catch(() => {});
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
   const statusColor: Record<string, string> = {

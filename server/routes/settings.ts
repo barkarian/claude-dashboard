@@ -23,11 +23,12 @@ router.post('/open-external', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'url is required' });
   }
 
-  // Only allow opening URLs on our tunnel domain for safety
+  // Only allow opening URLs on our tunnel domain or localhost for safety
   try {
     const parsed = new URL(url);
-    if (!parsed.hostname.endsWith('.claw-dev.com')) {
-      return res.status(400).json({ error: 'Only claw-dev.com URLs are allowed' });
+    const isAllowed = parsed.hostname.endsWith('.claw-dev.com') || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    if (!isAllowed) {
+      return res.status(400).json({ error: 'Only claw-dev.com and localhost URLs are allowed' });
     }
   } catch {
     return res.status(400).json({ error: 'Invalid URL' });

@@ -8,7 +8,7 @@ interface MarkdownRendererProps {
 
 export default function MarkdownRenderer({ text }: MarkdownRendererProps) {
   return (
-    <div className="text-sm prose prose-invert prose-sm max-w-none">
+    <div className="text-sm prose prose-invert prose-sm max-w-none overflow-hidden [&_pre]:overflow-x-auto [&_code]:break-all">
       <ReactMarkdown
         components={{
           code({ node, inline, className, children, ...props }: any) {
