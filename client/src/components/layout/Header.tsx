@@ -2,6 +2,10 @@ import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSidebar } from '../ui/sidebar.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from '../ui/alert-dialog.tsx';
 
 interface HeaderProps {
   // Simple mode
@@ -15,6 +19,7 @@ interface HeaderProps {
   chatId?: string;
   projectId?: string;
   onEditChatName?: (newName: string) => Promise<void>;
+  onDeleteChat?: () => Promise<void>;
   statusDot?: string;
   statusLabel?: string;
   onNewChat?: () => void;
@@ -30,6 +35,7 @@ export default function Header({
   chatId,
   projectId,
   onEditChatName,
+  onDeleteChat,
   statusDot,
   statusLabel,
   onNewChat,
@@ -38,6 +44,7 @@ export default function Header({
   const { toggleSidebar } = useSidebar();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   function startEditing() {
     setEditValue(chatName || '');
@@ -179,9 +186,41 @@ export default function Header({
                 <span className="text-xs text-text-muted capitalize">{statusLabel}</span>
               </>
             )}
+            {onDeleteChat && (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-danger hover:bg-bg-hover transition-all"
+                aria-label="Delete chat"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       )}
+
+      {/* Delete chat confirmation dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{chatName}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setShowDeleteConfirm(false); onDeleteChat?.(); }}
+              className="bg-danger hover:bg-danger/90 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   );
 }

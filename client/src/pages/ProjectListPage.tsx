@@ -18,19 +18,17 @@ const swarmHintStyle = `
 }
 
 @keyframes swarmEdgeTop {
-  0%   { transform: scaleX(0) scaleY(1) translateY(0); opacity: 0; }
-  25%  { transform: scaleX(0.4) scaleY(3) translateY(-6px); opacity: 0.9; }
-  50%  { transform: scaleX(0.75) scaleY(2) translateY(-3px); opacity: 0.6; }
-  75%  { transform: scaleX(1) scaleY(1) translateY(-1px); opacity: 0.3; }
-  100% { transform: scaleX(1) scaleY(1) translateY(0); opacity: 0; }
+  0%   { transform: scaleX(0) translateY(0); }
+  30%  { transform: scaleX(0.5) translateY(-6px); }
+  60%  { transform: scaleX(0.85) translateY(-2px); }
+  100% { transform: scaleX(1) translateY(0); }
 }
 
 @keyframes swarmEdgeBottom {
-  0%   { transform: scaleX(0) scaleY(1) translateY(0); opacity: 0; }
-  25%  { transform: scaleX(0.35) scaleY(3) translateY(6px); opacity: 0.9; }
-  50%  { transform: scaleX(0.7) scaleY(2) translateY(3px); opacity: 0.6; }
-  75%  { transform: scaleX(1) scaleY(1) translateY(1px); opacity: 0.3; }
-  100% { transform: scaleX(1) scaleY(1) translateY(0); opacity: 0; }
+  0%   { transform: scaleX(0) translateY(0); }
+  30%  { transform: scaleX(0.45) translateY(6px); }
+  60%  { transform: scaleX(0.8) translateY(2px); }
+  100% { transform: scaleX(1) translateY(0); }
 }
 
 @keyframes arrowBounce {
@@ -42,30 +40,33 @@ const swarmHintStyle = `
 .swarm-hint {
   position: relative;
   animation: swarmFadeIn 0.4s ease-out both;
+  border-top-color: transparent !important;
+  border-bottom-color: transparent !important;
 }
 
 .swarm-hint::before,
 .swarm-hint::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #a78bfa, #60a5fa 60%, transparent);
+  left: -1px;
+  right: -1px;
+  height: 1px;
+  background: #2a2d3a;
   transform-origin: left center;
   pointer-events: none;
-  will-change: transform, opacity;
+  will-change: transform;
 }
 
 .swarm-hint::before {
-  top: 0;
-  animation: swarmEdgeTop 0.9s ease-out 0.1s both;
+  top: -1px;
+  border-radius: 8px 8px 0 0;
+  animation: swarmEdgeTop 0.8s ease-out 0.1s both;
 }
 
 .swarm-hint::after {
-  bottom: 0;
-  animation: swarmEdgeBottom 0.9s ease-out 0.15s both;
+  bottom: -1px;
+  border-radius: 0 0 8px 8px;
+  animation: swarmEdgeBottom 0.8s ease-out 0.15s both;
 }
 `;
 

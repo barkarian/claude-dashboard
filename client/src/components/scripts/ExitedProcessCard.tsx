@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api.ts';
 import { stripAnsi } from '../../utils/ansi.ts';
 import { Card } from '../ui/card.tsx';
@@ -14,6 +15,7 @@ interface ExitedProcessCardProps {
 }
 
 export default function ExitedProcessCard({ process, projectId, onDismiss }: ExitedProcessCardProps) {
+  const navigate = useNavigate();
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [sendContent, setSendContent] = useState('');
 
@@ -33,12 +35,12 @@ export default function ExitedProcessCard({ process, projectId, onDismiss }: Exi
   const displayCommand = process.scriptId.startsWith('shell-') ? 'bash --login' : process.command;
 
   return (
-    <Card className="hover:border-border-light transition-all">
+    <Card className="hover:border-border-light transition-all group cursor-pointer" onClick={() => navigate(`/project/${projectId}/scripts/${process.scriptId}`)}>
       <div className="flex items-center gap-3">
         {/* Badge */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex-shrink-0">
+            <button className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
               <Badge variant={isSuccess ? 'success' : 'danger'}>
                 {isSuccess ? 'Success' : 'Error'}
               </Badge>
@@ -56,13 +58,13 @@ export default function ExitedProcessCard({ process, projectId, onDismiss }: Exi
 
         {/* Label + command */}
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-text truncate">{displayLabel}</div>
+          <div className="font-medium text-text group-hover:text-primary transition-colors truncate">{displayLabel}</div>
           <div className="text-xs text-text-dim font-mono truncate">{displayCommand}</div>
         </div>
 
         {/* Dismiss button */}
         <button
-          onClick={() => onDismiss(process.scriptId)}
+          onClick={(e) => { e.stopPropagation(); onDismiss(process.scriptId); }}
           className="p-2 rounded-lg hover:bg-bg-hover text-text-dim transition-colors flex-shrink-0"
           title="Dismiss"
         >

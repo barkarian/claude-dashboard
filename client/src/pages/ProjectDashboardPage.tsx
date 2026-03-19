@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
+import { useSocket } from '../context/SocketContext.tsx';
 import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
 import { Toaster } from '../components/ui/sonner.tsx';
 import Header from '../components/layout/Header.tsx';
@@ -38,6 +39,7 @@ export default function ProjectDashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { project, loading, loadProject, refreshProject, activeChatStatus } = useProject();
+  const { socket } = useSocket();
   const sessionStatuses = useSessionStatuses(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
@@ -162,6 +164,20 @@ export default function ProjectDashboardPage() {
     }
   }
 
+  async function handleDeleteChat() {
+    if (!activeChatId) return;
+    try {
+      if (sessionStatuses[activeChatId] && socket) {
+        socket.emit('sdk:end', { chatId: activeChatId });
+      }
+      await api.delete(`/api/projects/${id}/chats/${activeChatId}`);
+      await refreshProject();
+      navigate(`/project/${id}/chats`);
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
+    }
+  }
+
   // Use running process count for badge
   const scriptCount = runningCount;
 
@@ -176,6 +192,7 @@ export default function ProjectDashboardPage() {
         chatId={activeChatId || undefined}
         onNewChat={project ? handleNewChat : undefined}
         onEditChatName={activeChatId ? handleEditChatName : undefined}
+        onDeleteChat={activeChatId ? handleDeleteChat : undefined}
         statusDot={statusDotClass}
         statusLabel={statusLabel}
       />
