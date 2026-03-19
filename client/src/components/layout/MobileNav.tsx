@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
+import { haptic } from '../../utils/platform.ts';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface MobileNavProps {
@@ -114,6 +115,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
             <div key={tab.key} className="relative">
               <button
                 onClick={() => {
+                  haptic('light');
                   if (isScripts) {
                     handleScriptsTabClick();
                   } else {

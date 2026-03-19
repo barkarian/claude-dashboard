@@ -1,4 +1,5 @@
 import { Button } from '../ui/button.tsx';
+import { haptic } from '../../utils/platform.ts';
 
 interface DiffActionsProps {
   filePath: string;
@@ -11,7 +12,7 @@ export default function DiffActions({ filePath, onRevert, onAccept }: DiffAction
     <div className="flex items-center gap-2">
       {onRevert && (
         <Button
-          onClick={onRevert}
+          onClick={() => { haptic('warning'); onRevert(); }}
           variant="ghost"
           size="sm"
           className="text-danger hover:bg-danger/10"
@@ -24,7 +25,7 @@ export default function DiffActions({ filePath, onRevert, onAccept }: DiffAction
       )}
       {onAccept && (
         <Button
-          onClick={onAccept}
+          onClick={() => { haptic('success'); onAccept!(); }}
           variant="ghost"
           size="sm"
           className="text-success hover:bg-success/10"

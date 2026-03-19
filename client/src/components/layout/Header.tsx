@@ -2,6 +2,7 @@ import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSidebar } from '../ui/sidebar.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
+import { haptic } from '../../utils/platform.ts';
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
@@ -131,7 +132,7 @@ export default function Header({
 
         {onNewChat ? (
           <button
-            onClick={onNewChat}
+            onClick={() => { haptic('light'); onNewChat?.(); }}
             className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
             aria-label="New chat"
           >
@@ -220,7 +221,7 @@ export default function Header({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { setShowDeleteConfirm(false); onDeleteChat?.(); }}
+              onClick={() => { haptic('error'); setShowDeleteConfirm(false); onDeleteChat?.(); }}
               className="bg-danger hover:bg-danger/90 text-white"
             >
               Delete

@@ -7,6 +7,7 @@ import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
+import { haptic } from '../../utils/platform.ts';
 
 interface PromptInputProps {
   projectId: string;
@@ -101,6 +102,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
       }
     }
 
+    haptic('medium');
     onSend(trimmed);
     setValue('');
   }
@@ -221,7 +223,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
 
         {/* Action button */}
         {isThinking ? (
-          <Button onClick={onCancel} variant="danger" className="flex-shrink-0 py-2.5">
+          <Button onClick={() => { haptic('warning'); onCancel?.(); }} variant="danger" className="flex-shrink-0 py-2.5">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="1" />
             </svg>

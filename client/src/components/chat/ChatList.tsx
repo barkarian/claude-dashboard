@@ -10,6 +10,7 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import api from '../../utils/api.ts';
+import { haptic } from '../../utils/platform.ts';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 
 const PAGE_SIZE = 20;
@@ -88,6 +89,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
   async function handleNewChat() {
+    haptic('medium');
     setCreating(true);
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
@@ -106,6 +108,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
 
   async function confirmDelete() {
     if (!deleteTarget) return;
+    haptic('error');
     try {
       if (sessionStatuses[deleteTarget.id] && socket) {
         socket.emit('sdk:end', { chatId: deleteTarget.id });
