@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { Button } from '../components/ui/button.tsx';
 import Header from '../components/layout/Header.tsx';
-import { useSidebar } from '../context/SidebarContext.tsx';
+import { useSidebar } from '../components/ui/sidebar.tsx';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll.ts';
 import ProjectCard from '../components/projects/ProjectCard.tsx';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
@@ -17,7 +17,7 @@ export default function ProjectListPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const offsetRef = useRef(0);
   const navigate = useNavigate();
-  const { openSidebar } = useSidebar();
+  const { setOpenMobile } = useSidebar();
 
   // On mobile: trap the back gesture on the root page to open sidebar
   useEffect(() => {
@@ -29,12 +29,12 @@ export default function ProjectListPage() {
     function handlePopState() {
       // Re-push sentinel and open sidebar
       window.history.pushState({ sidebarTrap: true }, '', window.location.href);
-      openSidebar();
+      setOpenMobile(true);
     }
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [openSidebar]);
+  }, [setOpenMobile]);
 
   useEffect(() => {
     loadInitial();

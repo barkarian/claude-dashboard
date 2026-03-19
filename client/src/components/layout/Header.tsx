@@ -1,6 +1,6 @@
 import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSidebar } from '../../context/SidebarContext.tsx';
+import { useSidebar } from '../ui/sidebar.tsx';
 
 interface HeaderProps {
   // Simple mode
@@ -36,7 +36,7 @@ export default function Header({
   onNewChat,
 }: HeaderProps) {
   const navigate = useNavigate();
-  const { openSidebar } = useSidebar();
+  const { toggleSidebar } = useSidebar();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
 
@@ -69,7 +69,7 @@ export default function Header({
         <div className="flex items-center justify-between h-12 px-4">
           <div className="flex items-center gap-2">
             <button
-              onClick={openSidebar}
+              onClick={toggleSidebar}
               className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
               aria-label="Open menu"
             >
@@ -102,7 +102,7 @@ export default function Header({
       <div className="flex items-center justify-between h-12 px-4">
         <div className="flex items-center gap-1">
           <button
-            onClick={openSidebar}
+            onClick={toggleSidebar}
             className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
             aria-label="Open menu"
           >

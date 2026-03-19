@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.tsx';
 import api from './utils/api.ts';
 import { ProjectProvider } from './context/ProjectContext.tsx';
-import { SidebarContext } from './context/SidebarContext.tsx';
+import { AppSidebarContext } from './context/SidebarContext.tsx';
+import { SidebarProvider, useSidebar } from './components/ui/sidebar.tsx';
 import ProjectListPage from './pages/ProjectListPage.tsx';
 import NewProjectPage from './pages/NewProjectPage.tsx';
 import ProjectDashboardPage from './pages/ProjectDashboardPage.tsx';
@@ -11,7 +12,7 @@ import SettingsPage from './pages/SettingsPage.tsx';
 import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
 import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
-import Sidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
+import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -69,9 +70,6 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
   }
 
   // Redirect to tunnel URL when on localhost in a browser (not the Tauri webview).
-  // The Tauri webview must stay on localhost so that isDesktop=true (server detects
-  // direct access via absence of X-Forwarded-Host). Browser users who hit localhost
-  // directly should be bounced to the tunnel URL for proper session handling.
   if (tunnelUrl && window.location.hostname === 'localhost' && !isDesktop) {
     window.location.href = tunnelUrl;
     return <BrandedLoader message="Redirecting to dashboard..." />;
@@ -89,8 +87,9 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 }
 
 // Swipe-right gesture to open sidebar (mobile only).
-// Starts from left 20-80px zone (avoids iOS back gesture at 0-20px edge).
-function useSwipeToOpenSidebar(onOpen: () => void) {
+// Must be rendered inside SidebarProvider so it can call useSidebar().
+function SwipeHandler() {
+  const { setOpenMobile } = useSidebar();
   const touchRef = useRef<{ startX: number; startY: number } | null>(null);
 
   useEffect(() => {
@@ -114,7 +113,7 @@ function useSwipeToOpenSidebar(onOpen: () => void) {
       touchRef.current = null;
       // Require 60px horizontal, mostly horizontal (dx > 2*dy)
       if (dx > 60 && dx > dy * 2) {
-        onOpen();
+        setOpenMobile(true);
       }
     }
 
@@ -124,39 +123,39 @@ function useSwipeToOpenSidebar(onOpen: () => void) {
       document.removeEventListener('touchstart', handleTouchStart);
       document.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [onOpen]);
+  }, [setOpenMobile]);
+
+  return null;
 }
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const sidebarRef = useRef<SidebarHandle>(null);
   const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
-  useSwipeToOpenSidebar(openSidebar);
-
-  const sidebarCtx = useMemo(() => ({ openSidebar, refreshProjects }), [openSidebar, refreshProjects]);
 
   return (
     <Routes>
       <Route path="/*" element={
         <ProtectedRoute>
           <ProjectProvider>
-            <SidebarContext.Provider value={sidebarCtx}>
-              <div className="app-layout flex flex-col md:flex-row overflow-hidden">
-                <Sidebar ref={sidebarRef} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-                <main className="flex-1 flex flex-col overflow-hidden">
-                  <Routes>
-                    <Route path="/" element={<ProjectListPage />} />
-                    <Route path="/new" element={<NewProjectPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="/billing/success" element={<BillingSuccessPage />} />
-                    <Route path="/billing/cancel" element={<BillingCancelPage />} />
-                    <Route path="/migrate" element={<MigrationPage />} />
-                    <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
-                  </Routes>
-                </main>
-              </div>
-            </SidebarContext.Provider>
+            <SidebarProvider>
+              <AppSidebarContext.Provider value={{ refreshProjects }}>
+                <SwipeHandler />
+                <div className="app-layout flex w-full overflow-hidden">
+                  <AppSidebar ref={sidebarRef} />
+                  <main className="flex-1 flex flex-col overflow-hidden">
+                    <Routes>
+                      <Route path="/" element={<ProjectListPage />} />
+                      <Route path="/new" element={<NewProjectPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/billing/success" element={<BillingSuccessPage />} />
+                      <Route path="/billing/cancel" element={<BillingCancelPage />} />
+                      <Route path="/migrate" element={<MigrationPage />} />
+                      <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
+                    </Routes>
+                  </main>
+                </div>
+              </AppSidebarContext.Provider>
+            </SidebarProvider>
           </ProjectProvider>
         </ProtectedRoute>
       } />

@@ -1,15 +1,13 @@
 import { createContext, useContext } from 'react';
 
-interface SidebarContextValue {
-  openSidebar: () => void;
+interface AppSidebarContextValue {
   refreshProjects: () => void;
 }
 
-export const SidebarContext = createContext<SidebarContextValue>({
-  openSidebar: () => {},
+export const AppSidebarContext = createContext<AppSidebarContextValue>({
   refreshProjects: () => {},
 });
 
-export function useSidebar() {
-  return useContext(SidebarContext);
+export function useAppSidebar() {
+  return useContext(AppSidebarContext);
 }

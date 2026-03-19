@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { useSocket } from '../context/SocketContext.tsx';
-import { useSidebar } from '../context/SidebarContext.tsx';
+import { useAppSidebar } from '../context/SidebarContext.tsx';
 import { Button } from '../components/ui/button.tsx';
 import { Input } from '../components/ui/input.tsx';
 import { Label } from '../components/ui/label.tsx';
@@ -15,7 +15,7 @@ import type { GitHubRepo, Project } from '../../../shared/types/models.ts';
 export default function NewProjectPage() {
   const navigate = useNavigate();
   const { socket } = useSocket();
-  const { refreshProjects } = useSidebar();
+  const { refreshProjects } = useAppSidebar();
   const [step, setStep] = useState(1);
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [customUrl, setCustomUrl] = useState('');

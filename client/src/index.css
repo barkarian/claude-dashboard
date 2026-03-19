@@ -29,6 +29,18 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-border-light;
   }
+  :root {
+    --sidebar-background: #1a1d27;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-primary: #6366f1;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #22253a;
+    --sidebar-accent-foreground: #e2e8f0;
+    --sidebar-border: #2a2d3a;
+    --sidebar-ring: #6366f1;
+    --sidebar-width: 16rem;
+    --sidebar-width-mobile: 18rem;
+  }
 }
 
 /* iOS notch: colored bar behind the notch, always visible.
