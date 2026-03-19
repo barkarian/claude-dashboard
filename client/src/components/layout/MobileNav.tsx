@@ -44,7 +44,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
   // Non-project mode: just show Projects link (rendered from App.tsx for non-project pages)
   if (!projectId) {
     return (
-      <nav className="flex-shrink-0 bg-bg-surface border-t border-border">
+      <nav className="flex-shrink-0 bg-bg-surface border-t border-border pb-2">
         <div className="flex items-center justify-around h-14 max-w-lg mx-auto">
           <button
             onClick={() => navigate('/')}
@@ -103,7 +103,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
   ];
 
   return (
-    <nav className="flex-shrink-0 bg-bg-surface border-t border-border safe-area-inset-bottom">
+    <nav className="flex-shrink-0 bg-bg-surface border-t border-border pb-2 safe-area-inset-bottom">
       <div className="flex items-center justify-around h-14 max-w-lg mx-auto">
         {tabs.map((tab) => {
           const isActive = currentTab === tab.key;

@@ -110,18 +110,8 @@ export default function Header({
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-1 text-sm text-text-muted hover:text-text transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-            Projects
-          </button>
+          <h2 className="text-sm font-semibold truncate">{projectName}</h2>
         </div>
-
-        <h2 className="text-sm font-semibold truncate mx-4 flex-1 text-center">{projectName}</h2>
 
         {onNewChat ? (
           <button
