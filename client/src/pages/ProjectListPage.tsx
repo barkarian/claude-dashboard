@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { Button } from '../components/ui/button.tsx';
 import { useSidebar } from '../components/ui/sidebar.tsx';
@@ -7,14 +7,73 @@ import { useNewProjectDrawer } from '../context/NewProjectDrawerContext.tsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog.tsx';
 import { Input } from '../components/ui/input.tsx';
 import TruncatedPath from '../components/ui/truncated-path.tsx';
+import { useIsMobile } from '../hooks/use-mobile.tsx';
+import { isCapacitorNative } from '../utils/platform.ts';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
 
-const PAGE_SIZE = 20;
+const swarmHintStyle = `
+@keyframes swarmFadeIn {
+  0%   { opacity: 0; transform: translateX(-8px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes swarmEdgeTop {
+  0%   { transform: scaleX(0) translateY(0); opacity: 0; height: 2px; }
+  25%  { transform: scaleX(0.4) translateY(-8px); opacity: 0.9; height: 6px; }
+  50%  { transform: scaleX(0.75) translateY(-4px); opacity: 0.6; height: 4px; }
+  75%  { transform: scaleX(1) translateY(-1px); opacity: 0.3; height: 2px; }
+  100% { transform: scaleX(1) translateY(0); opacity: 0; height: 1px; }
+}
+
+@keyframes swarmEdgeBottom {
+  0%   { transform: scaleX(0) translateY(0); opacity: 0; height: 2px; }
+  25%  { transform: scaleX(0.35) translateY(8px); opacity: 0.9; height: 6px; }
+  50%  { transform: scaleX(0.7) translateY(4px); opacity: 0.6; height: 4px; }
+  75%  { transform: scaleX(1) translateY(1px); opacity: 0.3; height: 2px; }
+  100% { transform: scaleX(1) translateY(0); opacity: 0; height: 1px; }
+}
+
+@keyframes arrowBounce {
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-5px); }
+  100% { transform: translateX(0); }
+}
+
+.swarm-hint {
+  position: relative;
+  animation: swarmFadeIn 0.5s ease-out both;
+}
+
+.swarm-hint::before,
+.swarm-hint::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #a78bfa, #60a5fa 60%, transparent);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.swarm-hint::before {
+  top: 0;
+  animation: swarmEdgeTop 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.swarm-hint::after {
+  bottom: 0;
+  animation: swarmEdgeBottom 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+}
+`;
 
 export default function ProjectListPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const { openDrawer } = useNewProjectDrawer();
+  const isMobile = useIsMobile();
+  const isNative = isCapacitorNative();
 
   // Prompt state
   const [message, setMessage] = useState('');
@@ -30,16 +89,21 @@ export default function ProjectListPage() {
   const cmdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cmdInputRef = useRef<HTMLInputElement>(null);
 
-  // Project list state (below section)
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [listLoading, setListLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const offsetRef = useRef(0);
-  const [listSearch, setListSearch] = useState('');
-  const listSearchRef = useRef('');
-  const listTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Animation re-trigger key
+  const [hintKey, setHintKey] = useState(0);
+  useEffect(() => {
+    setHintKey(k => k + 1);
+  }, [location.key]);
+
+  // Auto-select latest project for prompt picker
+  useEffect(() => {
+    if (selectedProject) return;
+    api.get<{ projects: ProjectSummary[]; total: number }>('/api/projects?limit=1&offset=0')
+      .then((data) => {
+        if (data.projects?.length) setSelectedProject(data.projects[0]);
+      })
+      .catch(() => {});
+  }, []);
 
   // On mobile: trap back gesture to open sidebar
   useEffect(() => {
@@ -60,11 +124,6 @@ export default function ProjectListPage() {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [message]);
-
-  // Load initial projects for list + auto-select latest
-  useEffect(() => {
-    fetchListProjects('', 0, true);
-  }, []);
 
   // --- Command dialog ---
   function openCmd() {
@@ -99,60 +158,6 @@ export default function ProjectListPage() {
     openDrawer();
   }
 
-  // --- List search (below section) ---
-  function fetchListProjects(q: string, offset: number, reset: boolean) {
-    if (reset) setListLoading(true);
-    const searchParam = q ? `&search=${encodeURIComponent(q)}` : '';
-    api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${offset}${searchParam}`)
-      .then((data) => {
-        const fetched = data.projects || [];
-        if (reset) {
-          setProjects(fetched);
-          // Auto-select latest on initial load
-          if (!q && fetched.length > 0 && !selectedProject) {
-            setSelectedProject(fetched[0]);
-          }
-        } else {
-          setProjects(prev => [...prev, ...fetched]);
-        }
-        const newOffset = (reset ? 0 : offset) + fetched.length;
-        offsetRef.current = newOffset;
-        setHasMore(newOffset < (data.total || 0));
-      })
-      .catch(() => {})
-      .finally(() => { setListLoading(false); setLoadingMore(false); });
-  }
-
-  function handleListSearchChange(value: string) {
-    setListSearch(value);
-    listSearchRef.current = value;
-    if (listTimerRef.current) clearTimeout(listTimerRef.current);
-    listTimerRef.current = setTimeout(() => fetchListProjects(value, 0, true), 300);
-  }
-
-  // Infinite scroll — refs to avoid stale closures
-  const loadingMoreRef = useRef(false);
-  const hasMoreRef = useRef(false);
-  loadingMoreRef.current = loadingMore;
-  hasMoreRef.current = hasMore;
-
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && hasMoreRef.current && !loadingMoreRef.current) {
-          setLoadingMore(true);
-          loadingMoreRef.current = true;
-          fetchListProjects(listSearchRef.current, offsetRef.current, false);
-        }
-      },
-      { rootMargin: '200px' }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [projects]);
-
   // --- Prompt handlers ---
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -179,6 +184,8 @@ export default function ProjectListPage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      <style>{swarmHintStyle}</style>
+
       {/* Header */}
       <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
         <div className="flex items-center justify-between h-12 px-4">
@@ -318,63 +325,28 @@ export default function ProjectListPage() {
             </DialogContent>
           </Dialog>
 
-          {/* ===== SEPARATOR ===== */}
-          <div className="my-6 border-t border-border" />
-
-          {/* ===== PROJECT SEARCH + LIST ===== */}
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={listSearch}
-              onChange={(e) => handleListSearchChange(e.target.value)}
-              placeholder="Search projects..."
-              className="w-full bg-bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-            />
-
-            <Button variant="outline" onClick={openDrawer} className="w-full gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          {/* ===== MOBILE HINT BAR ===== */}
+          {isMobile && (
+            <button
+              key={hintKey}
+              onClick={() => setOpenMobile(true)}
+              className="swarm-hint mt-8 w-full flex items-center gap-2.5 px-3 py-3 rounded-lg bg-bg-surface border border-border hover:bg-bg-hover transition-colors"
+            >
+              <svg
+                className="w-4 h-4 text-text-muted flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                style={{ animation: 'arrowBounce 1.5s ease-in-out 1s 2' }}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
               </svg>
-              New Project
-            </Button>
-
-            {listLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
-              </div>
-            ) : projects.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-text-muted text-sm">
-                  {listSearch ? 'No projects match your search' : 'No projects yet'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                {projects.map((project) => (
-                  <button
-                    key={project.id}
-                    onClick={() => navigate(`/project/${project.id}`)}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-bg-surface transition-colors flex items-center gap-3"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-border flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm text-text truncate">{project.name}</div>
-                      {project.path && (
-                        <TruncatedPath path={project.path} />
-                      )}
-                    </div>
-                  </button>
-                ))}
-
-                <div ref={sentinelRef} />
-                {loadingMore && (
-                  <div className="flex justify-center py-4">
-                    <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              <span className="text-sm text-text-muted">
+                {isNative ? 'Swipe right to see all projects' : 'Projects'}
+              </span>
+            </button>
+          )}
         </div>
       </div>
     </div>

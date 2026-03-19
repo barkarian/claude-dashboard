@@ -15,8 +15,6 @@ interface HeaderProps {
   chatId?: string;
   projectId?: string;
   onEditChatName?: (newName: string) => Promise<void>;
-  onPowerOff?: () => void;
-  showPowerOff?: boolean;
   statusDot?: string;
   statusLabel?: string;
   onNewChat?: () => void;
@@ -32,8 +30,6 @@ export default function Header({
   chatId,
   projectId,
   onEditChatName,
-  onPowerOff,
-  showPowerOff,
   statusDot,
   statusLabel,
   onNewChat,
@@ -113,7 +109,7 @@ export default function Header({
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0" style={{ maxWidth: '50vw' }}>
             <h2 className="text-sm font-semibold truncate leading-tight">{projectName}</h2>
             {projectPath && <TruncatedPath path={projectPath} />}
           </div>
@@ -177,18 +173,6 @@ export default function Header({
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {showPowerOff && onPowerOff && (
-              <button
-                onClick={onPowerOff}
-                className="flex items-center justify-center w-7 h-7 rounded-lg bg-bg-surface active:bg-bg-hover hover:bg-bg-hover text-text-muted transition-colors"
-                aria-label="End session"
-                title="End session"
-              >
-                <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
-                </svg>
-              </button>
-            )}
             {statusDot && (
               <>
                 <div className={`w-2 h-2 rounded-full ${statusDot}`} />

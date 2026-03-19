@@ -14,6 +14,7 @@ import MigrationPage from './pages/MigrationPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
+import { isCapacitorNative } from './utils/platform.ts';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -98,9 +99,10 @@ function SwipeHandler() {
 
     function handleTouchStart(e: TouchEvent) {
       const x = e.touches[0].clientX;
-      // Only start tracking if touch begins in the left edge zone (20–80px)
+      // Capacitor native: allow swipe from anywhere on screen
+      // Browser: only start tracking in the left edge zone (20–80px)
       // 0-20px is reserved for iOS system back gesture
-      if (x >= 20 && x <= 80) {
+      if (isCapacitorNative() || (x >= 20 && x <= 80)) {
         touchRef.current = { startX: x, startY: e.touches[0].clientY };
       }
     }

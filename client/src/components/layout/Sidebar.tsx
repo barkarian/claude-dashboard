@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
@@ -49,13 +49,21 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const [loadingMore, setLoadingMore] = useState(false);
   const offsetRef = useRef(0);
 
+  // Search state
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<ProjectSummary[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     loadInitial();
   }, []);
 
-  // Auto-close mobile drawer on navigation
+  // Auto-close mobile drawer on navigation + clear search
   useEffect(() => {
     setOpenMobile(false);
+    setSidebarSearch('');
+    setSearchResults(null);
   }, [location.pathname]);
 
   async function loadInitial() {
@@ -94,6 +102,35 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
+  // Local filtering of already-loaded projects
+  const localFiltered = useMemo(() => {
+    if (!sidebarSearch.trim()) return null;
+    const q = sidebarSearch.toLowerCase();
+    return projects.filter(p => p.name.toLowerCase().includes(q));
+  }, [sidebarSearch, projects]);
+
+  // Debounced API search for full DB results
+  function handleSidebarSearch(value: string) {
+    setSidebarSearch(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!value.trim()) {
+      setSearchResults(null);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => {
+      api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=20&offset=0&search=${encodeURIComponent(value)}`)
+        .then((data) => setSearchResults(data.projects || []))
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+  }
+
+  // Display: API results when available, else local filter, else full list
+  const displayProjects = searchResults ?? localFiltered ?? projects;
+  const showInfiniteScroll = !sidebarSearch.trim();
+
   return (
     <Sidebar collapsible="offcanvas">
       <SidebarHeader className="p-4 border-b border-sidebar-border">
@@ -127,8 +164,23 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         <SidebarGroup>
           <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Projects</SidebarGroupLabel>
           <SidebarGroupContent>
+            {/* Search input */}
+            <div className="px-2 pb-2">
+              <input
+                type="text"
+                value={sidebarSearch}
+                onChange={(e) => handleSidebarSearch(e.target.value)}
+                placeholder="Search projects..."
+                className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-1.5 text-xs text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+              />
+            </div>
             <SidebarMenu>
-              {projects.map((project) => (
+              {searchLoading && sidebarSearch.trim() && (
+                <li className="flex justify-center py-2">
+                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                </li>
+              )}
+              {displayProjects.map((project) => (
                 <SidebarMenuItem key={project.id}>
                   <SidebarMenuButton asChild isActive={location.pathname.startsWith(`/project/${project.id}`)}>
                     <NavLink to={`/project/${project.id}`} className="flex items-center gap-3">
@@ -139,9 +191,13 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 </SidebarMenuItem>
               ))}
 
-              {/* Infinite scroll sentinel */}
-              <li><div ref={sentinelRef} /></li>
-              {loadingMore && (
+              {sidebarSearch.trim() && !searchLoading && displayProjects.length === 0 && (
+                <li className="px-3 py-2 text-xs text-text-dim">No projects found</li>
+              )}
+
+              {/* Infinite scroll sentinel — only when not searching */}
+              {showInfiniteScroll && <li><div ref={sentinelRef} /></li>}
+              {showInfiniteScroll && loadingMore && (
                 <li className="flex justify-center py-2">
                   <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
                 </li>

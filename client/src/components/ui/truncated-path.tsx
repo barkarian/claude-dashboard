@@ -15,7 +15,6 @@ export default function TruncatedPath({ path, prefix, className = '' }: Truncate
       {prefix && <span className="flex-shrink-0">{prefix}:</span>}
       <span
         className="truncate"
-        style={{ direction: 'rtl', textAlign: 'left' }}
         title={path}
       >
         {path}
