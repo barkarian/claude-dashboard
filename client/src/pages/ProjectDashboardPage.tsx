@@ -3,7 +3,6 @@ import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 're
 import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
 import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
-import { useSocket } from '../context/SocketContext.tsx';
 import { Toaster } from '../components/ui/sonner.tsx';
 import Header from '../components/layout/Header.tsx';
 import MobileNav from '../components/layout/MobileNav.tsx';
@@ -39,7 +38,6 @@ export default function ProjectDashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { project, loading, loadProject, refreshProject, activeChatStatus } = useProject();
-  const { socket } = useSocket();
   const sessionStatuses = useSessionStatuses(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
@@ -111,8 +109,6 @@ export default function ProjectDashboardPage() {
     }
   })();
 
-  const isActive = activeChatStatus && activeChatStatus !== 'disconnected' && activeChatStatus !== 'exited' && activeChatStatus !== 'error';
-
   // Toast notifications for background session changes
   useEffect(() => {
     const prev = prevStatusesRef.current;
@@ -166,12 +162,6 @@ export default function ProjectDashboardPage() {
     }
   }
 
-  function handlePowerOff() {
-    if (socket && activeChatId) {
-      socket.emit('sdk:end', { chatId: activeChatId });
-    }
-  }
-
   // Use running process count for badge
   const scriptCount = runningCount;
 
@@ -186,8 +176,6 @@ export default function ProjectDashboardPage() {
         chatId={activeChatId || undefined}
         onNewChat={project ? handleNewChat : undefined}
         onEditChatName={activeChatId ? handleEditChatName : undefined}
-        onPowerOff={activeChatId ? handlePowerOff : undefined}
-        showPowerOff={!!isActive}
         statusDot={statusDotClass}
         statusLabel={statusLabel}
       />

@@ -11,6 +11,8 @@ import type {
 } from '../../shared/types/sdk.ts';
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const IDLE_CLEANUP_INTERVAL_MS = 60 * 1000;     // check every 60s
 
 // Tools that Claude Code uses internally but can't be executed through the Agent SDK.
 // When Claude tries these, we auto-deny with a message so it falls back to text.
@@ -56,6 +58,7 @@ interface SDKSession {
   permissionResolvers: Map<string, PermissionResolver>;
   questionResolvers: Map<string, QuestionResolver>;
   queryStartTime: number | null;
+  lastActivityAt: number;
 }
 
 const sessions = new Map<string, SDKSession>();
@@ -72,6 +75,10 @@ function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
     chatId: session.chatId,
     status: mapToLegacyStatus(status),
   });
+}
+
+function touchActivity(session: SDKSession): void {
+  session.lastActivityAt = Date.now();
 }
 
 /** Map SDK status to legacy SessionStatus for useSessionStatuses compatibility */
@@ -111,6 +118,7 @@ function initSession(
     permissionResolvers: new Map(),
     questionResolvers: new Map(),
     queryStartTime: null,
+    lastActivityAt: Date.now(),
   };
 
   if (sdkSessionId) {
@@ -146,6 +154,8 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
   if (session.status === 'exited' || session.status === 'error') {
     return { error: 'Session not active' };
   }
+
+  touchActivity(session);
 
   // Add user message
   const userMessage: SDKChatMessage = {
@@ -468,11 +478,13 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
         sessionId: session.sdkSessionId,
       });
 
+      touchActivity(session);
       emitStatus(session, 'idle');
       break; // Success — exit retry loop
     } catch (err: any) {
       if (err.name === 'AbortError' || session.abortController?.signal.aborted) {
         console.log(`[sdk:${chatId}] Query aborted`);
+        touchActivity(session);
         emitStatus(session, 'idle');
         break;
       } else if (useResume && attempt === 0) {
@@ -566,6 +578,7 @@ function resolveQuestion(chatId: string, requestId: string, answers: Record<numb
 
   resolver.resolve({ behavior: 'deny', message: `User answered:\n${formatted}` });
   session.questionResolvers.delete(requestId);
+  touchActivity(session);
 }
 
 function resolvePermission(chatId: string, requestId: string, granted: boolean): void {
@@ -582,6 +595,7 @@ function resolvePermission(chatId: string, requestId: string, granted: boolean):
     resolver.resolve({ behavior: 'deny', message: 'User denied permission' });
   }
   session.permissionResolvers.delete(requestId);
+  touchActivity(session);
 
   if (granted) {
     emitStatus(session, 'tool-use');
@@ -594,7 +608,8 @@ function interrupt(chatId: string): void {
 
   if (session.abortController) {
     session.abortController.abort();
-    session.abortController = null;
+    // Don't null here — sendPrompt()'s catch block needs to check
+    // signal.aborted to distinguish abort from real errors
   }
 
   // Clean up pending permission requests
@@ -646,6 +661,32 @@ function endAllSessions(): void {
   }
 }
 
+function cleanupIdleSessions(): void {
+  const now = Date.now();
+  for (const [chatId, session] of sessions) {
+    if (session.status !== 'idle' && session.status !== 'error') continue;
+    if (now - session.lastActivityAt >= IDLE_SESSION_TIMEOUT_MS) {
+      console.log(`[sdk:${chatId}] Auto-ending idle session`);
+      endSession(chatId);
+    }
+  }
+}
+
+let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+function startIdleCleanup(): void {
+  if (cleanupInterval) return;
+  cleanupInterval = setInterval(cleanupIdleSessions, IDLE_CLEANUP_INTERVAL_MS);
+  cleanupInterval.unref();
+}
+
+function stopIdleCleanup(): void {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+}
+
 export { migrateHistoryMessage };
 
 export default {
@@ -660,4 +701,6 @@ export default {
   getProjectSessions,
   endAllSessions,
   migrateHistoryMessage,
+  startIdleCleanup,
+  stopIdleCleanup,
 };

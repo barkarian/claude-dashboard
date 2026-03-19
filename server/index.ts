@@ -178,6 +178,9 @@ setTunnelClientIO(io);
 // Register socket handlers
 registerSocketHandlers(io);
 
+// Start idle session cleanup sweep
+sdkSessionManager.startIdleCleanup();
+
 // Serve static files + SPA fallback whenever built client exists
 const indexPath = path.join(config.publicPath, 'index.html');
 if (fs.existsSync(indexPath)) {
@@ -236,6 +239,7 @@ async function shutdown(): Promise<void> {
   // Kill local processes first (fast, no network)
   processManager.killAll();
   sdkSessionManager.endAllSessions();
+  sdkSessionManager.stopIdleCleanup();
   fileService.stopAllWatching();
 
   // Disconnect tunnel (don't await remote calls — they may hang)
