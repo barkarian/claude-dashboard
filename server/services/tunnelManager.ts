@@ -69,6 +69,9 @@ function setCredentials(apiKey: string, userSubdomain: string): void {
     console.log('[tunnel] No tunnelServiceUrl configured, skipping WebSocket');
   }
 
+  // Fetch user's preferred shell in the background
+  import('./processManager.ts').then(({ default: pm }) => pm.fetchPreferredShell()).catch(() => {});
+
   // Auto-register the dashboard itself as a tunnel endpoint
   // so it's accessible at <subdomain>.<TUNNEL_DOMAIN>
   console.log(`[tunnel] Registering dashboard endpoint on port ${config.port}`);

@@ -1,11 +1,81 @@
 import pty, { type IPty } from 'node-pty';
 import type { Server as SocketIOServer } from 'socket.io';
-import type { ProcessStatus } from '../../shared/types/models.ts';
+import type { ProcessStatus, RunningProcess } from '../../shared/types/models.ts';
 import { detectPorts } from './portDetector.ts';
 import tunnelManager from './tunnelManager.ts';
+import projectManager from './projectManager.ts';
 import { emitSidecarEvent } from './sidecarEmitter.ts';
+import config from '../config.ts';
 
 const MAX_BUFFER_LINES = 5000;
+
+// Cached user shell preference (fetched from tunnel-service)
+let preferredShell: string | null = null;
+
+const SHELL_BINARY_MAP: Record<string, string> = {
+  bash: 'bash',
+  zsh: 'zsh',
+  fish: 'fish',
+  sh: 'sh',
+  powershell: process.platform === 'win32' ? 'powershell.exe' : 'pwsh',
+  wsl: 'wsl',
+};
+
+function getShell(): string {
+  if (process.platform === 'win32') {
+    if (preferredShell === 'wsl') return 'wsl';
+    if (preferredShell === 'powershell') return 'powershell.exe';
+    return 'powershell.exe';
+  }
+  if (preferredShell && SHELL_BINARY_MAP[preferredShell]) {
+    return SHELL_BINARY_MAP[preferredShell];
+  }
+  return 'bash';
+}
+
+function getShellArgs(mode: 'command' | 'interactive', command?: string): string[] {
+  const shell = getShell();
+  if (mode === 'command' && command) {
+    if (shell === 'wsl') return ['-e', 'bash', '-c', command];
+    if (shell === 'powershell.exe' || shell === 'pwsh') return ['-Command', command];
+    return ['-c', command]; // bash, zsh, fish, sh all support -c
+  }
+  // interactive mode
+  if (shell === 'wsl' || shell === 'powershell.exe' || shell === 'pwsh') return [];
+  return ['-i']; // bash, zsh, fish, sh
+}
+
+async function fetchPreferredShell(): Promise<void> {
+  const creds = tunnelManager.getCredentials();
+  if (!creds || !config.tunnelServiceUrl) return;
+  try {
+    const res = await fetch(`${config.tunnelServiceUrl}/api/account/preferences`, {
+      headers: { 'Authorization': `users API-Key ${creds.apiKey}` },
+    });
+    if (res.ok) {
+      const data = await res.json() as { preferredShell?: string };
+      preferredShell = data.preferredShell || null;
+      console.log(`[process] User preferred shell: ${preferredShell || 'default (bash)'}`);
+    }
+  } catch {
+    console.log('[process] Failed to fetch shell preference, using default');
+  }
+}
+
+function setPreferredShell(shell: string | null): void {
+  preferredShell = shell;
+}
+
+function getPreferredShell(): string | null {
+  return preferredShell;
+}
+
+// Cached port detection state
+const cachedPorts = new Map<string, number[]>();
+const portCheckTimers = new Map<string, NodeJS.Timeout>();
+
+// Store io ref for broadcasting from non-spawn contexts
+let ioRef: SocketIOServer | null = null;
 
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
@@ -49,12 +119,67 @@ function getProcess(projectId: string, scriptId: string): ProcessEntry | null {
   return projectMap.get(scriptId) || null;
 }
 
+/** Build the full RunningProcess[] for a project (using cached ports). */
+async function getProcessesList(projectId: string): Promise<RunningProcess[]> {
+  const scripts = projectManager.listScripts(projectId);
+  const projectProcesses = getProjectProcesses(projectId);
+  const result: RunningProcess[] = [];
+
+  for (const [scriptId, entry] of projectProcesses) {
+    const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
+    const isShell = scriptId.startsWith('shell-');
+    const key = getKey(projectId, scriptId);
+    const ports = entry.status === 'running' ? (cachedPorts.get(key) || []) : [];
+    const tunnelUrls = (entry.status === 'running' && ports.length > 0)
+      ? await tunnelManager.getTunnelUrls(ports, key)
+      : {};
+    result.push({
+      scriptId,
+      command: entry.command,
+      status: entry.status,
+      startedAt: entry.startedAt,
+      exitCode: entry.exitCode,
+      label: isShell ? 'Terminal' : matchedScript?.label,
+      isShell,
+      detectedPorts: ports,
+      tunnelUrls,
+    });
+  }
+
+  return result;
+}
+
+/** Broadcast full process list to all clients in the project room. */
+async function broadcastProcesses(projectId: string): Promise<void> {
+  if (!ioRef) return;
+  const processList = await getProcessesList(projectId);
+  const runningCount = processList.filter(p => p.status === 'running').length;
+  ioRef.to(`project:${projectId}`).emit('processes:updated', { projectId, processes: processList, runningCount });
+}
+
+/** Schedule debounced port detection for a process (runs 2s after last call). */
+function schedulePortCheck(projectId: string, scriptId: string, entry: ProcessEntry): void {
+  const key = getKey(projectId, scriptId);
+  if (portCheckTimers.has(key)) return; // already scheduled
+  portCheckTimers.set(key, setTimeout(async () => {
+    portCheckTimers.delete(key);
+    if (entry.status !== 'running') return;
+    const newPorts = await detectPorts(entry.buffer.join(''));
+    const oldPorts = cachedPorts.get(key) || [];
+    if (JSON.stringify(newPorts) !== JSON.stringify(oldPorts)) {
+      cachedPorts.set(key, newPorts);
+      broadcastProcesses(projectId);
+    }
+  }, 2000));
+}
+
 function spawnProcess(projectId: string, scriptId: string, command: string, cwd: string, io: SocketIOServer): ProcessEntry {
+  ioRef = io;
   // Kill existing process if any
   killProcess(projectId, scriptId);
 
-  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-  const args = process.platform === 'win32' ? [] : ['-c', command];
+  const shell = getShell();
+  const args = getShellArgs('command', command);
 
   const ptyProcess = pty.spawn(shell, args, {
     name: 'xterm-256color',
@@ -82,6 +207,8 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
   processes.get(projectId)!.set(scriptId, entry);
 
   const room = `terminal:${projectId}:${scriptId}`;
+  const key = getKey(projectId, scriptId);
+  cachedPorts.set(key, []);
 
   ptyProcess.onData((data: string) => {
     buffer.push(data);
@@ -91,17 +218,24 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     if (io) {
       io.to(room).emit('terminal:output', { projectId, scriptId, data });
     }
+    schedulePortCheck(projectId, scriptId, entry);
   });
 
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
-    tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
+    // Clean up port detection state
+    const k = getKey(projectId, scriptId);
+    cachedPorts.delete(k);
+    const timer = portCheckTimers.get(k);
+    if (timer) { clearTimeout(timer); portCheckTimers.delete(k); }
+    tunnelManager.closeTunnelsForProcess(k).catch(() => {});
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
       io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
     }
+    broadcastProcesses(projectId);
     // Notify desktop shell of build completion/failure
     emitSidecarEvent({
       type: 'notification',
@@ -116,17 +250,18 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
     io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'running' });
   }
+  broadcastProcesses(projectId);
 
   return entry;
 }
 
 function spawnShell(projectId: string, scriptId: string, cwd: string, io: SocketIOServer): ProcessEntry {
+  ioRef = io;
   // Kill existing process if any
   killProcess(projectId, scriptId);
 
-  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-  // Use -i (interactive) instead of --login to avoid profile scripts overriding cwd
-  const args = process.platform === 'win32' ? [] : ['-i'];
+  const shell = getShell();
+  const args = getShellArgs('interactive');
 
   const ptyProcess = pty.spawn(shell, args, {
     name: 'xterm-256color',
@@ -143,7 +278,7 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     status: 'running',
     startedAt: new Date().toISOString(),
     exitCode: null,
-    command: 'bash',
+    command: shell,
     projectId,
     scriptId,
   };
@@ -154,6 +289,8 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
   processes.get(projectId)!.set(scriptId, entry);
 
   const room = `terminal:${projectId}:${scriptId}`;
+  const key = getKey(projectId, scriptId);
+  cachedPorts.set(key, []);
 
   ptyProcess.onData((data: string) => {
     buffer.push(data);
@@ -163,23 +300,30 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     if (io) {
       io.to(room).emit('terminal:output', { projectId, scriptId, data });
     }
+    schedulePortCheck(projectId, scriptId, entry);
   });
 
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
-    tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
+    const k = getKey(projectId, scriptId);
+    cachedPorts.delete(k);
+    const timer = portCheckTimers.get(k);
+    if (timer) { clearTimeout(timer); portCheckTimers.delete(k); }
+    tunnelManager.closeTunnelsForProcess(k).catch(() => {});
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
       io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
     }
+    broadcastProcesses(projectId);
   });
 
   if (io) {
     io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
     io.to(`project:${projectId}`).emit('terminal:status', { projectId, scriptId, status: 'running' });
   }
+  broadcastProcesses(projectId);
 
   return entry;
 }
@@ -264,6 +408,10 @@ export default {
   getProjectProcesses,
   getBuffer,
   getDetectedPorts,
+  getProcessesList,
   killAllForProject,
   killAll,
+  fetchPreferredShell,
+  setPreferredShell,
+  getPreferredShell,
 };
