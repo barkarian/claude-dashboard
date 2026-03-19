@@ -86,6 +86,14 @@ db.exec(`
   );
 `);
 
+// --- Migrations ---
+// Add shell_override column to projects (safe to re-run)
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN shell_override TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

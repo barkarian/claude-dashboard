@@ -13,6 +13,7 @@ import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
+import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import api from '../utils/api.ts';
 import type { Chat } from '../../../shared/types/models.ts';
 
@@ -46,6 +47,7 @@ export default function ProjectDashboardPage() {
   const [diffCount, setDiffCount] = useState(0);
   const { runningCount, processesWithPorts } = useProcessStatus(id);
   const isKeyboardVisible = useKeyboardVisible();
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
 
   useEffect(() => {
     loadProject(id!);
@@ -173,7 +175,20 @@ export default function ProjectDashboardPage() {
         onDeleteChat={activeChatId ? handleDeleteChat : undefined}
         statusDot={statusDotClass}
         statusLabel={statusLabel}
+        onProjectSettings={() => setShowProjectSettings(true)}
       />
+
+      {project && (
+        <ProjectSettingsDialog
+          open={showProjectSettings}
+          onOpenChange={setShowProjectSettings}
+          projectId={project.id}
+          projectName={project.name}
+          projectPath={project.path}
+          shellOverride={project.shellOverride}
+          onShellChanged={refreshProject}
+        />
+      )}
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center">

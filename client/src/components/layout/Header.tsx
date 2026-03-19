@@ -23,6 +23,7 @@ interface HeaderProps {
   statusDot?: string;
   statusLabel?: string;
   onNewChat?: () => void;
+  onProjectSettings?: () => void;
 }
 
 export default function Header({
@@ -39,6 +40,7 @@ export default function Header({
   statusDot,
   statusLabel,
   onNewChat,
+  onProjectSettings,
 }: HeaderProps) {
   const navigate = useNavigate();
   const { toggleSidebar } = useSidebar();
@@ -116,10 +118,15 @@ export default function Header({
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <div className="min-w-0" style={{ maxWidth: '50vw' }}>
+          <button
+            onClick={onProjectSettings}
+            className="min-w-0 text-left hover:bg-bg-hover rounded-md px-1.5 py-0.5 -mx-1.5 -my-0.5 transition-colors cursor-pointer"
+            style={{ maxWidth: '50vw' }}
+            title="Project settings"
+          >
             <h2 className="text-sm font-semibold truncate leading-tight">{projectName}</h2>
             {projectPath && <TruncatedPath path={projectPath} />}
-          </div>
+          </button>
         </div>
 
         {onNewChat ? (

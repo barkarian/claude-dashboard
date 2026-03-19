@@ -28,6 +28,7 @@ export interface Project {
   path: string;
   repo: string | null;
   createdAt: string;
+  shellOverride: string | null;
   scripts: Script[];
   chats: Chat[];
 }

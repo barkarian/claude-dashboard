@@ -100,6 +100,7 @@ function getProject(projectId: string): Project | null {
     path: row.path,
     repo: row.repo || null,
     createdAt: row.created_at,
+    shellOverride: row.shell_override || null,
     scripts,
     chats,
   };
@@ -134,6 +135,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     path: targetPath,
     repo: repoUrl || null,
     createdAt: now,
+    shellOverride: null,
     scripts: [],
     chats: [],
   };
@@ -158,17 +160,21 @@ function registerProject(name: string, projectPath: string): Project {
     path: projectPath,
     repo: null,
     createdAt: now,
+    shellOverride: null,
     scripts: [],
     chats: [],
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; shellOverride?: string | null }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
   if (updates.name !== undefined) {
     db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(updates.name, projectId);
+  }
+  if (updates.shellOverride !== undefined) {
+    db.prepare('UPDATE projects SET shell_override = ? WHERE id = ?').run(updates.shellOverride, projectId);
   }
 
   return getProject(projectId);

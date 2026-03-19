@@ -21,20 +21,21 @@ const SHELL_BINARY_MAP: Record<string, string> = {
   wsl: 'wsl',
 };
 
-function getShell(): string {
+function getShell(projectShellOverride?: string | null): string {
+  const effective = projectShellOverride || preferredShell;
   if (process.platform === 'win32') {
-    if (preferredShell === 'wsl') return 'wsl';
-    if (preferredShell === 'powershell') return 'powershell.exe';
+    if (effective === 'wsl') return 'wsl';
+    if (effective === 'powershell') return 'powershell.exe';
     return 'powershell.exe';
   }
-  if (preferredShell && SHELL_BINARY_MAP[preferredShell]) {
-    return SHELL_BINARY_MAP[preferredShell];
+  if (effective && SHELL_BINARY_MAP[effective]) {
+    return SHELL_BINARY_MAP[effective];
   }
   return 'bash';
 }
 
-function getShellArgs(mode: 'command' | 'interactive', command?: string): string[] {
-  const shell = getShell();
+function getShellArgs(mode: 'command' | 'interactive', command?: string, projectShellOverride?: string | null): string[] {
+  const shell = getShell(projectShellOverride);
   if (mode === 'command' && command) {
     if (shell === 'wsl') return ['-e', 'bash', '-c', command];
     if (shell === 'powershell.exe' || shell === 'pwsh') return ['-Command', command];
@@ -179,8 +180,11 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
   // Kill existing process if any
   killProcess(projectId, scriptId);
 
-  const shell = getShell();
-  const args = getShellArgs('command', command);
+  // Check for per-project shell override
+  const project = projectManager.getProject(projectId);
+  const shellOverride = project?.shellOverride;
+  const shell = getShell(shellOverride);
+  const args = getShellArgs('command', command, shellOverride);
 
   const ptyProcess = pty.spawn(shell, args, {
     name: 'xterm-256color',
@@ -261,8 +265,11 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
   // Kill existing process if any
   killProcess(projectId, scriptId);
 
-  const shell = getShell();
-  const args = getShellArgs('interactive');
+  // Check for per-project shell override
+  const project = projectManager.getProject(projectId);
+  const shellOverride = project?.shellOverride;
+  const shell = getShell(shellOverride);
+  const args = getShellArgs('interactive', undefined, shellOverride);
 
   const ptyProcess = pty.spawn(shell, args, {
     name: 'xterm-256color',

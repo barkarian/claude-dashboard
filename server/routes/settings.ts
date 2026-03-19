@@ -5,6 +5,7 @@ import simpleGit from 'simple-git';
 import config from '../config.ts';
 import sshKeyService from '../services/sshKeyService.ts';
 import credentialService from '../services/credentialService.ts';
+import processManager from '../services/processManager.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -156,6 +157,17 @@ router.post('/settings/update', async (req: Request, res: Response) => {
       updateError = err.message || 'Update failed';
     }
   })();
+});
+
+// GET /api/shell-preference — get account-level shell preference
+router.get('/shell-preference', (req: Request, res: Response) => {
+  const preferred = processManager.getPreferredShell();
+  const defaultShell = process.platform === 'win32' ? 'powershell' : 'bash';
+  res.json({
+    accountShell: preferred || defaultShell,
+    isDefault: !preferred,
+    availableShells: ['bash', 'zsh', 'fish', 'sh', ...(process.platform === 'win32' ? ['powershell', 'wsl'] : [])],
+  });
 });
 
 // GET /api/ssh-keys — list user's SSH keys (proxied from tunnel-service)
