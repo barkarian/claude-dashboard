@@ -67,7 +67,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex-1 flex items-center justify-center py-12">
         <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
       </div>
     );
@@ -77,7 +77,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
 
   if (files.length === 0) {
     return (
-      <div className="text-center py-12">
+      <div className="flex-1 text-center py-12">
         <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -90,8 +90,8 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
   if (selectedFile) {
     const file = files.find(f => f.path === selectedFile);
     return (
-      <div className="flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border">
           <button
             onClick={() => setSelectedFile(null)}
             className="flex items-center gap-2 text-sm text-text-muted hover:text-text"
@@ -111,7 +111,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
   }
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="flex-1 overflow-y-auto p-4 space-y-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-text-muted">{files.length} file{files.length !== 1 ? 's' : ''} changed</span>
         <div className="flex gap-2">

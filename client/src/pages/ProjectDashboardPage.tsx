@@ -224,7 +224,7 @@ export default function ProjectDashboardPage() {
           } />
           <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
           <Route path="diff" element={
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 flex flex-col overflow-hidden">
               <DiffOverview projectId={id!} />
             </div>
           } />

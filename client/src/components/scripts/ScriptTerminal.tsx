@@ -71,7 +71,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const statusLabel = isShell ? 'Terminal' : status;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)]">
+    <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <button
           onClick={() => navigate(`/project/${projectId}/scripts`)}
