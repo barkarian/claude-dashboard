@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import { Button } from '../ui/button.tsx';
 import FilePicker from './FilePicker.tsx';
 import TerminalRecordButton from './TerminalRecordButton.tsx';
 import ScriptPickerPanel from './ScriptPickerPanel.tsx';
@@ -188,7 +189,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
             setValue(newVal);
           }}
           onKeyDown={handleKeyDown}
-          className="input resize-none min-h-[42px] max-h-[200px] py-2.5"
+          className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[42px] max-h-[200px] py-2.5"
           placeholder={disabled ? 'Session not active' : isThinking ? 'Claude is thinking...' : 'Message Claude Code... (@ for files, Cmd+Enter to send)'}
           rows={1}
           disabled={disabled}
@@ -220,17 +221,17 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
 
         {/* Action button */}
         {isThinking ? (
-          <button onClick={onCancel} className="btn-danger flex-shrink-0 py-2.5">
+          <Button onClick={onCancel} variant="danger" className="flex-shrink-0 py-2.5">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="1" />
             </svg>
             Stop
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
             onClick={handleAction}
             disabled={actionDisabled}
-            className="btn-primary flex-shrink-0 py-2.5 disabled:opacity-50"
+            className="flex-shrink-0 py-2.5"
           >
             {showSelect ? (
               <>
@@ -247,7 +248,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
                 Send
               </>
             )}
-          </button>
+          </Button>
         )}
       </div>
 

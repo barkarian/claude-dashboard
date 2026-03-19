@@ -1,4 +1,10 @@
 import { useState, type FormEvent } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog.tsx';
+import { Input } from '../ui/input.tsx';
+import { Label } from '../ui/label.tsx';
+import { Checkbox } from '../ui/checkbox.tsx';
+import { Button } from '../ui/button.tsx';
+import { Alert } from '../ui/alert.tsx';
 import api from '../../utils/api.ts';
 import type { ScriptWithStatus } from '../../../../shared/types/models.ts';
 
@@ -37,60 +43,63 @@ export default function EditScriptModal({ projectId, script, onClose, onUpdated 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="card w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-semibold mb-4">Edit Script</h3>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Script</DialogTitle>
+        </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Label</label>
-            <input
+            <Label htmlFor="edit-script-label">Label</Label>
+            <Input
+              id="edit-script-label"
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              className="input"
               placeholder="Dev Server"
               autoFocus
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Command</label>
-            <input
+            <Label htmlFor="edit-script-command">Command</Label>
+            <Input
+              id="edit-script-command"
               type="text"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              className="input font-mono text-sm"
+              className="font-mono text-sm"
               placeholder="npm run dev"
             />
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="edit-script-autostart"
               checked={autostart}
-              onChange={(e) => setAutostart(e.target.checked)}
-              className="w-4 h-4 rounded border-border bg-bg text-primary focus:ring-primary"
+              onCheckedChange={(checked) => setAutostart(checked === true)}
             />
-            <span className="text-sm text-text-muted">Auto-start on server boot</span>
-          </label>
+            <label htmlFor="edit-script-autostart" className="text-sm text-text-muted cursor-pointer">
+              Auto-start on server boot
+            </label>
+          </div>
 
           {error && (
-            <div className="text-danger text-sm bg-danger/10 px-3 py-2 rounded-lg">{error}</div>
+            <Alert variant="danger">{error}</Alert>
           )}
 
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-            <button
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button
               type="submit"
               disabled={saving || !label.trim() || !command.trim()}
-              className="btn-primary disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

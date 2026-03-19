@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Switch } from '../ui/switch.tsx';
 
 declare global {
   interface Window {
@@ -81,18 +82,10 @@ export default function DesktopNotificationsSection() {
               <div className="text-sm font-medium">{nt.label}</div>
               <div className="text-xs text-text-muted">{nt.description}</div>
             </div>
-            <button
-              onClick={() => handleToggle(nt.key)}
-              className={`relative w-10 h-6 rounded-full transition-colors ${
-                toggles[nt.key] ? 'bg-accent' : 'bg-border'
-              }`}
-            >
-              <span
-                className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                  toggles[nt.key] ? 'translate-x-4' : ''
-                }`}
-              />
-            </button>
+            <Switch
+              checked={toggles[nt.key]}
+              onCheckedChange={() => handleToggle(nt.key)}
+            />
           </label>
         ))}
       </div>

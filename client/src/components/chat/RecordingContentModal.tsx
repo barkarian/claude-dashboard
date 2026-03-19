@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface RecordingContentModalProps {
@@ -11,27 +12,16 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
   const scrollRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<'terminal' | 'browser'>('terminal');
 
-  // Use active recording if ID matches, otherwise look in completed recordings
   const isLive = activeRecording?.id === recordingId;
   const rec = isLive ? activeRecording : recordings.get(recordingId);
 
   const hasBrowser = rec ? rec.browserLines.length > 0 || (isLive && 'browserPorts' in rec && (rec as any).browserPorts?.length > 0) : false;
 
-  // Auto-scroll for live recordings
   useEffect(() => {
     if (isLive && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [isLive, rec?.rawLines.length, rec?.browserLines.length, tab]);
-
-  // Close on Escape
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   if (!rec) return null;
 
@@ -45,12 +35,8 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
   const displayLines = tab === 'browser' ? rec.browserLines : rec.rawLines;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="bg-bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col shadow-2xl"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col p-0">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div>
             <div className="flex items-center gap-2">
@@ -62,18 +48,8 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
               {stoppedAt ? ` - ${stoppedAt}` : ' - now'}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-muted"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
 
-        {/* Tab toggle */}
         {hasBrowser && (
           <div className="flex border-b border-border">
             <button
@@ -91,13 +67,12 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
           </div>
         )}
 
-        {/* Content */}
         <div ref={scrollRef} className="overflow-y-auto flex-1 p-4 bg-[#0f1117]">
           <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
             {displayLines.join('\n') || (tab === 'browser' ? 'No browser logs captured.' : '')}
           </pre>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

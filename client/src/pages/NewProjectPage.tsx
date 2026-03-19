@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { useSocket } from '../context/SocketContext.tsx';
 import { useSidebar } from '../context/SidebarContext.tsx';
+import { Button } from '../components/ui/button.tsx';
+import { Input } from '../components/ui/input.tsx';
+import { Label } from '../components/ui/label.tsx';
+import { Alert } from '../components/ui/alert.tsx';
 import Header from '../components/layout/Header.tsx';
 import RepoSelector from '../components/projects/RepoSelector.tsx';
 import SetupTerminal from '../components/projects/SetupTerminal.tsx';
@@ -117,16 +121,16 @@ export default function NewProjectPage() {
                 <div>
                   <h3 className="text-lg font-medium mb-2">Clone from URL</h3>
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       type="text"
                       value={customUrl}
                       onChange={(e) => setCustomUrl(e.target.value)}
-                      className="input flex-1"
+                      className="flex-1"
                       placeholder="https://github.com/user/repo.git"
                     />
-                    <button onClick={handleCustomUrl} disabled={!customUrl.trim()} className="btn-primary whitespace-nowrap disabled:opacity-50">
+                    <Button onClick={handleCustomUrl} disabled={!customUrl.trim()} className="whitespace-nowrap">
                       Clone
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -142,20 +146,21 @@ export default function NewProjectPage() {
                 <div>
                   <h3 className="text-lg font-medium mb-2">Empty Project</h3>
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       type="text"
                       value={projectName}
                       onChange={(e) => setProjectName(e.target.value)}
-                      className="input flex-1"
+                      className="flex-1"
                       placeholder="project-name"
                     />
-                    <button
+                    <Button
+                      variant="outline"
                       onClick={() => { setSelectedRepo(null); setStep(2); }}
                       disabled={!projectName.trim()}
-                      className="btn-outline whitespace-nowrap disabled:opacity-50"
+                      className="whitespace-nowrap"
                     >
                       Create Empty
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </>
@@ -165,32 +170,31 @@ export default function NewProjectPage() {
                   Register an existing directory on your filesystem as a project.
                 </p>
                 <div>
-                  <label className="block text-sm font-medium text-text-muted mb-1">Project Name</label>
-                  <input
+                  <Label>Project Name</Label>
+                  <Input
                     type="text"
                     value={projectName}
                     onChange={(e) => setProjectName(e.target.value)}
-                    className="input"
                     placeholder="my-project"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-text-muted mb-1">Directory Path</label>
-                  <input
+                  <Label>Directory Path</Label>
+                  <Input
                     type="text"
                     value={projectPath}
                     onChange={(e) => setProjectPath(e.target.value)}
-                    className="input font-mono"
+                    className="font-mono"
                     placeholder="/Users/you/projects/my-project"
                   />
                 </div>
                 {error && (
-                  <div className="text-danger text-sm bg-danger/10 px-3 py-2 rounded-lg">{error}</div>
+                  <Alert variant="danger">{error}</Alert>
                 )}
                 {!setupDone ? (
-                  <button
+                  <Button
                     onClick={handleRegister}
-                    className="btn-primary w-full"
+                    className="w-full"
                     disabled={creating || !projectName.trim() || !projectPath.trim()}
                   >
                     {creating ? (
@@ -199,18 +203,18 @@ export default function NewProjectPage() {
                         Adding...
                       </>
                     ) : 'Add Project'}
-                  </button>
+                  </Button>
                 ) : (
                   <div className="space-y-4">
-                    <div className="badge-success text-sm px-3 py-2 rounded-lg bg-success/10">
+                    <Alert variant="success">
                       Project added successfully!
-                    </div>
-                    <button
+                    </Alert>
+                    <Button
                       onClick={() => navigate(`/project/${createdProjectId}`)}
-                      className="btn-primary w-full"
+                      className="w-full"
                     >
                       Open Project
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -221,22 +225,21 @@ export default function NewProjectPage() {
         {step === 2 && (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Project Name</label>
-              <input
+              <Label>Project Name</Label>
+              <Input
                 type="text"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
-                className="input"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Directory Path (optional)</label>
-              <input
+              <Label>Directory Path (optional)</Label>
+              <Input
                 type="text"
                 value={projectPath}
                 onChange={(e) => setProjectPath(e.target.value)}
-                className="input font-mono"
+                className="font-mono"
                 placeholder="Leave empty for default ~/projects/"
               />
             </div>
@@ -248,34 +251,34 @@ export default function NewProjectPage() {
             )}
 
             {error && (
-              <div className="text-danger text-sm bg-danger/10 px-3 py-2 rounded-lg">{error}</div>
+              <Alert variant="danger">{error}</Alert>
             )}
 
             {!setupDone ? (
               <div className="flex gap-2">
-                <button onClick={() => setStep(1)} className="btn-ghost" disabled={creating}>
+                <Button variant="ghost" onClick={() => setStep(1)} disabled={creating}>
                   Back
-                </button>
-                <button onClick={handleCreate} className="btn-primary flex-1" disabled={creating || !projectName.trim()}>
+                </Button>
+                <Button onClick={handleCreate} className="flex-1" disabled={creating || !projectName.trim()}>
                   {creating ? (
                     <>
                       <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                       Creating...
                     </>
                   ) : 'Create Project'}
-                </button>
+                </Button>
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="badge-success text-sm px-3 py-2 rounded-lg bg-success/10">
+                <Alert variant="success">
                   Project created successfully!
-                </div>
-                <button
+                </Alert>
+                <Button
                   onClick={() => navigate(`/project/${createdProjectId}`)}
-                  className="btn-primary w-full"
+                  className="w-full"
                 >
                   Open Project
-                </button>
+                </Button>
               </div>
             )}
           </div>

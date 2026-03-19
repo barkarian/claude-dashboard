@@ -1,5 +1,8 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useAIGenerate } from '../../hooks/useAIGenerate.ts';
+import { Card } from '../ui/card.tsx';
+import { Button } from '../ui/button.tsx';
+import { Alert } from '../ui/alert.tsx';
 import api from '../../utils/api.ts';
 
 interface AIScriptGeneratorProps {
@@ -96,7 +99,7 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
   // ─── Mode Chooser ─────────────────────────────────────
   if (mode === 'choose') {
     return (
-      <div className="card border-primary/30 bg-gradient-to-br from-bg-surface to-primary/5">
+      <Card className="border-primary/30 bg-gradient-to-br from-bg-surface to-primary/5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
@@ -157,13 +160,13 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
             Generate
           </button>
         </form>
-      </div>
+      </Card>
     );
   }
 
   // ─── Generating / Results ─────────────────────────────
   return (
-    <div className="card border-primary/30 bg-gradient-to-br from-bg-surface to-primary/5">
+    <Card className="border-primary/30 bg-gradient-to-br from-bg-surface to-primary/5">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
@@ -226,22 +229,23 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
             </div>
           </div>
 
-          <button
+          <Button
             onClick={() => cancel()}
-            className="w-full btn-ghost text-xs text-text-dim"
+            variant="ghost"
+            className="w-full text-xs text-text-dim"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Error state */}
       {error && !isGenerating && (
         <div className="space-y-3">
-          <div className="text-sm text-danger bg-danger/10 px-3 py-2 rounded-lg">{error}</div>
+          <Alert variant="danger">{error}</Alert>
           <div className="flex gap-2">
-            <button onClick={handleRetry} className="btn-outline flex-1 text-sm">Try Again</button>
-            <button onClick={handleClose} className="btn-ghost flex-1 text-sm">Close</button>
+            <Button onClick={handleRetry} variant="outline" className="flex-1 text-sm">Try Again</Button>
+            <Button onClick={handleClose} variant="ghost" className="flex-1 text-sm">Close</Button>
           </div>
         </div>
       )}
@@ -283,20 +287,20 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
           ))}
 
           <div className="flex gap-2 pt-1">
-            <button onClick={handleRetry} className="btn-ghost flex-1 text-sm">Regenerate</button>
-            <button
+            <Button onClick={handleRetry} variant="ghost" className="flex-1 text-sm">Regenerate</Button>
+            <Button
               onClick={handleAddSelected}
               disabled={selectedCount === 0 || adding}
-              className="btn-primary flex-1 text-sm disabled:opacity-50"
+              className="flex-1 text-sm"
             >
               {adding
                 ? 'Adding...'
                 : `Add ${selectedCount} Script${selectedCount !== 1 ? 's' : ''}`
               }
-            </button>
+            </Button>
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

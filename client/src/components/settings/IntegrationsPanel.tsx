@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui/button.tsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs.tsx';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '../ui/alert-dialog.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
 import SettingsTerminal from './SettingsTerminal.tsx';
@@ -863,24 +864,20 @@ export default function IntegrationsPanel() {
       )}
 
       {/* Mutual exclusivity confirmation modal */}
-      {pendingSave && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setPendingSave(null)}>
-          <div className="card w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-3">Switch AI Provider?</h3>
-            <p className="text-sm text-text-muted mb-5">
-              Switching to {providerName(pendingSave.provider)} will disconnect {pendingSave.competingProvider} on your {envLabel(pendingSave.environment)} environment. Continue?
-            </p>
-            <div className="flex items-center gap-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setPendingSave(null)}>
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleConfirmSwitch}>
-                Continue
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog open={!!pendingSave} onOpenChange={(open) => !open && setPendingSave(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch AI Provider?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingSave ? `Switching to ${providerName(pendingSave.provider)} will disconnect ${pendingSave.competingProvider} on your ${envLabel(pendingSave.environment)} environment. Continue?` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSwitch}>Continue</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

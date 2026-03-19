@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Fuse from 'fuse.js';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog.tsx';
+import { Input } from '../ui/input.tsx';
 import api from '../../utils/api.ts';
 import type { Chat } from '../../../../shared/types/models.ts';
 
@@ -75,31 +77,24 @@ export default function SendToChatDialog({ projectId, content, contentLabel, onC
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="card w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold">Send to Chat</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg-hover text-text-dim">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Send to Chat</DialogTitle>
+        </DialogHeader>
 
         <div className="mb-3">
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Escape' && onClose()}
-            className="input text-sm py-1.5"
+            className="text-sm py-1.5"
             placeholder="Search chats..."
           />
         </div>
 
-        <div className="overflow-y-auto flex-1 -mx-4 px-4">
-          {/* New Chat option */}
+        <div className="overflow-y-auto flex-1 -mx-6 px-6">
           <button
             onClick={handleNewChat}
             className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2 mb-1"
@@ -134,7 +129,7 @@ export default function SendToChatDialog({ projectId, content, contentLabel, onC
             ))
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

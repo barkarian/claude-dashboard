@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
+import { Button } from '../components/ui/button.tsx';
 import Header from '../components/layout/Header.tsx';
 import { useSidebar } from '../context/SidebarContext.tsx';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll.ts';
@@ -78,12 +79,12 @@ export default function ProjectListPage() {
       <Header
         title="Projects"
         actions={
-          <button onClick={() => navigate('/new')} className="btn-primary text-sm">
+          <Button onClick={() => navigate('/new')} className="text-sm">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             New Project
-          </button>
+          </Button>
         }
       />
 
@@ -101,9 +102,9 @@ export default function ProjectListPage() {
             </div>
             <h3 className="text-lg font-medium text-text mb-1">No projects yet</h3>
             <p className="text-text-muted mb-4">Create your first project to get started</p>
-            <button onClick={() => navigate('/new')} className="btn-primary">
+            <Button onClick={() => navigate('/new')}>
               Create Project
-            </button>
+            </Button>
           </div>
         ) : (
           <>

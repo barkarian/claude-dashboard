@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Card } from '../ui/card.tsx';
+import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import type { RecordingScript } from '../../context/TerminalRecordingContext.tsx';
@@ -97,7 +99,7 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
   const hasSelection = selected.size > 0 || selectedBrowserPorts.size > 0;
 
   return (
-    <div className="card shadow-xl max-h-96 overflow-hidden flex flex-col border-border-light">
+    <Card className="shadow-xl max-h-96 overflow-hidden flex flex-col border-border-light">
       <div className="flex items-center justify-between p-3 border-b border-border">
         <span className="text-sm font-medium">Select sources to record</span>
         <button onClick={onClose} className="text-text-muted hover:text-text transition-colors">
@@ -177,15 +179,15 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
 
       {(processes.length > 0 || browserPorts.length > 0) && (
         <div className="p-3 border-t border-border">
-          <button
+          <Button
             onClick={handleStart}
             disabled={!hasSelection}
-            className="btn-primary w-full py-2 text-sm disabled:opacity-50"
+            className="w-full py-2 text-sm"
           >
             Start Recording{hasSelection ? ` (${selected.size + selectedBrowserPorts.size})` : ''}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

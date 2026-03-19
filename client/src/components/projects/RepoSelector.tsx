@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Input } from '../ui/input.tsx';
+import { Badge } from '../ui/badge.tsx';
 import api from '../../utils/api.ts';
 import { getLanguageBadgeColor } from '../../utils/fileIcons.ts';
 import type { GitHubRepo } from '../../../../shared/types/models.ts';
@@ -43,11 +45,10 @@ export default function RepoSelector({ onSelect }: RepoSelectorProps) {
 
   return (
     <div className="space-y-3">
-      <input
+      <Input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="input"
         placeholder="Search repositories..."
       />
 
@@ -71,7 +72,7 @@ export default function RepoSelector({ onSelect }: RepoSelectorProps) {
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-text truncate">{repo.name}</span>
                       {repo.private && (
-                        <span className="badge-muted text-xs">Private</span>
+                        <Badge className="text-xs">Private</Badge>
                       )}
                     </div>
                     {repo.description && (
@@ -79,9 +80,9 @@ export default function RepoSelector({ onSelect }: RepoSelectorProps) {
                     )}
                   </div>
                   {repo.language && (
-                    <span className={`badge text-xs flex-shrink-0 ${getLanguageBadgeColor(repo.language)}`}>
+                    <Badge className={`text-xs flex-shrink-0 ${getLanguageBadgeColor(repo.language)}`}>
                       {repo.language}
-                    </span>
+                    </Badge>
                   )}
                 </div>
               </button>

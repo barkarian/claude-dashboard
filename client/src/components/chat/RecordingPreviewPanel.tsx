@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Card } from '../ui/card.tsx';
+import { Button } from '../ui/button.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface RecordingPreviewPanelProps {
@@ -47,7 +49,7 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
   const displayLines = tab === 'browser' ? activeRecording.browserLines : activeRecording.rawLines;
 
   return (
-    <div className="card shadow-xl flex flex-col border-border-light max-h-64">
+    <Card className="shadow-xl flex flex-col border-border-light max-h-64">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-border">
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -97,10 +99,10 @@ export default function RecordingPreviewPanel({ onClose, onStop }: RecordingPrev
 
       {/* Stop button */}
       <div className="p-3 border-t border-border">
-        <button onClick={handleStop} className="btn-danger w-full py-2 text-sm">
+        <Button onClick={handleStop} variant="danger" className="w-full py-2 text-sm">
           Stop Recording
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

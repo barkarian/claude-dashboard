@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, type KeyboardEvent } from 'react';
+import { Card } from '../ui/card.tsx';
+import { Input } from '../ui/input.tsx';
 import Fuse from 'fuse.js';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { getFileIcon } from '../../utils/fileIcons.ts';
@@ -51,15 +53,15 @@ export default function FilePicker({ projectId, onSelect, onClose }: FilePickerP
   }
 
   return (
-    <div className="card max-h-64 overflow-hidden flex flex-col shadow-xl border-border-light">
+    <Card className="max-h-64 overflow-hidden flex flex-col shadow-xl border-border-light">
       <div className="p-2 border-b border-border">
-        <input
+        <Input
           ref={inputRef}
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="input text-sm py-1.5"
+          className="text-sm py-1.5"
           placeholder="Search files..."
         />
       </div>
@@ -79,6 +81,6 @@ export default function FilePicker({ projectId, onSelect, onClose }: FilePickerP
           ))
         )}
       </div>
-    </div>
+    </Card>
   );
 }

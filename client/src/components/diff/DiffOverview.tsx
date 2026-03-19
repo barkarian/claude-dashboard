@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Card } from '../ui/card.tsx';
+import { Badge } from '../ui/badge.tsx';
+import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import DiffViewer from './DiffViewer.tsx';
 import DiffActions from './DiffActions.tsx';
@@ -112,26 +115,26 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-text-muted">{files.length} file{files.length !== 1 ? 's' : ''} changed</span>
         <div className="flex gap-2">
-          <button onClick={handleRevertAll} className="btn-ghost text-sm text-danger">Revert All</button>
-          <button onClick={handleCommit} className="btn-primary text-sm">Commit All</button>
+          <Button onClick={handleRevertAll} variant="ghost" className="text-sm text-danger">Revert All</Button>
+          <Button onClick={handleCommit} className="text-sm">Commit All</Button>
         </div>
       </div>
 
       {files.map((file) => (
-        <div key={file.path} className="card hover:border-border-light transition-all">
+        <Card key={file.path} className="hover:border-border-light transition-all">
           <div className="flex items-center justify-between">
             <button
               onClick={() => setSelectedFile(file.path)}
               className="flex-1 text-left min-w-0"
             >
               <div className="flex items-center gap-2">
-                <span className={`badge text-xs ${
-                  file.status === 'added' ? 'badge-success' :
-                  file.status === 'deleted' ? 'badge-danger' :
-                  'badge-warning'
-                }`}>
+                <Badge variant={
+                  file.status === 'added' ? 'success' :
+                  file.status === 'deleted' ? 'danger' :
+                  'warning'
+                } className="text-xs">
                   {file.status}
-                </span>
+                </Badge>
                 <span className="font-mono text-sm text-text truncate">{file.path}</span>
               </div>
               <div className="flex items-center gap-3 mt-1 text-xs">
@@ -141,21 +144,25 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
             </button>
 
             <div className="flex items-center gap-1 flex-shrink-0">
-              <button
+              <Button
                 onClick={() => setSelectedFile(file.path)}
-                className="btn-ghost text-xs py-1 px-2"
+                variant="ghost"
+                size="sm"
+                className="text-xs py-1 px-2"
               >
                 View
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => handleRevert(file.path)}
-                className="btn-ghost text-xs py-1 px-2 text-danger"
+                variant="ghost"
+                size="sm"
+                className="text-xs py-1 px-2 text-danger"
               >
                 Revert
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   );

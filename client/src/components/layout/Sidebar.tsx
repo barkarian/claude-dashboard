@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardR
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
+import { Sheet, SheetContent } from '../ui/sheet.tsx';
 import api from '../../utils/api.ts';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
@@ -241,23 +242,11 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(function Sidebar({ isOpe
       </aside>
 
       {/* Mobile drawer */}
-      <div
-        className={`md:hidden fixed inset-0 z-50 transition-opacity duration-300 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-      >
-        {/* Backdrop */}
-        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        {/* Drawer panel */}
-        <aside
-          className={`absolute left-0 bottom-0 w-72 bg-bg-surface flex flex-col shadow-xl transition-transform duration-300 ${
-            isOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
-          style={{ top: 'env(safe-area-inset-top, 0px)' }}
-        >
+      <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <SheetContent side="left" className="w-72 p-0 flex flex-col md:hidden" style={{ top: 'env(safe-area-inset-top, 0px)' }}>
           {sidebarContent}
-        </aside>
-      </div>
+        </SheetContent>
+      </Sheet>
     </>
   );
 });

@@ -1,3 +1,4 @@
+import { Badge } from '../ui/badge.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface RecordingBadgeBarProps {
@@ -35,9 +36,10 @@ export default function RecordingBadgeBar({ value, onValueChange, onBadgeClick }
         const rec = recordings.get(id);
         const lineCount = rec ? rec.lines.length : 0;
         return (
-          <span
+          <Badge
             key={id}
-            className="badge-recording inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-xs cursor-pointer"
+            variant="recording"
+            className="gap-1.5 pl-2 pr-1 py-1 rounded-lg cursor-pointer"
             onClick={() => onBadgeClick(id)}
           >
             <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
@@ -54,7 +56,7 @@ export default function RecordingBadgeBar({ value, onValueChange, onBadgeClick }
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </span>
+          </Badge>
         );
       })}
     </div>

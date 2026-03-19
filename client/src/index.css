@@ -31,60 +31,6 @@
   }
 }
 
-@layer components {
-  .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-all duration-150 inline-flex items-center justify-center gap-2;
-  }
-
-  .btn-primary {
-    @apply btn bg-primary hover:bg-primary-hover text-white;
-  }
-
-  .btn-danger {
-    @apply btn bg-danger hover:bg-danger-dark text-white;
-  }
-
-  .btn-ghost {
-    @apply btn bg-transparent hover:bg-bg-hover text-text-muted hover:text-text;
-  }
-
-  .btn-outline {
-    @apply btn border border-border hover:border-border-light text-text-muted hover:text-text;
-  }
-
-  .card {
-    @apply bg-bg-surface border border-border rounded-xl p-4;
-  }
-
-  .input {
-    @apply w-full bg-bg border border-border rounded-lg px-3 py-2 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors;
-  }
-
-  .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply badge bg-success/20 text-success;
-  }
-
-  .badge-danger {
-    @apply badge bg-danger/20 text-danger;
-  }
-
-  .badge-warning {
-    @apply badge bg-warning/20 text-warning;
-  }
-
-  .badge-muted {
-    @apply badge bg-border text-text-muted;
-  }
-
-  .badge-recording {
-    @apply bg-danger/15 text-danger border border-danger/30;
-  }
-}
-
 /* iOS notch: colored bar behind the notch, always visible.
    On non-notched devices env() is 0 → height is 0 → invisible. */
 body::before {

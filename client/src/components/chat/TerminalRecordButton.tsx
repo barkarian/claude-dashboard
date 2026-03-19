@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface TerminalRecordButtonProps {
@@ -12,9 +13,7 @@ export default function TerminalRecordButton({ onOpenScriptPicker, onOpenLivePre
   const { activeRecording, stopRecording } = useTerminalRecording();
   const [showPopover, setShowPopover] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Update elapsed timer while recording
   useEffect(() => {
     if (!activeRecording) {
       setElapsed(0);
@@ -25,18 +24,6 @@ export default function TerminalRecordButton({ onOpenScriptPicker, onOpenLivePre
     }, 1000);
     return () => clearInterval(interval);
   }, [activeRecording]);
-
-  // Close popover on outside click
-  useEffect(() => {
-    if (!showPopover) return;
-    function handleClick(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setShowPopover(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [showPopover]);
 
   function formatTime(secs: number): string {
     const m = Math.floor(secs / 60);
@@ -64,28 +51,29 @@ export default function TerminalRecordButton({ onOpenScriptPicker, onOpenLivePre
   }
 
   return (
-    <div className="relative flex-shrink-0" ref={popoverRef}>
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={disabled}
-        className="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg transition-colors hover:bg-bg-hover disabled:opacity-50"
-        aria-label={activeRecording ? 'Recording in progress' : 'Record terminal'}
-      >
-        {activeRecording ? (
-          <span className="flex items-center gap-1.5 text-xs font-medium text-danger">
-            <span className="recording-pulse w-3 h-3 rounded-full bg-danger" />
-            {formatTime(elapsed)}
-          </span>
-        ) : (
-          <svg className="w-5 h-5 text-danger" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="12" cy="12" r="8" />
-          </svg>
-        )}
-      </button>
-
-      {showPopover && (
-        <div className="absolute bottom-full left-0 mb-2 card shadow-xl p-2 min-w-[160px] z-50">
+    <div className="relative flex-shrink-0">
+      <Popover open={showPopover} onOpenChange={setShowPopover}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={disabled}
+            className="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg transition-colors hover:bg-bg-hover disabled:opacity-50"
+            aria-label={activeRecording ? 'Recording in progress' : 'Record terminal'}
+          >
+            {activeRecording ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-danger">
+                <span className="recording-pulse w-3 h-3 rounded-full bg-danger" />
+                {formatTime(elapsed)}
+              </span>
+            ) : (
+              <svg className="w-5 h-5 text-danger" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="12" r="8" />
+              </svg>
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="start" className="p-2 min-w-[160px]">
           <button
             onClick={handleViewLive}
             className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors"
@@ -98,8 +86,8 @@ export default function TerminalRecordButton({ onOpenScriptPicker, onOpenLivePre
           >
             Stop Recording
           </button>
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

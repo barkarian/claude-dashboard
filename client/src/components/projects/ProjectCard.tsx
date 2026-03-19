@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { Card } from '../ui/card.tsx';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 
 interface ProjectCardProps {
@@ -10,9 +11,11 @@ export default function ProjectCard({ project }: ProjectCardProps) {
   const hasRunning = false; // Will be enhanced with real-time status later
 
   return (
-    <button
+    <Card
       onClick={() => navigate(`/project/${project.id}`)}
-      className="card text-left w-full hover:border-border-light transition-all group"
+      className="text-left w-full hover:border-border-light transition-all group cursor-pointer"
+      role="button"
+      tabIndex={0}
     >
       <div className="flex gap-3">
         <div className={`w-1 rounded-full self-stretch flex-shrink-0 ${hasRunning ? 'bg-success' : 'bg-border'}`} />
@@ -31,6 +34,6 @@ export default function ProjectCard({ project }: ProjectCardProps) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
       </div>
-    </button>
+    </Card>
   );
 }

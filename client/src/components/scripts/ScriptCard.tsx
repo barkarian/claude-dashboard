@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
+import { Card } from '../ui/card.tsx';
 import EditScriptModal from './EditScriptModal.tsx';
 import type { ScriptWithStatus, ProcessStatus } from '../../../../shared/types/models.ts';
 
@@ -50,7 +51,7 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
   };
 
   return (
-    <div className="card hover:border-border-light transition-all">
+    <Card className="hover:border-border-light transition-all">
       <div className="flex items-center gap-3">
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColor[status] || 'bg-text-dim'}`} />
 
@@ -107,6 +108,6 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
           onUpdated={() => { setShowEdit(false); onRefresh(); }}
         />
       )}
-    </div>
+    </Card>
   );
 }

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type MouseEvent, type KeyboardEvent } from 'react';
+import { Card } from '../ui/card.tsx';
+import { Button } from '../ui/button.tsx';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
@@ -182,10 +184,10 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
       ) : (
         <>
           {chats.map((chat) => (
-            <button
+            <Card
               key={chat.id}
+              className="text-left w-full hover:border-border-light transition-all group cursor-pointer"
               onClick={() => editingId !== chat.id && navigate(`/project/${projectId}/chats/${chat.id}`)}
-              className="card text-left w-full hover:border-border-light transition-all group"
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -266,7 +268,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                   </svg>
                 </div>
               </div>
-            </button>
+            </Card>
           ))}
 
           {/* Infinite scroll sentinel */}
@@ -279,12 +281,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
         </>
       )}
 
-      <button onClick={handleNewChat} disabled={creating} className="btn-outline w-full">
+      <Button onClick={handleNewChat} disabled={creating} variant="outline" className="w-full">
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
         </svg>
         {creating ? 'Creating...' : 'New Chat'}
-      </button>
+      </Button>
     </div>
   );
 }

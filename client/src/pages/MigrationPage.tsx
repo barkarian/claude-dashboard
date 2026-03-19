@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
+import { Button } from '../components/ui/button.tsx';
 import Header from '../components/layout/Header.tsx';
 
 interface MigrationProject {
@@ -176,12 +177,11 @@ export default function MigrationPage() {
               ) : projects.length === 0 && !error ? (
                 <div className="text-center py-12">
                   <p className="text-text-muted mb-4">No projects found on your local machine.</p>
-                  <button
+                  <Button
                     onClick={() => navigate('/')}
-                    className="btn-primary"
                   >
                     Start Fresh
-                  </button>
+                  </Button>
                 </div>
               ) : projects.length > 0 ? (
                 <>
@@ -230,13 +230,13 @@ export default function MigrationPage() {
 
                   {/* Actions */}
                   <div className="flex gap-3">
-                    <button
+                    <Button
                       onClick={startMigration}
                       disabled={selected.size === 0}
-                      className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1"
                     >
                       Migrate Selected ({selected.size})
-                    </button>
+                    </Button>
                     <button
                       onClick={() => navigate('/')}
                       className="px-4 py-2 rounded-lg border border-border text-text-muted hover:text-text hover:border-text-dim transition-colors"
@@ -293,12 +293,12 @@ export default function MigrationPage() {
               </div>
 
               {allDone && (
-                <button
+                <Button
                   onClick={() => navigate('/')}
-                  className="btn-primary w-full"
+                  className="w-full"
                 >
                   Go to Projects
-                </button>
+                </Button>
               )}
             </>
           )}
