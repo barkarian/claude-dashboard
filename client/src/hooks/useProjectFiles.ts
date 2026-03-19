@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext.tsx';
 
+interface FilesChangedEvent {
+  projectId: string;
+  event: 'add' | 'change' | 'unlink';
+  path: string;
+}
+
 export function useProjectFiles(projectId: string) {
   const { socket } = useSocket();
   const [files, setFiles] = useState<string[]>([]);
@@ -20,8 +26,19 @@ export function useProjectFiles(projectId: string) {
       setLoading(false);
     }
 
-    function handleFilesChanged() {
-      socket!.emit('files:list', { projectId });
+    function handleFilesChanged({ event, path: filePath }: FilesChangedEvent) {
+      setFiles((prev) => {
+        if (event === 'add') {
+          // Only add if not already present
+          if (prev.includes(filePath)) return prev;
+          return [...prev, filePath].sort();
+        }
+        if (event === 'unlink') {
+          return prev.filter((f) => f !== filePath);
+        }
+        // 'change' — content changed, file list unchanged
+        return prev;
+      });
     }
 
     socket.on('files:list', handleFileList);

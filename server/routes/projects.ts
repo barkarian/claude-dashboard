@@ -96,6 +96,18 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
+// Git status (lightweight — paths + statuses only, no diff content)
+router.get('/:id/status', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const files = await gitService.getStatus(projectPath);
+    res.json({ files });
+  } catch (err) {
+    console.error('Error getting status:', err);
+    res.status(500).json({ error: 'Failed to get status' });
+  }
+});
+
 // Diff endpoints
 router.get('/:id/diff', async (req: Request<{ id: string }>, res: Response) => {
   try {

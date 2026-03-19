@@ -35,6 +35,16 @@ export default function registerFileEvents(socket: Socket, io: SocketIOServer): 
     socket.leave(room);
   });
 
+  socket.on('files:stat', async ({ projectId, filePath }: FilesContentPayload) => {
+    try {
+      const projectPath = projectManager.getProjectPath(projectId);
+      const stat = await fileService.getFileStat(projectPath, filePath!);
+      socket.emit('files:stat', { projectId, filePath, size: stat.size });
+    } catch (err: any) {
+      socket.emit('files:error', { projectId, error: err.message });
+    }
+  });
+
   socket.on('files:content', async ({ projectId, filePath }: FilesContentPayload) => {
     try {
       const projectPath = projectManager.getProjectPath(projectId);

@@ -5,9 +5,13 @@ import { buildFileTree, type TreeNode } from '../../utils/buildFileTree.ts';
 import { getFileIcon } from '../../utils/fileIcons.ts';
 import api from '../../utils/api.ts';
 import FileContentView from './FileContentView.tsx';
-import type { DiffResult } from '../../../../shared/types/models.ts';
 
-type FileStatus = 'added' | 'modified' | 'deleted';
+type FileStatus = 'added' | 'modified' | 'deleted' | 'untracked' | 'renamed';
+
+interface StatusFile {
+  path: string;
+  status: string;
+}
 
 interface FolderBrowserProps {
   projectId: string;
@@ -42,10 +46,10 @@ export default function FolderBrowser({ projectId }: FolderBrowserProps) {
     [observerRef],
   );
 
-  // Fetch git diff status to color changed files
+  // Fetch lightweight git status (paths + statuses only, no diff content)
   useEffect(() => {
     api
-      .get<DiffResult>(`/api/projects/${projectId}/diff`)
+      .get<{ files: StatusFile[] }>(`/api/projects/${projectId}/status`)
       .then((data) => {
         const map = new Map<string, FileStatus>();
         for (const f of data.files || []) {
@@ -81,8 +85,8 @@ export default function FolderBrowser({ projectId }: FolderBrowserProps) {
   function getNameColor(nodeId: string, isLeaf: boolean): string {
     if (isLeaf) {
       const status = changedFiles.get(nodeId);
-      if (status === 'added') return 'text-green-400';
-      if (status === 'modified') return 'text-yellow-400';
+      if (status === 'added' || status === 'untracked') return 'text-green-400';
+      if (status === 'modified' || status === 'renamed') return 'text-yellow-400';
       if (status === 'deleted') return 'text-red-400';
       return 'text-text';
     }

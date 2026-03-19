@@ -82,14 +82,24 @@ async function listProjectFiles(projectPath: string): Promise<string[]> {
   return files;
 }
 
-async function getFileContent(projectPath: string, relativePath: string): Promise<string> {
+function resolveAndGuard(projectPath: string, relativePath: string): string {
   const fullPath = path.join(projectPath, relativePath);
-  // Security: ensure path is within project
   const resolved = path.resolve(fullPath);
   const resolvedBase = path.resolve(projectPath);
   if (!resolved.startsWith(resolvedBase)) {
     throw new Error('Path traversal detected');
   }
+  return resolved;
+}
+
+async function getFileStat(projectPath: string, relativePath: string): Promise<{ size: number }> {
+  const fullPath = resolveAndGuard(projectPath, relativePath);
+  const stat = await fs.stat(fullPath);
+  return { size: stat.size };
+}
+
+async function getFileContent(projectPath: string, relativePath: string): Promise<string> {
+  const fullPath = resolveAndGuard(projectPath, relativePath);
   return fs.readFile(fullPath, 'utf-8');
 }
 
@@ -149,6 +159,7 @@ function stopAllWatching(): void {
 
 export default {
   listProjectFiles,
+  getFileStat,
   getFileContent,
   startWatching,
   stopWatching,
