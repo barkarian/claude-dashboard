@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Button } from '../ui/button.tsx';
 import {
@@ -19,6 +19,7 @@ import api from '../../utils/api.ts';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
+import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
 
 export interface SidebarHandle {
   refreshProjects: () => void;
@@ -29,8 +30,8 @@ const PAGE_SIZE = 20;
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
   const { setOpenMobile } = useSidebar();
-  const navigate = useNavigate();
   const location = useLocation();
+  const { openDrawer } = useNewProjectDrawer();
 
   const accountSettingsUrl = tunnelUrl
     ? new URL('/settings', tunnelUrl).href
@@ -147,7 +148,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               )}
 
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => navigate('/new')} className="text-text-muted">
+                <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
@@ -196,7 +197,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}>
+      <SidebarFooter className="border-t border-sidebar-border">
         {user && (
           <div className="px-1 py-1">
             <div className="flex items-center gap-2">
