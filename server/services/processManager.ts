@@ -49,13 +49,14 @@ async function fetchPreferredShell(): Promise<void> {
   const creds = tunnelManager.getCredentials();
   if (!creds || !config.tunnelServiceUrl) return;
   try {
-    const res = await fetch(`${config.tunnelServiceUrl}/api/account/preferences`, {
+    const env = config.dashboardEnv; // 'local' or 'vps'
+    const res = await fetch(`${config.tunnelServiceUrl}/api/account/preferences?environment=${env}`, {
       headers: { 'Authorization': `users API-Key ${creds.apiKey}` },
     });
     if (res.ok) {
       const data = await res.json() as { preferredShell?: string };
       preferredShell = data.preferredShell || null;
-      console.log(`[process] User preferred shell: ${preferredShell || 'default (bash)'}`);
+      console.log(`[process] User preferred shell (${env}): ${preferredShell || 'default (bash)'}`);
     }
   } catch {
     console.log('[process] Failed to fetch shell preference, using default');
