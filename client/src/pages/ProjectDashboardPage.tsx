@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
 import { useSocket } from '../context/SocketContext.tsx';
 import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
+import { useProcessStatus } from '../hooks/useProcessStatus.ts';
 import { Toaster } from '../components/ui/sonner.tsx';
 import Header from '../components/layout/Header.tsx';
 import MobileNav from '../components/layout/MobileNav.tsx';
@@ -13,7 +14,7 @@ import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
 import api from '../utils/api.ts';
-import type { Chat, RunningProcess } from '../../../shared/types/models.ts';
+import type { Chat } from '../../../shared/types/models.ts';
 
 function useKeyboardVisible() {
   const [visible, setVisible] = useState(false);
@@ -43,8 +44,7 @@ export default function ProjectDashboardPage() {
   const sessionStatuses = useSessionStatuses(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
-  const [runningCount, setRunningCount] = useState(0);
-  const [processesWithPorts, setProcessesWithPorts] = useState<RunningProcess[]>([]);
+  const { runningCount, processesWithPorts } = useProcessStatus(id);
   const isKeyboardVisible = useKeyboardVisible();
 
   useEffect(() => {
@@ -57,28 +57,6 @@ export default function ProjectDashboardPage() {
     api.get<{ files?: any[] }>(`/api/projects/${id}/diff`)
       .then((data) => setDiffCount(data.files?.length || 0))
       .catch(() => setDiffCount(0));
-  }, [id]);
-
-  // Poll running process count for badge
-  useEffect(() => {
-    if (!id) return;
-    function fetchRunningCount(): void {
-      api.get<{ processes: RunningProcess[]; runningCount: number }>(`/api/projects/${id}/scripts/processes`)
-        .then((data) => {
-          setRunningCount(data.runningCount || 0);
-          const withPorts = (data.processes || []).filter(
-            (p) => p.status === 'running' && p.detectedPorts && p.detectedPorts.length > 0
-          );
-          setProcessesWithPorts(withPorts);
-        })
-        .catch(() => {
-          setRunningCount(0);
-          setProcessesWithPorts([]);
-        });
-    }
-    fetchRunningCount();
-    const interval = setInterval(fetchRunningCount, 5000);
-    return () => clearInterval(interval);
   }, [id]);
 
   // Derive current tab and active chat from pathname

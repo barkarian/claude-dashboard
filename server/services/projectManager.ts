@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
@@ -173,18 +174,31 @@ function updateProject(projectId: string, updates: { name?: string }): Project |
   return getProject(projectId);
 }
 
-async function deleteProject(projectId: string): Promise<void> {
+async function deleteProject(projectId: string, deleteFolder: boolean = true): Promise<void> {
   const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as any;
   if (!row) throw new Error('Project not found');
 
   // Delete from DB first (CASCADE handles scripts/chats/messages)
   db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
 
-  // Remove directory
+  // Remove directory only if requested
+  if (deleteFolder) {
+    try {
+      await fs.rm(row.path, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error deleting project directory:', err);
+    }
+  }
+}
+
+function projectDirectoryExists(projectId: string): boolean {
+  const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as any;
+  if (!row) throw new Error('Project not found');
   try {
-    await fs.rm(row.path, { recursive: true, force: true });
-  } catch (err) {
-    console.error('Error deleting project directory:', err);
+    const stat = fsSync.statSync(row.path);
+    return stat.isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -373,6 +387,7 @@ export default {
   registerProject,
   updateProject,
   deleteProject,
+  projectDirectoryExists,
   getProjectPath,
   // Scripts
   listScripts,

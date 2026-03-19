@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
 import { useSocket } from '../../context/SocketContext.tsx';
+import { useProcessStatus } from '../../hooks/useProcessStatus.ts';
 import ScriptCard from './ScriptCard.tsx';
 import RunningProcessCard from './RunningProcessCard.tsx';
 import ExitedProcessCard from './ExitedProcessCard.tsx';
 import AddScriptModal from './AddScriptModal.tsx';
 import AIScriptGenerator from './AIScriptGenerator.tsx';
-import type { Project, ScriptWithStatus, RunningProcess } from '../../../../shared/types/models.ts';
+import type { Project, ScriptWithStatus } from '../../../../shared/types/models.ts';
 
 interface ScriptListProps {
   projectId: string;
@@ -17,8 +18,9 @@ interface ScriptListProps {
 
 export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [scripts, setScripts] = useState<ScriptWithStatus[]>([]);
-  const [runningProcesses, setRunningProcesses] = useState<RunningProcess[]>([]);
-  const [exitedProcesses, setExitedProcesses] = useState<RunningProcess[]>([]);
+  const { processes } = useProcessStatus(projectId);
+  const runningProcesses = processes.filter(p => p.status === 'running');
+  const exitedProcesses = processes.filter(p => p.status === 'exited');
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(`dismissed-processes:${projectId}`);
@@ -33,14 +35,8 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   const { socket } = useSocket();
 
   useEffect(() => {
-    loadAll();
-    const interval = setInterval(loadProcesses, 5000);
-    return () => clearInterval(interval);
+    loadScripts();
   }, [projectId]);
-
-  async function loadAll() {
-    await Promise.all([loadScripts(), loadProcesses()]);
-  }
 
   async function loadScripts() {
     try {
@@ -53,19 +49,8 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
     }
   }
 
-  async function loadProcesses(): Promise<void> {
-    try {
-      const data = await api.get<{ processes: RunningProcess[]; runningCount: number }>(`/api/projects/${projectId}/scripts/processes`);
-      const all = data.processes || [];
-      setRunningProcesses(all.filter((p: RunningProcess) => p.status === 'running'));
-      setExitedProcesses(all.filter((p: RunningProcess) => p.status === 'exited'));
-    } catch (err) {
-      console.error('[ScriptList] Failed to load processes:', err);
-    }
-  }
-
   function handleRefresh() {
-    loadAll();
+    loadScripts();
   }
 
   const handleDismiss = useCallback((scriptId: string) => {
@@ -81,7 +66,6 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
     try {
       await api.delete(`/api/projects/${projectId}/scripts/${scriptId}`);
       setScripts(scripts.filter(s => s.id !== scriptId));
-      loadProcesses();
     } catch (err) {
       console.error('Failed to delete script:', err);
     }

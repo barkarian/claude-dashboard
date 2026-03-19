@@ -86,9 +86,23 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
+router.get('/:id/directory-exists', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const exists = projectManager.projectDirectoryExists(req.params.id);
+    res.json({ exists });
+  } catch (err: any) {
+    if (err.message === 'Project not found') {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    console.error('Error checking directory:', err);
+    res.status(500).json({ error: 'Failed to check directory' });
+  }
+});
+
 router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    await projectManager.deleteProject(req.params.id);
+    const deleteFolder = req.body?.deleteFolder !== false;
+    await projectManager.deleteProject(req.params.id, deleteFolder);
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting project:', err);

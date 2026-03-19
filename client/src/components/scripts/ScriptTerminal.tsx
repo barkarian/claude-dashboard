@@ -1,11 +1,11 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useTerminal } from '../../hooks/useTerminal.ts';
+import { useProcessStatus } from '../../hooks/useProcessStatus.ts';
 import TerminalInputBar from './TerminalInputBar.tsx';
 import api from '../../utils/api.ts';
-import type { RunningProcess } from '../../../../shared/types/models.ts';
 
 interface ScriptTerminalProps {
   projectId: string;
@@ -17,8 +17,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const { socket } = useSocket();
   const { isDesktop } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [detectedPorts, setDetectedPorts] = useState<number[]>([]);
-  const [tunnelUrls, setTunnelUrls] = useState<Record<number, string>>({});
+  const { processes } = useProcessStatus(projectId);
 
   const { status } = useTerminal(containerRef, {
     socket,
@@ -29,29 +28,10 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const isShell = scriptId?.startsWith('shell-') ?? false;
   const isRunning = status === 'running' || status === 'connected';
 
-  // Poll for detected ports every 5s
-  useEffect(() => {
-    if (!isRunning) return;
-
-    async function pollPorts() {
-      try {
-        const data = await api.get<{ processes: RunningProcess[] }>(
-          `/api/projects/${projectId}/scripts/processes`
-        );
-        const proc = (data.processes || []).find(p => p.scriptId === scriptId);
-        if (proc?.detectedPorts?.length) {
-          setDetectedPorts(proc.detectedPorts);
-          setTunnelUrls(proc.tunnelUrls || {});
-        }
-      } catch {
-        // ignore polling errors
-      }
-    }
-
-    pollPorts();
-    const interval = setInterval(pollPorts, 5000);
-    return () => clearInterval(interval);
-  }, [projectId, scriptId, isRunning]);
+  // Get port info from process status push
+  const currentProcess = processes.find(p => p.scriptId === scriptId);
+  const detectedPorts = currentProcess?.detectedPorts || [];
+  const tunnelUrls = currentProcess?.tunnelUrls || {};
 
   const handleInputSend = useCallback((data: string) => {
     if (socket && scriptId) {

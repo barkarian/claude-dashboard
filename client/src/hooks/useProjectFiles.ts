@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext.tsx';
 
-interface FilesChangedEvent {
-  projectId: string;
-  event: 'add' | 'change' | 'unlink';
+interface BatchChange {
+  event: string;
   path: string;
 }
 
@@ -26,23 +25,34 @@ export function useProjectFiles(projectId: string) {
       setLoading(false);
     }
 
-    function handleFilesChanged({ event, path: filePath }: FilesChangedEvent) {
+    function handleBatchChanged({ changes }: { projectId: string; changes: BatchChange[] }) {
       setFiles((prev) => {
-        if (event === 'add') {
-          // Only add if not already present
-          if (prev.includes(filePath)) return prev;
-          return [...prev, filePath].sort();
+        let next = prev;
+        let changed = false;
+        for (const { event, path: filePath } of changes) {
+          if (event === 'add' && !next.includes(filePath)) {
+            next = changed ? next : [...next];
+            next.push(filePath);
+            changed = true;
+          } else if (event === 'unlink') {
+            const filtered = next.filter(f => f !== filePath);
+            if (filtered.length !== next.length) {
+              next = filtered;
+              changed = true;
+            }
+          }
         }
-        if (event === 'unlink') {
-          return prev.filter((f) => f !== filePath);
-        }
-        // 'change' — content changed, file list unchanged
-        return prev;
+        return changed ? next.sort() : prev;
       });
     }
 
+    function handleRefresh() {
+      socket!.emit('files:list', { projectId });
+    }
+
     socket.on('files:list', handleFileList);
-    socket.on('files:changed', handleFilesChanged);
+    socket.on('files:changed-batch', handleBatchChanged);
+    socket.on('files:refresh', handleRefresh);
 
     // Initial fetch and start watching
     socket.emit('files:list', { projectId });
@@ -50,7 +60,8 @@ export function useProjectFiles(projectId: string) {
 
     return () => {
       socket.off('files:list', handleFileList);
-      socket.off('files:changed', handleFilesChanged);
+      socket.off('files:changed-batch', handleBatchChanged);
+      socket.off('files:refresh', handleRefresh);
       socket.emit('files:watch-stop', { projectId });
     };
   }, [socket, projectId]);

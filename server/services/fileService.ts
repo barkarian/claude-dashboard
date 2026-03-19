@@ -103,6 +103,40 @@ async function getFileContent(projectPath: string, relativePath: string): Promis
   return fs.readFile(fullPath, 'utf-8');
 }
 
+// Batched file event state
+const eventBatches = new Map<string, Array<{ event: string; path: string }>>();
+const batchTimers = new Map<string, NodeJS.Timeout>();
+
+function queueFileEvent(projectId: string, projectPath: string, io: SocketIOServer, event: string, filePath: string): void {
+  if (event === 'add' || event === 'unlink') {
+    fileCache.delete(projectPath);
+  }
+
+  const relativePath = path.relative(projectPath, filePath);
+  if (!eventBatches.has(projectId)) {
+    eventBatches.set(projectId, []);
+  }
+  eventBatches.get(projectId)!.push({ event, path: relativePath });
+
+  // Reset debounce timer (500ms quiet period)
+  if (batchTimers.has(projectId)) {
+    clearTimeout(batchTimers.get(projectId));
+  }
+
+  batchTimers.set(projectId, setTimeout(() => {
+    const batch = eventBatches.get(projectId) || [];
+    eventBatches.delete(projectId);
+    batchTimers.delete(projectId);
+
+    const room = `project:${projectId}`;
+    if (batch.length > 20) {
+      io.to(room).emit('files:refresh', { projectId });
+    } else {
+      io.to(room).emit('files:changed-batch', { projectId, changes: batch });
+    }
+  }, 500));
+}
+
 function startWatching(projectPath: string, projectId: string, io: SocketIOServer): void {
   if (watchers.has(projectId)) return;
 
@@ -121,23 +155,16 @@ function startWatching(projectPath: string, projectId: string, io: SocketIOServe
     },
   });
 
-  const room = `project:${projectId}`;
-
   watcher.on('add', (filePath: string) => {
-    fileCache.delete(projectPath);
-    const relativePath = path.relative(projectPath, filePath);
-    io.to(room).emit('files:changed', { projectId, event: 'add', path: relativePath });
+    queueFileEvent(projectId, projectPath, io, 'add', filePath);
   });
 
   watcher.on('change', (filePath: string) => {
-    const relativePath = path.relative(projectPath, filePath);
-    io.to(room).emit('files:changed', { projectId, event: 'change', path: relativePath });
+    queueFileEvent(projectId, projectPath, io, 'change', filePath);
   });
 
   watcher.on('unlink', (filePath: string) => {
-    fileCache.delete(projectPath);
-    const relativePath = path.relative(projectPath, filePath);
-    io.to(room).emit('files:changed', { projectId, event: 'unlink', path: relativePath });
+    queueFileEvent(projectId, projectPath, io, 'unlink', filePath);
   });
 
   watchers.set(projectId, watcher);

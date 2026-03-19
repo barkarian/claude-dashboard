@@ -108,6 +108,17 @@ export default function registerTerminalEvents(socket: Socket, io: SocketIOServe
     socket.leave(room);
   });
 
+  socket.on('processes:list', async ({ projectId }: { projectId: string }) => {
+    socket.join(`project:${projectId}`);
+    try {
+      const processes = await processManager.getProcessesList(projectId);
+      const runningCount = processes.filter(p => p.status === 'running').length;
+      socket.emit('processes:updated', { projectId, processes, runningCount });
+    } catch (err: any) {
+      console.error('processes:list error:', err);
+    }
+  });
+
   socket.on('browser-monitor:enable', ({ port }: { port: number }) => {
     enableBrowserMonitor(port);
   });

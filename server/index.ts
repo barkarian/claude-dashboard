@@ -158,6 +158,7 @@ app.use('/api', apiRouter);
 // Socket.IO setup — env-prefixed path
 const io = new SocketIOServer(server, {
   path: `/${env}/socket.io`,
+  perMessageDeflate: true,
   cors: {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
