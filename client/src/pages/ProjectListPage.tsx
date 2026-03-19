@@ -18,19 +18,19 @@ const swarmHintStyle = `
 }
 
 @keyframes swarmEdgeTop {
-  0%   { transform: scaleX(0) translateY(0); opacity: 0; height: 2px; }
-  25%  { transform: scaleX(0.4) translateY(-8px); opacity: 0.9; height: 6px; }
-  50%  { transform: scaleX(0.75) translateY(-4px); opacity: 0.6; height: 4px; }
-  75%  { transform: scaleX(1) translateY(-1px); opacity: 0.3; height: 2px; }
-  100% { transform: scaleX(1) translateY(0); opacity: 0; height: 1px; }
+  0%   { transform: scaleX(0) scaleY(1) translateY(0); opacity: 0; }
+  25%  { transform: scaleX(0.4) scaleY(3) translateY(-6px); opacity: 0.9; }
+  50%  { transform: scaleX(0.75) scaleY(2) translateY(-3px); opacity: 0.6; }
+  75%  { transform: scaleX(1) scaleY(1) translateY(-1px); opacity: 0.3; }
+  100% { transform: scaleX(1) scaleY(1) translateY(0); opacity: 0; }
 }
 
 @keyframes swarmEdgeBottom {
-  0%   { transform: scaleX(0) translateY(0); opacity: 0; height: 2px; }
-  25%  { transform: scaleX(0.35) translateY(8px); opacity: 0.9; height: 6px; }
-  50%  { transform: scaleX(0.7) translateY(4px); opacity: 0.6; height: 4px; }
-  75%  { transform: scaleX(1) translateY(1px); opacity: 0.3; height: 2px; }
-  100% { transform: scaleX(1) translateY(0); opacity: 0; height: 1px; }
+  0%   { transform: scaleX(0) scaleY(1) translateY(0); opacity: 0; }
+  25%  { transform: scaleX(0.35) scaleY(3) translateY(6px); opacity: 0.9; }
+  50%  { transform: scaleX(0.7) scaleY(2) translateY(3px); opacity: 0.6; }
+  75%  { transform: scaleX(1) scaleY(1) translateY(1px); opacity: 0.3; }
+  100% { transform: scaleX(1) scaleY(1) translateY(0); opacity: 0; }
 }
 
 @keyframes arrowBounce {
@@ -41,7 +41,7 @@ const swarmHintStyle = `
 
 .swarm-hint {
   position: relative;
-  animation: swarmFadeIn 0.5s ease-out both;
+  animation: swarmFadeIn 0.4s ease-out both;
 }
 
 .swarm-hint::before,
@@ -50,20 +50,22 @@ const swarmHintStyle = `
   position: absolute;
   left: 0;
   right: 0;
+  height: 2px;
   border-radius: 2px;
   background: linear-gradient(90deg, #a78bfa, #60a5fa 60%, transparent);
   transform-origin: left center;
   pointer-events: none;
+  will-change: transform, opacity;
 }
 
 .swarm-hint::before {
   top: 0;
-  animation: swarmEdgeTop 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  animation: swarmEdgeTop 0.9s ease-out 0.1s both;
 }
 
 .swarm-hint::after {
   bottom: 0;
-  animation: swarmEdgeBottom 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+  animation: swarmEdgeBottom 0.9s ease-out 0.15s both;
 }
 `;
 
