@@ -55,6 +55,37 @@ function listProjectsPaginated(limit: number = 20, offset: number = 0): { projec
   return { projects, total };
 }
 
+function searchProjectsPaginated(search: string, limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
+  const pattern = `%${search}%`;
+
+  const { total } = db.prepare(
+    'SELECT COUNT(*) as total FROM projects WHERE name LIKE ? OR path LIKE ?'
+  ).get(pattern, pattern) as any;
+
+  const rows = db.prepare(`
+    SELECT
+      p.id, p.name, p.path, p.repo, p.created_at,
+      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
+      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+    FROM projects p
+    WHERE p.name LIKE ? OR p.path LIKE ?
+    ORDER BY p.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(pattern, pattern, limit, offset) as any[];
+
+  const projects = rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    repo: r.repo || null,
+    createdAt: r.created_at,
+    scriptsCount: r.scriptsCount,
+    chatsCount: r.chatsCount,
+  }));
+
+  return { projects, total };
+}
+
 function getProject(projectId: string): Project | null {
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
   if (!row) return null;
@@ -336,6 +367,7 @@ export default {
   // Projects
   listProjects,
   listProjectsPaginated,
+  searchProjectsPaginated,
   getProject,
   createProject,
   registerProject,

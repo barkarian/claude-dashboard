@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { Button } from '../components/ui/button.tsx';
+import TruncatedPath from '../components/ui/truncated-path.tsx';
 import Header from '../components/layout/Header.tsx';
 
 interface MigrationProject {
@@ -216,7 +217,7 @@ export default function MigrationPage() {
                         />
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-text truncate">{project.name}</div>
-                          <div className="text-xs text-text-dim truncate">{project.path}</div>
+                          <TruncatedPath path={project.path} />
                         </div>
                         <div className="text-right flex-shrink-0">
                           <div className="text-sm text-text-muted">{formatBytes(project.size)}</div>

@@ -16,6 +16,7 @@ import settingsRoutes from './routes/settings.ts';
 import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
 import devicesRoutes from './routes/devices.ts';
+import filesystemRoutes from './routes/filesystem.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
@@ -148,6 +149,7 @@ apiRouter.use('/', settingsRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/migrate', migrateRoutes);
 apiRouter.use('/devices', devicesRoutes);
+apiRouter.use('/filesystem', filesystemRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);

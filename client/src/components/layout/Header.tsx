@@ -1,6 +1,7 @@
 import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSidebar } from '../ui/sidebar.tsx';
+import TruncatedPath from '../ui/truncated-path.tsx';
 
 interface HeaderProps {
   // Simple mode
@@ -9,6 +10,7 @@ interface HeaderProps {
   actions?: ReactNode;
   // Project mode
   projectName?: string;
+  projectPath?: string;
   chatName?: string;
   chatId?: string;
   projectId?: string;
@@ -25,6 +27,7 @@ export default function Header({
   backTo,
   actions,
   projectName,
+  projectPath,
   chatName,
   chatId,
   projectId,
@@ -100,17 +103,20 @@ export default function Header({
     <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
       {/* Row 1: Back to projects | Project Name | New Chat */}
       <div className="flex items-center justify-between h-12 px-4">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 min-w-0 flex-1">
           <button
             onClick={toggleSidebar}
-            className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
+            className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors flex-shrink-0"
             aria-label="Open menu"
           >
             <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <h2 className="text-sm font-semibold truncate">{projectName}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold truncate leading-tight">{projectName}</h2>
+            {projectPath && <TruncatedPath path={projectPath} />}
+          </div>
         </div>
 
         {onNewChat ? (

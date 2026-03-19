@@ -27,6 +27,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingAutoSendRef = useRef<string | null>(null);
 
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
 
@@ -59,13 +60,28 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
 
   // Prefill from navigation state (e.g. Send to Chat from scripts)
   useEffect(() => {
-    const prefill = (location.state as { prefillContent?: string } | null)?.prefillContent;
+    const state = location.state as { prefillContent?: string; autoSend?: boolean } | null;
+    const prefill = state?.prefillContent;
     if (prefill) {
-      setValue(prefill);
+      if (state?.autoSend) {
+        // Store for auto-send once session is ready
+        pendingAutoSendRef.current = prefill;
+      } else {
+        setValue(prefill);
+      }
       // Clear the state so it doesn't re-prefill on re-renders
       window.history.replaceState({}, '');
     }
   }, []);
+
+  // Auto-send: when status transitions to idle and we have pending content, send it
+  useEffect(() => {
+    if (status === 'idle' && pendingAutoSendRef.current) {
+      const msg = pendingAutoSendRef.current;
+      pendingAutoSendRef.current = null;
+      onSend(msg);
+    }
+  }, [status, onSend]);
 
   const isStreaming = status === 'streaming' || status === 'tool-use' || status === 'waiting-permission';
   const disabled = status === 'disconnected' || status === 'exited' || status === 'error';

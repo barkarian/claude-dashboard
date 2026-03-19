@@ -6,13 +6,14 @@ import { ProjectProvider } from './context/ProjectContext.tsx';
 import { AppSidebarContext } from './context/SidebarContext.tsx';
 import { SidebarProvider, useSidebar } from './components/ui/sidebar.tsx';
 import ProjectListPage from './pages/ProjectListPage.tsx';
-import NewProjectPage from './pages/NewProjectPage.tsx';
 import ProjectDashboardPage from './pages/ProjectDashboardPage.tsx';
 import SettingsPage from './pages/SettingsPage.tsx';
 import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
 import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
+import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
+import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -139,21 +140,23 @@ export default function App() {
           <ProjectProvider>
             <SidebarProvider>
               <AppSidebarContext.Provider value={{ refreshProjects }}>
-                <SwipeHandler />
-                <div className="app-layout flex w-full overflow-hidden">
-                  <AppSidebar ref={sidebarRef} />
-                  <main className="flex-1 flex flex-col overflow-hidden">
-                    <Routes>
-                      <Route path="/" element={<ProjectListPage />} />
-                      <Route path="/new" element={<NewProjectPage />} />
-                      <Route path="/settings" element={<SettingsPage />} />
-                      <Route path="/billing/success" element={<BillingSuccessPage />} />
-                      <Route path="/billing/cancel" element={<BillingCancelPage />} />
-                      <Route path="/migrate" element={<MigrationPage />} />
-                      <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
-                    </Routes>
-                  </main>
-                </div>
+                <NewProjectDrawerProvider>
+                  <SwipeHandler />
+                  <div className="app-layout flex w-full overflow-hidden">
+                    <AppSidebar ref={sidebarRef} />
+                    <main className="flex-1 flex flex-col overflow-hidden">
+                      <Routes>
+                        <Route path="/" element={<ProjectListPage />} />
+                        <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/billing/success" element={<BillingSuccessPage />} />
+                        <Route path="/billing/cancel" element={<BillingCancelPage />} />
+                        <Route path="/migrate" element={<MigrationPage />} />
+                        <Route path="/project/:id/*" element={<ProjectDashboardPage />} />
+                      </Routes>
+                    </main>
+                  </div>
+                  <NewProjectDrawer />
+                </NewProjectDrawerProvider>
               </AppSidebarContext.Provider>
             </SidebarProvider>
           </ProjectProvider>

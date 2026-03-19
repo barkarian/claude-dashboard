@@ -10,8 +10,12 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 0;
     const offset = parseInt(req.query.offset as string) || 0;
+    const search = (req.query.search as string) || '';
 
-    if (limit > 0) {
+    if (search && limit > 0) {
+      const result = projectManager.searchProjectsPaginated(search, limit, offset);
+      res.json({ projects: result.projects, total: result.total });
+    } else if (limit > 0) {
       const result = projectManager.listProjectsPaginated(limit, offset);
       res.json({ projects: result.projects, total: result.total });
     } else {

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../ui/card.tsx';
+import TruncatedPath from '../ui/truncated-path.tsx';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 
 interface ProjectCardProps {
@@ -23,7 +24,7 @@ export default function ProjectCard({ project }: ProjectCardProps) {
           <h3 className="font-semibold text-text group-hover:text-primary transition-colors truncate">
             {project.name}
           </h3>
-          <p className="text-xs text-text-dim font-mono mt-0.5 truncate">{project.path}</p>
+          {project.path && <TruncatedPath path={project.path} className="mt-0.5" />}
           <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
             <span>{project.scriptsCount || 0} scripts</span>
             <span className="text-border">·</span>

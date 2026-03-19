@@ -180,6 +180,7 @@ export default function ProjectDashboardPage() {
       <Toaster />
       <Header
         projectName={project?.name || id || '...'}
+        projectPath={project?.path}
         projectId={id}
         chatName={activeChat?.label || (activeChatId ? 'New Chat' : undefined)}
         chatId={activeChatId || undefined}
