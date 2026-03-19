@@ -11,7 +11,7 @@ import ScriptList from '../components/scripts/ScriptList.tsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
-import DiffOverview from '../components/diff/DiffOverview.tsx';
+import FilesPage from '../components/files/FilesPage.tsx';
 import api from '../utils/api.ts';
 import type { Chat, RunningProcess } from '../../../shared/types/models.ts';
 
@@ -223,9 +223,9 @@ export default function ProjectDashboardPage() {
             </div>
           } />
           <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
-          <Route path="diff" element={
+          <Route path="files" element={
             <div className="flex-1 flex flex-col overflow-hidden">
-              <DiffOverview projectId={id!} />
+              <FilesPage projectId={id!} />
             </div>
           } />
         </Routes>

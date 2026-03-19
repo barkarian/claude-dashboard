@@ -67,7 +67,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center py-12">
+      <div className="flex-1 flex justify-center pt-12">
         <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
       </div>
     );
@@ -77,7 +77,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
 
   if (files.length === 0) {
     return (
-      <div className="flex-1 text-center py-12">
+      <div className="flex-1 text-center pt-12">
         <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>

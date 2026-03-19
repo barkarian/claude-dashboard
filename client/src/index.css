@@ -87,36 +87,19 @@ body::before {
   border-radius: 3px;
 }
 
-/* diff2html dark theme overrides */
-.d2h-wrapper {
-  background: #1a1d27 !important;
+/* Custom diff viewer */
+.diff-viewer table {
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.d2h-file-header {
-  background: #22253a !important;
-  color: #e2e8f0 !important;
-  border-color: #2a2d3a !important;
+.diff-viewer td.diff-ln {
+  font-size: 0.7rem;
+  line-height: 1.25rem;
+  vertical-align: top;
 }
 
-.d2h-code-line {
-  color: #e2e8f0 !important;
-}
-
-.d2h-code-linenumber {
-  color: #64748b !important;
-  background: #1a1d27 !important;
-  border-color: #2a2d3a !important;
-}
-
-.d2h-del {
-  background: rgba(239, 68, 68, 0.15) !important;
-}
-
-.d2h-ins {
-  background: rgba(34, 197, 94, 0.15) !important;
-}
-
-.d2h-info {
-  background: #22253a !important;
-  color: #94a3b8 !important;
+.diff-viewer td {
+  padding-top: 1px;
+  padding-bottom: 1px;
 }
