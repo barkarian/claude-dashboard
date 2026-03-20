@@ -1,6 +1,7 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs.tsx';
 import DiffOverview from '../diff/DiffOverview.tsx';
 import FolderBrowser from './FolderBrowser.tsx';
+import GitPanel from '../git/GitPanel.tsx';
 
 interface FilesPageProps {
   projectId: string;
@@ -13,6 +14,7 @@ export default function FilesPage({ projectId }: FilesPageProps) {
         <TabsList>
           <TabsTrigger value="folder">Folder</TabsTrigger>
           <TabsTrigger value="changes">Changes</TabsTrigger>
+          <TabsTrigger value="git">Git</TabsTrigger>
         </TabsList>
       </div>
 
@@ -30,6 +32,14 @@ export default function FilesPage({ projectId }: FilesPageProps) {
         className="flex-1 flex flex-col overflow-hidden min-h-0 data-[state=inactive]:hidden"
       >
         <DiffOverview projectId={projectId} />
+      </TabsContent>
+
+      <TabsContent
+        value="git"
+        forceMount
+        className="flex-1 flex flex-col overflow-hidden min-h-0 data-[state=inactive]:hidden"
+      >
+        <GitPanel projectId={projectId} />
       </TabsContent>
     </Tabs>
   );

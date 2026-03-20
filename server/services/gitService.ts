@@ -1,7 +1,7 @@
-import simpleGit from 'simple-git';
+import simpleGit, { CheckRepoActions } from 'simple-git';
 import fs from 'fs/promises';
 import path from 'path';
-import type { DiffResult, DiffFile } from '../../shared/types/models.ts';
+import type { DiffResult, DiffFile, GitRemote, GitLogEntry } from '../../shared/types/models.ts';
 
 async function clone(repoUrl: string, targetPath: string): Promise<void> {
   const git = simpleGit();
@@ -131,6 +131,45 @@ async function getStatus(projectPath: string): Promise<StatusFile[]> {
   return files;
 }
 
+async function checkIsRepo(targetPath: string): Promise<boolean> {
+  const git = simpleGit(targetPath);
+  return git.checkIsRepo(CheckRepoActions.IS_REPO_ROOT);
+}
+
+async function getRemotes(targetPath: string): Promise<GitRemote[]> {
+  const git = simpleGit(targetPath);
+  const remotes = await git.getRemotes(true);
+  return remotes.map((r) => ({ name: r.name, url: r.refs.fetch || r.refs.push || '' }));
+}
+
+async function addRemote(targetPath: string, name: string, url: string): Promise<void> {
+  const git = simpleGit(targetPath);
+  await git.addRemote(name, url);
+}
+
+async function getLog(targetPath: string, maxCount = 20): Promise<GitLogEntry[]> {
+  const git = simpleGit(targetPath);
+  try {
+    const log = await git.log({ maxCount });
+    return log.all.map((entry) => ({
+      hash: entry.hash,
+      shortHash: entry.hash.slice(0, 7),
+      message: entry.message,
+      author: entry.author_name,
+      date: entry.date,
+    }));
+  } catch {
+    // Empty repo with no commits
+    return [];
+  }
+}
+
+async function getCurrentBranch(targetPath: string): Promise<string | null> {
+  const git = simpleGit(targetPath);
+  const status = await git.status();
+  return status.current;
+}
+
 export default {
   clone,
   init,
@@ -139,4 +178,9 @@ export default {
   revertAll,
   commitAll,
   getStatus,
+  checkIsRepo,
+  getRemotes,
+  addRemote,
+  getLog,
+  getCurrentBranch,
 };

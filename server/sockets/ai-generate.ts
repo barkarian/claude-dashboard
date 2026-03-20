@@ -15,6 +15,11 @@ interface AIGenerateScriptsPayload {
   description?: string;
 }
 
+interface AIGenerateCommitMessagePayload {
+  sessionId: string;
+  projectId: string;
+}
+
 interface AICancelPayload {
   sessionId: string;
 }
@@ -40,6 +45,18 @@ export default function registerAIGenerateEvents(socket: Socket, io: SocketIOSer
 
       const projectPath = projectManager.getProjectPath(projectId);
       aiGenerator.generateScripts(sessionId, projectPath, mode, description, socket.id, io);
+    } catch (err: any) {
+      socket.emit('ai:error', { sessionId, error: err.message });
+    }
+  });
+
+  socket.on('ai:generate-commit-message', async ({ sessionId, projectId }: AIGenerateCommitMessagePayload) => {
+    try {
+      const room = `ai:${sessionId}`;
+      socket.join(room);
+
+      const projectPath = projectManager.getProjectPath(projectId);
+      aiGenerator.generateCommitMessage(sessionId, projectPath, socket.id, io);
     } catch (err: any) {
       socket.emit('ai:error', { sessionId, error: err.message });
     }

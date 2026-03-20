@@ -164,6 +164,54 @@ router.post('/:id/commit', async (req: Request<{ id: string }>, res: Response) =
   }
 });
 
+// Git info (bundled)
+router.get('/:id/git-info', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const isRepo = await gitService.checkIsRepo(projectPath);
+    if (!isRepo) {
+      return res.json({ isRepo: false, branch: null, remotes: [], log: [] });
+    }
+    const [branch, remotes, log] = await Promise.all([
+      gitService.getCurrentBranch(projectPath),
+      gitService.getRemotes(projectPath),
+      gitService.getLog(projectPath),
+    ]);
+    res.json({ isRepo, branch, remotes, log });
+  } catch (err) {
+    console.error('Error getting git info:', err);
+    res.status(500).json({ error: 'Failed to get git info' });
+  }
+});
+
+// Git init
+router.post('/:id/git-init', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    await gitService.init(projectPath);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error initializing git:', err);
+    res.status(500).json({ error: 'Failed to initialize git' });
+  }
+});
+
+// Git remote add
+router.post('/:id/git-remote', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const { name, url } = req.body;
+    if (!name || !url) {
+      return res.status(400).json({ error: 'name and url are required' });
+    }
+    await gitService.addRemote(projectPath, name, url);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error adding remote:', err);
+    res.status(500).json({ error: 'Failed to add remote' });
+  }
+});
+
 // Chat endpoints
 router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => {
   try {

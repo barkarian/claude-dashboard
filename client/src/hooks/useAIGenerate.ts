@@ -16,7 +16,7 @@ interface AIPartialPayload {
 
 interface AIResultPayload {
   sessionId: string;
-  type: 'command' | 'scripts';
+  type: 'command' | 'scripts' | 'commit-message';
   result: any;
 }
 
@@ -34,6 +34,7 @@ interface UseAIGenerateReturn {
   error: string | null;
   generateCommand: (projectId: string, description: string) => void;
   generateScripts: (projectId: string, mode: 'auto-detect' | 'describe', description?: string) => void;
+  generateCommitMessage: (projectId: string) => void;
   cancel: () => void;
   reset: () => void;
 }
@@ -131,6 +132,22 @@ export function useAIGenerate(): UseAIGenerateReturn {
     [socket, isGenerating],
   );
 
+  const generateCommitMessage = useCallback(
+    (projectId: string) => {
+      if (!socket || isGenerating) return;
+      const sessionId = `commit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      sessionIdRef.current = sessionId;
+      setIsGenerating(true);
+      setStatus('analyzing');
+      setStep('Starting...');
+      setPartialText('');
+      setResult(null);
+      setError(null);
+      socket.emit('ai:generate-commit-message', { sessionId, projectId });
+    },
+    [socket, isGenerating],
+  );
+
   const cancel = useCallback(() => {
     if (!socket || !sessionIdRef.current) return;
     socket.emit('ai:cancel', { sessionId: sessionIdRef.current });
@@ -161,6 +178,7 @@ export function useAIGenerate(): UseAIGenerateReturn {
     error,
     generateCommand,
     generateScripts,
+    generateCommitMessage,
     cancel,
     reset,
   };

@@ -83,3 +83,25 @@ export interface RunningProcess {
   detectedPorts?: number[];
   tunnelUrls?: Record<number, string>;
 }
+
+// === Git Models ===
+
+export interface GitRemote {
+  name: string;
+  url: string;
+}
+
+export interface GitLogEntry {
+  hash: string;
+  shortHash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface GitInfo {
+  isRepo: boolean;
+  branch: string | null;
+  remotes: GitRemote[];
+  log: GitLogEntry[];
+}

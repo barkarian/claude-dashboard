@@ -10,10 +10,11 @@ interface SendToChatDialogProps {
   projectId: string;
   content: string;
   contentLabel: string;
+  rawContent?: boolean;
   onClose: () => void;
 }
 
-export default function SendToChatDialog({ projectId, content, contentLabel, onClose }: SendToChatDialogProps) {
+export default function SendToChatDialog({ projectId, content, contentLabel, rawContent, onClose }: SendToChatDialogProps) {
   const navigate = useNavigate();
   const [chats, setChats] = useState<Chat[]>([]);
   const [search, setSearch] = useState('');
@@ -22,7 +23,7 @@ export default function SendToChatDialog({ projectId, content, contentLabel, onC
   const inputRef = useRef<HTMLInputElement>(null);
   const fuseRef = useRef<Fuse<Chat> | null>(null);
 
-  const formattedContent = `[Terminal Output: ${contentLabel}]\n\`\`\`\n${content}\n\`\`\``;
+  const formattedContent = rawContent ? content : `[Terminal Output: ${contentLabel}]\n\`\`\`\n${content}\n\`\`\``;
 
   useEffect(() => {
     inputRef.current?.focus();

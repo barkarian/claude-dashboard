@@ -54,6 +54,20 @@ RULES:
 - Format: [{"label": "...", "command": "...", "autostart": false}]
 - Do NOT wrap in markdown code blocks`;
 
+const COMMIT_MESSAGE_SYSTEM_PROMPT = `You are a git commit message expert. Analyze the current changes in the repository and write a concise, meaningful commit message.
+
+MANDATORY STEPS:
+1. Run \`git diff\` via the Bash tool to see unstaged changes
+2. Run \`git diff --cached\` via the Bash tool to see staged changes
+3. Run \`git status\` via the Bash tool to see the overall state
+
+RULES:
+- Write a conventional commit message (e.g. "feat: add user auth", "fix: resolve null pointer in parser")
+- First line should be under 72 characters
+- If the changes are significant, add a blank line then a brief body
+- Respond with ONLY the commit message — no explanation, no markdown, no backticks
+- If there are no changes, respond with "No changes to commit"`;
+
 // ─── Generation Functions ────────────────────────────────────────
 
 async function generateCommand(
@@ -274,6 +288,93 @@ async function generateScripts(
   }
 }
 
+async function generateCommitMessage(
+  sessionId: string,
+  projectPath: string,
+  socketId: string,
+  io: SocketIOServer,
+): Promise<void> {
+  const abortController = new AbortController();
+  const session: AIGenSession = { id: sessionId, abortController, io, socketId };
+  sessions.set(sessionId, session);
+
+  const room = `ai:${sessionId}`;
+
+  try {
+    io.to(room).emit('ai:status', { sessionId, status: 'analyzing', step: 'Analyzing changes...' });
+
+    const stream = query({
+      prompt: 'Analyze the current git changes and generate a commit message.',
+      options: {
+        cwd: projectPath,
+        allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+        abortController,
+        includePartialMessages: true,
+        canUseTool: async (toolName, toolInput) => {
+          if (toolName === 'Bash') {
+            io.to(room).emit('ai:status', { sessionId, status: 'reading', step: 'Running git commands...' });
+          } else if (toolName === 'Read') {
+            const filePath = String((toolInput as any).file_path || '');
+            const fileName = filePath.split('/').pop() || filePath;
+            io.to(room).emit('ai:status', { sessionId, status: 'reading', step: `Reading ${fileName}...` });
+          } else if (toolName === 'Glob') {
+            io.to(room).emit('ai:status', { sessionId, status: 'reading', step: 'Scanning project...' });
+          }
+          return { behavior: 'allow' as const, updatedInput: {} };
+        },
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: `\n\n${COMMIT_MESSAGE_SYSTEM_PROMPT}\n\nProject root: ${projectPath}`,
+        },
+        stderr: () => {},
+      },
+    });
+
+    let fullText = '';
+
+    for await (const event of stream) {
+      if (abortController.signal.aborted) break;
+
+      if (event.type === 'stream_event') {
+        const rawEvent = (event as any).event;
+        if (!rawEvent) continue;
+
+        if (rawEvent.type === 'content_block_delta') {
+          const delta = rawEvent.delta;
+          if (delta?.type === 'text_delta' && delta.text) {
+            fullText += delta.text;
+            io.to(room).emit('ai:partial', { sessionId, text: fullText });
+          }
+        }
+      }
+
+      if (event.type === 'assistant') {
+        const msg = (event as any).message;
+        if (msg?.content) {
+          for (const block of msg.content) {
+            if (block.type === 'text' && block.text) {
+              fullText = block.text;
+            }
+          }
+        }
+      }
+    }
+
+    // Clean the result
+    let message = fullText.trim();
+    message = message.replace(/^```[a-z]*\n?/g, '').replace(/\n?```$/g, '').trim();
+
+    io.to(room).emit('ai:result', { sessionId, type: 'commit-message', result: message });
+  } catch (err: any) {
+    if (err.name !== 'AbortError' && !abortController.signal.aborted) {
+      io.to(room).emit('ai:error', { sessionId, error: err.message || 'Generation failed' });
+    }
+  } finally {
+    sessions.delete(sessionId);
+  }
+}
+
 function cancel(sessionId: string): void {
   const session = sessions.get(sessionId);
   if (!session) return;
@@ -287,4 +388,4 @@ function cancelAll(): void {
   }
 }
 
-export default { generateCommand, generateScripts, cancel, cancelAll };
+export default { generateCommand, generateScripts, generateCommitMessage, cancel, cancelAll };
