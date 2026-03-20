@@ -62,7 +62,7 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
   const startTime = new Date(process.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <Card className="hover:border-border-light transition-all">
+    <Card className="hover-hover:border-border-light transition-all">
       <div className="flex items-center gap-3">
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColor[process.status] || 'bg-text-dim'} ${process.status === 'running' ? 'animate-pulse' : ''}`} />
 

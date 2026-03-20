@@ -242,6 +242,41 @@ router.post('/:id/git-push', async (req: Request<{ id: string }>, res: Response)
   }
 });
 
+// Git branches
+router.get('/:id/git-branches', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const branches = await gitService.listBranches(projectPath);
+    res.json(branches);
+  } catch (err) {
+    console.error('Error listing branches:', err);
+    res.status(500).json({ error: 'Failed to list branches' });
+  }
+});
+
+// Git checkout
+router.post('/:id/git-checkout', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const { branch, force } = req.body;
+    if (!branch) {
+      return res.status(400).json({ error: 'branch is required' });
+    }
+    // Check for uncommitted changes unless force is set
+    if (!force) {
+      const dirty = await gitService.hasUncommittedChanges(projectPath);
+      if (dirty) {
+        return res.status(409).json({ error: 'You have uncommitted changes. Commit or stash them before switching branches.' });
+      }
+    }
+    await gitService.checkoutBranch(projectPath, branch);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error checking out branch:', err);
+    res.status(500).json({ error: err.message || 'Failed to checkout branch' });
+  }
+});
+
 // Search GitHub repos (requires gh CLI or GITHUB_TOKEN)
 router.get('/:id/github-repos', async (req: Request<{ id: string }>, res: Response) => {
   try {

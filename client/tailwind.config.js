@@ -59,5 +59,11 @@ export default {
       },
     },
   },
-  plugins: [require('tailwindcss-animate')],
+  plugins: [
+    require('tailwindcss-animate'),
+    function({ addVariant }) {
+      addVariant('hover-hover', '@media (hover: hover) { &:hover }');
+      addVariant('group-hover-hover', '@media (hover: hover) { :merge(.group):hover & }');
+    },
+  ],
 };

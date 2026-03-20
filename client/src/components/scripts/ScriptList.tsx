@@ -133,12 +133,13 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
             Previously Run ({visibleExited.length})
           </h3>
           {visibleExited.map((proc) => (
-            <ExitedProcessCard
-              key={proc.scriptId}
-              process={proc}
-              projectId={projectId}
-              onDismiss={handleDismiss}
-            />
+            <SwipeableRow key={proc.scriptId} onDismiss={() => handleDismiss(proc.scriptId)}>
+              <ExitedProcessCard
+                process={proc}
+                projectId={projectId}
+                onDismiss={handleDismiss}
+              />
+            </SwipeableRow>
           ))}
         </>
       )}

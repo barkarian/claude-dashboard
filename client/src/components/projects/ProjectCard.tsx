@@ -14,14 +14,14 @@ export default function ProjectCard({ project }: ProjectCardProps) {
   return (
     <Card
       onClick={() => navigate(`/project/${project.id}`)}
-      className="text-left w-full hover:border-border-light transition-all group cursor-pointer"
+      className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
       role="button"
       tabIndex={0}
     >
       <div className="flex gap-3">
         <div className={`w-1 rounded-full self-stretch flex-shrink-0 ${hasRunning ? 'bg-success' : 'bg-border'}`} />
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-text group-hover:text-primary transition-colors truncate">
+          <h3 className="font-semibold text-text group-hover-hover:text-primary transition-colors truncate">
             {project.name}
           </h3>
           {project.path && <TruncatedPath path={project.path} className="mt-0.5" />}
@@ -31,7 +31,7 @@ export default function ProjectCard({ project }: ProjectCardProps) {
             <span>{project.chatsCount || 0} chats</span>
           </div>
         </div>
-        <svg className="w-5 h-5 text-text-dim group-hover:text-text-muted transition-colors flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <svg className="w-5 h-5 text-text-dim group-hover-hover:text-text-muted transition-colors flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
       </div>

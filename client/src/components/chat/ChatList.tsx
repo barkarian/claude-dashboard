@@ -174,6 +174,13 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
 
   return (
     <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3">
+      <Button onClick={handleNewChat} disabled={creating} variant="outline" className="w-full">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+        {creating ? 'Creating...' : 'New Chat'}
+      </Button>
+
       {/* Search input */}
       {showSearch && (
         <div className="relative">
@@ -288,7 +295,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
           {chats.map((chat) => (
             <SwipeableRow key={chat.id} onDelete={() => setDeleteTarget(chat)}>
             <Card
-              className="text-left w-full hover:border-border-light transition-all group cursor-pointer"
+              className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
               onClick={() => navigate(`/project/${projectId}/chats/${chat.id}`)}
               onTouchStart={(e) => { longPressChatRef.current = chat; longPressHandlers.onTouchStart(e); }}
               onTouchMove={longPressHandlers.onTouchMove}
@@ -297,7 +304,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-medium text-text group-hover:text-primary transition-colors truncate">
+                  <h4 className="font-medium text-text group-hover-hover:text-primary transition-colors truncate">
                     {chat.label}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
@@ -324,14 +331,14 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={(e) => promptDelete(chat, e)}
-                    className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-danger hover:bg-bg-hover transition-all"
+                    className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-danger hover-hover:bg-bg-hover transition-all"
                     aria-label="Delete chat"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                     </svg>
                   </button>
-                  <svg className="w-5 h-5 text-text-dim group-hover:text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="w-5 h-5 text-text-dim group-hover-hover:text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                   </svg>
                 </div>
@@ -349,13 +356,6 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
           )}
         </>
       )}
-
-      <Button onClick={handleNewChat} disabled={creating} variant="outline" className="w-full">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-        </svg>
-        {creating ? 'Creating...' : 'New Chat'}
-      </Button>
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>

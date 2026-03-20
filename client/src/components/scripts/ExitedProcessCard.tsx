@@ -34,7 +34,7 @@ export default function ExitedProcessCard({ process, projectId, onDismiss }: Exi
   const displayCommand = process.scriptId.startsWith('shell-') ? 'bash --login' : process.command;
 
   return (
-    <Card className="hover:border-border-light transition-all group cursor-pointer" onClick={() => navigate(`/project/${projectId}/scripts/${process.scriptId}`)}>
+    <Card className="hover-hover:border-border-light transition-all group cursor-pointer" onClick={() => navigate(`/project/${projectId}/scripts/${process.scriptId}`)}>
       <div className="flex items-center gap-3">
         {/* Badge */}
         <Badge variant={isSuccess ? 'success' : 'danger'} className="flex-shrink-0">
@@ -43,7 +43,7 @@ export default function ExitedProcessCard({ process, projectId, onDismiss }: Exi
 
         {/* Label + command */}
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-text group-hover:text-primary transition-colors truncate">{displayLabel}</div>
+          <div className="font-medium text-text group-hover-hover:text-primary transition-colors truncate">{displayLabel}</div>
           <div className="text-xs text-text-dim font-mono truncate">{displayCommand}</div>
         </div>
 

@@ -121,7 +121,7 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
       </div>
 
       {files.map((file) => (
-        <Card key={file.path} className="hover:border-border-light transition-all">
+        <Card key={file.path} className="hover-hover:border-border-light transition-all">
           <div className="flex items-center justify-between">
             <button
               onClick={() => setSelectedFile(file.path)}

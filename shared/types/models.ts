@@ -110,3 +110,9 @@ export interface GitInfo {
   unpushedCount: number;
   hasGithubToken: boolean;
 }
+
+export interface BranchList {
+  current: string | null;
+  local: string[];
+  remote: string[];
+}

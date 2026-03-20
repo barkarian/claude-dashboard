@@ -18,6 +18,7 @@ import { isCapacitorNative } from './utils/platform.ts';
 import { initStatusBar } from './utils/statusBar.ts';
 import { haptics } from './utils/haptics.ts';
 import { useBackButton } from './hooks/useBackButton.ts';
+import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -117,6 +118,11 @@ function SwipeHandler() {
 
     function handleTouchEnd(e: TouchEvent) {
       if (!touchRef.current) return;
+      // If a SwipeableRow is active (swiping/cancelling), skip sidebar/nav
+      if (swipeableRowActive.current) {
+        touchRef.current = null;
+        return;
+      }
       const startX = touchRef.current.startX;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;

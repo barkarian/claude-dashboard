@@ -85,7 +85,7 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
 
   return (
     <Card
-      className="hover:border-border-light transition-all"
+      className="hover-hover:border-border-light transition-all"
       onTouchStart={longPressHandlers.onTouchStart}
       onTouchMove={longPressHandlers.onTouchMove}
       onTouchEnd={longPressHandlers.onTouchEnd}

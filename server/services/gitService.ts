@@ -1,7 +1,7 @@
 import simpleGit, { CheckRepoActions } from 'simple-git';
 import fs from 'fs/promises';
 import path from 'path';
-import type { DiffResult, DiffFile, GitRemote, GitLogEntry } from '../../shared/types/models.ts';
+import type { DiffResult, DiffFile, GitRemote, GitLogEntry, BranchList } from '../../shared/types/models.ts';
 
 async function clone(repoUrl: string, targetPath: string): Promise<void> {
   const git = simpleGit();
@@ -212,6 +212,37 @@ async function push(targetPath: string): Promise<void> {
   }
 }
 
+async function listBranches(targetPath: string): Promise<BranchList> {
+  const git = simpleGit(targetPath);
+  const local = await git.branchLocal();
+  const remote = await git.branch(['-r']);
+  // Filter remote branches: remove HEAD pointers, strip 'origin/' prefix
+  const remoteNames = remote.all
+    .filter(b => !b.includes('HEAD'))
+    .map(b => b.replace(/^origin\//, ''));
+  // Only include remote branches that don't exist locally
+  const localSet = new Set(local.all);
+  const remoteOnly = remoteNames.filter(b => !localSet.has(b));
+  return { current: local.current || null, local: local.all, remote: remoteOnly };
+}
+
+async function checkoutBranch(targetPath: string, name: string): Promise<void> {
+  const git = simpleGit(targetPath);
+  const local = await git.branchLocal();
+  if (local.all.includes(name)) {
+    await git.checkout(name);
+  } else {
+    // Create local tracking branch from remote
+    await git.checkout(['-b', name, `origin/${name}`]);
+  }
+}
+
+async function hasUncommittedChanges(targetPath: string): Promise<boolean> {
+  const git = simpleGit(targetPath);
+  const status = await git.status();
+  return !status.isClean();
+}
+
 export default {
   clone,
   init,
@@ -227,4 +258,7 @@ export default {
   getCurrentBranch,
   getUnpushedCount,
   push,
+  listBranches,
+  checkoutBranch,
+  hasUncommittedChanges,
 };
