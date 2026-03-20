@@ -36,8 +36,8 @@ cd "$RESOURCES_DIR/server"
 npm install --omit=dev --ignore-scripts 2>&1 | tail -3
 # Rebuild native modules for the current platform
 echo "→ Rebuilding native modules..."
-npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3 --release 2>&1 | tail -2
-npx --yes node-gyp rebuild --directory=node_modules/node-pty --release 2>&1 | tail -2
+npm rebuild better-sqlite3 2>&1 | tail -3
+npm rebuild node-pty 2>&1 | tail -3
 cd "$DASHBOARD_DIR"
 
 # --- Copy shared/ ---
