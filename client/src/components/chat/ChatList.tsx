@@ -15,6 +15,8 @@ import { haptics } from '../../utils/haptics.ts';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
 import ContextMenu, { type ContextMenuItem } from '../ui/ContextMenu.tsx';
+import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
+import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 
 const PAGE_SIZE = 20;
@@ -29,9 +31,11 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   const navigate = useNavigate();
   const { socket } = useSocket();
   const { refreshProject } = useProject();
+  const isMobile = useIsMobile();
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -180,7 +184,14 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={(e) => {
+              if (isMobile) {
+                e.target.blur();
+                setSheetOpen(true);
+              }
+            }}
             placeholder="Search chats..."
+            readOnly={isMobile}
             className="w-full pl-9 pr-8 py-2 text-sm bg-bg-surface border border-border rounded-lg text-text placeholder:text-text-dim focus:outline-none focus:border-primary transition-colors"
           />
           {searchQuery && (
@@ -196,6 +207,65 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
           )}
         </div>
       )}
+
+      {/* Mobile search sheet */}
+      <MobileSearchSheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open);
+          if (!open && !searchQuery) setSearchQuery('');
+        }}
+        title="Search Chats"
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search chats..."
+        loading={initialLoading}
+        emptyContent={
+          chats.length === 0 && searchQuery
+            ? <div className="py-4 text-sm text-text-muted text-center">No matching chats</div>
+            : chats.length === 0
+              ? <div className="py-4 text-sm text-text-muted text-center">No chats yet</div>
+              : undefined
+        }
+      >
+        {chats.map((chat) => (
+          <button
+            key={chat.id}
+            onClick={() => {
+              setSheetOpen(false);
+              navigate(`/project/${projectId}/chats/${chat.id}`);
+            }}
+            className="w-full text-left px-3 py-2.5 rounded-lg active:bg-bg-hover transition-colors flex items-center gap-2"
+          >
+            <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+            </svg>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-text truncate">{chat.label || 'Untitled Chat'}</div>
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
+                <span>{(chat.history || []).length} messages</span>
+                <span className="text-border">&middot;</span>
+                <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
+                {sessionStatuses[chat.id] && (
+                  <>
+                    <span className="text-border">&middot;</span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                      {sessionStatuses[chat.id] === 'thinking' ? 'Thinking...'
+                        : sessionStatuses[chat.id] === 'waiting-input' ? 'Waiting input'
+                        : sessionStatuses[chat.id] === 'starting' ? 'Starting...'
+                        : 'Active'}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        ))}
+      </MobileSearchSheet>
 
       {initialLoading ? (
         <div className="flex justify-center py-8">

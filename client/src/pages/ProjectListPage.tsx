@@ -6,6 +6,7 @@ import { useSidebar } from '../components/ui/sidebar.tsx';
 import { useNewProjectDrawer } from '../context/NewProjectDrawerContext.tsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog.tsx';
 import { Input } from '../components/ui/input.tsx';
+import MobileSearchSheet from '../components/ui/MobileSearchSheet.tsx';
 import TruncatedPath from '../components/ui/truncated-path.tsx';
 import { useIsMobile } from '../hooks/use-mobile.tsx';
 import { isCapacitorNative } from '../utils/platform.ts';
@@ -265,69 +266,115 @@ export default function ProjectListPage() {
             </div>
           </div>
 
-          {/* ===== PROJECT PICKER DIALOG ===== */}
-          <Dialog open={cmdOpen} onOpenChange={(open) => !open && setCmdOpen(false)}>
-            <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
-              <DialogHeader>
-                <DialogTitle>Select Project</DialogTitle>
-              </DialogHeader>
-
-              <div className="mb-3">
-                <Input
-                  ref={cmdInputRef}
-                  type="text"
-                  value={cmdSearch}
-                  onChange={(e) => handleCmdSearchChange(e.target.value)}
-                  className="text-sm py-1.5"
-                  placeholder="Search projects..."
-                />
-              </div>
-
-              <div className="overflow-y-auto flex-1 -mx-6 px-6">
-                {/* + New Project — always first */}
+          {/* ===== PROJECT PICKER ===== */}
+          {isMobile ? (
+            <MobileSearchSheet
+              open={cmdOpen}
+              onOpenChange={(open) => !open && setCmdOpen(false)}
+              title="Select Project"
+              searchValue={cmdSearch}
+              onSearchChange={handleCmdSearchChange}
+              searchPlaceholder="Search projects..."
+              loading={cmdLoading}
+              emptyContent={
+                cmdProjects.length === 0 && !cmdLoading
+                  ? <div className="py-4 text-sm text-text-muted text-center">No projects found</div>
+                  : undefined
+              }
+              actionSlot={
                 <button
                   onClick={handleCmdNewProject}
-                  className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2 mb-1"
+                  className="flex items-center gap-1 text-xs font-medium text-primary px-2 py-1 rounded-md hover:bg-bg-hover transition-colors"
                 >
-                  <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
-                  <span className="text-sm font-medium text-primary">New Project</span>
+                  New
                 </button>
-
-                {cmdLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+              }
+            >
+              {cmdProjects.map((project) => (
+                <button
+                  key={project.id}
+                  onClick={() => handleCmdSelect(project)}
+                  className="w-full text-left px-3 py-2.5 rounded-lg active:bg-bg-hover transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                  </svg>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-text truncate">{project.name}</div>
+                    {project.path && <TruncatedPath path={project.path} />}
                   </div>
-                ) : cmdProjects.length === 0 ? (
-                  <div className="py-4 text-sm text-text-muted text-center">No projects found</div>
-                ) : (
-                  cmdProjects.map((project) => (
-                    <button
-                      key={project.id}
-                      onClick={() => handleCmdSelect(project)}
-                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-                      </svg>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm text-text truncate">{project.name}</div>
-                        {project.path && (
-                          <TruncatedPath path={project.path} />
-                        )}
-                      </div>
-                      {selectedProject?.id === project.id && (
-                        <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  {selectedProject?.id === project.id && (
+                    <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </MobileSearchSheet>
+          ) : (
+            <Dialog open={cmdOpen} onOpenChange={(open) => !open && setCmdOpen(false)}>
+              <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
+                <DialogHeader>
+                  <DialogTitle>Select Project</DialogTitle>
+                </DialogHeader>
+
+                <div className="mb-3">
+                  <Input
+                    ref={cmdInputRef}
+                    type="text"
+                    value={cmdSearch}
+                    onChange={(e) => handleCmdSearchChange(e.target.value)}
+                    className="text-sm py-1.5"
+                    placeholder="Search projects..."
+                  />
+                </div>
+
+                <div className="overflow-y-auto flex-1 -mx-6 px-6">
+                  <button
+                    onClick={handleCmdNewProject}
+                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2 mb-1"
+                  >
+                    <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    <span className="text-sm font-medium text-primary">New Project</span>
+                  </button>
+
+                  {cmdLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+                    </div>
+                  ) : cmdProjects.length === 0 ? (
+                    <div className="py-4 text-sm text-text-muted text-center">No projects found</div>
+                  ) : (
+                    cmdProjects.map((project) => (
+                      <button
+                        key={project.id}
+                        onClick={() => handleCmdSelect(project)}
+                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                         </svg>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm text-text truncate">{project.name}</div>
+                          {project.path && <TruncatedPath path={project.path} />}
+                        </div>
+                        {selectedProject?.id === project.id && (
+                          <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                          </svg>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
 
           {/* ===== MOBILE HINT BAR ===== */}
           {isMobile && (
