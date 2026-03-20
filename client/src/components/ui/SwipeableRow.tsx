@@ -1,8 +1,25 @@
-import { useRef, useState, useCallback, type ReactNode, type TouchEvent } from 'react';
+import { useRef, useState, useCallback, useEffect, type ReactNode, type TouchEvent } from 'react';
 import { haptics } from '../../utils/haptics.ts';
 
 // Module-level flag so SwipeHandler in App.tsx can skip sidebar/nav during swipe interactions
 export const swipeableRowActive = { current: false };
+
+// Module-level registry: close all revealed rows when tapping outside them
+interface RevealedEntry { el: HTMLElement; close: () => void }
+const revealedRows = new Set<RevealedEntry>();
+let listenerAttached = false;
+function ensureOutsideTapListener() {
+  if (listenerAttached) return;
+  listenerAttached = true;
+  function handleOutsideTap(e: Event) {
+    const target = e.target as Node;
+    for (const entry of revealedRows) {
+      if (!entry.el.contains(target)) entry.close();
+    }
+  }
+  document.addEventListener('touchstart', handleOutsideTap, { passive: true });
+  document.addEventListener('mousedown', handleOutsideTap, { passive: true });
+}
 
 interface SwipeableRowProps {
   onDelete?: () => void;
@@ -20,10 +37,29 @@ export default function SwipeableRow({ onDelete, onDismiss, children, className 
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const swiping = useRef(false);
   const revealedHaptic = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   const action = onDelete || onDismiss;
   const isDismiss = !onDelete && !!onDismiss;
+
+  // Stable close callback for the registry
+  const closeRow = useCallback(() => {
+    setTransitioning(true);
+    setOffsetX(0);
+  }, []);
+
+  // Register/unregister this row in the revealed registry
+  useEffect(() => {
+    ensureOutsideTapListener();
+    const el = containerRef.current;
+    if (!el) return;
+    const entry: RevealedEntry = { el, close: closeRow };
+    if (offsetX !== 0) {
+      revealedRows.add(entry);
+    }
+    return () => { revealedRows.delete(entry); };
+  }, [offsetX, closeRow]);
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (!isMobile) return;
@@ -109,7 +145,7 @@ export default function SwipeableRow({ onDelete, onDismiss, children, className 
   }
 
   return (
-    <div className={`relative overflow-hidden ${className || ''}`}>
+    <div ref={containerRef} className={`relative overflow-hidden ${className || ''}`}>
       {/* Action zone behind */}
       {offsetX < 0 && (
         <div className={`absolute inset-y-0 right-0 flex items-center justify-center text-white text-sm font-medium ${isDismiss ? 'bg-text-dim' : 'bg-danger'}`}
