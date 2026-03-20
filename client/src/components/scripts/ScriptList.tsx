@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/button.tsx';
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from '../ui/alert-dialog.tsx';
 import api from '../../utils/api.ts';
 import { haptics } from '../../utils/haptics.ts';
 import { useSocket } from '../../context/SocketContext.tsx';
@@ -30,6 +34,7 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
       return stored ? new Set(JSON.parse(stored)) : new Set();
     } catch { return new Set(); }
   });
+  const [deleteTarget, setDeleteTarget] = useState<ScriptWithStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showAIGenerator, setShowAIGenerator] = useState(false);
@@ -65,14 +70,24 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
     });
   }, [projectId]);
 
-  async function handleDelete(scriptId: string) {
+  function promptDelete(scriptId: string) {
+    const script = scripts.find(s => s.id === scriptId);
+    if (script) {
+      haptics.notificationWarning();
+      setDeleteTarget(script);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
     haptics.notificationError();
     try {
-      await api.delete(`/api/projects/${projectId}/scripts/${scriptId}`);
-      setScripts(scripts.filter(s => s.id !== scriptId));
+      await api.delete(`/api/projects/${projectId}/scripts/${deleteTarget.id}`);
+      setScripts(scripts.filter(s => s.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete script:', err);
     }
+    setDeleteTarget(null);
   }
 
   function handleNewTerminal() {
@@ -160,11 +175,11 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
         </div>
       ) : (
         scripts.map((script) => (
-          <SwipeableRow key={script.id} onDelete={() => handleDelete(script.id)}>
+          <SwipeableRow key={script.id} onDelete={() => promptDelete(script.id)}>
             <ScriptCard
               script={script}
               projectId={projectId}
-              onDelete={handleDelete}
+              onDelete={promptDelete}
               onRefresh={handleRefresh}
             />
           </SwipeableRow>
@@ -229,6 +244,24 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
           onCreated={() => { setShowModal(false); handleRefresh(); }}
         />
       )}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete script</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deleteTarget?.label}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-danger hover:bg-danger/90 text-white">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PullToRefresh>
   );
 }
