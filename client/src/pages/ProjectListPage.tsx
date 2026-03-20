@@ -178,7 +178,7 @@ export default function ProjectListPage() {
         label: message.trim().slice(0, 60),
       });
       navigate(`/project/${selectedProject.id}/chats/${data.chat.id}`, {
-        state: { prefillContent: message.trim(), autoSend: true },
+        state: { isNewChat: true, prefillContent: message.trim(), autoSend: true },
       });
     } catch (err) {
       console.error('Failed to create chat:', err);

@@ -113,7 +113,7 @@ export default function ProjectDashboardPage() {
   async function handleNewChat() {
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat' });
-      navigate(`/project/${id}/chats/${data.chat.id}`);
+      navigate(`/project/${id}/chats/${data.chat.id}`, { state: { isNewChat: true } });
     } catch (err) {
       console.error('Failed to create chat:', err);
     }

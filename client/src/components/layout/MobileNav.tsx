@@ -115,12 +115,10 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
             <div key={tab.key} className="relative">
               <button
                 onClick={() => {
+                  haptics.impactLight();
                   if (isScripts) {
-                    // Only haptic on actual navigation, not popover toggle
-                    if (!hasPorts) haptics.impactLight();
                     handleScriptsTabClick();
                   } else {
-                    haptics.impactLight();
                     navigate(`/project/${projectId}/${tab.key}`);
                   }
                 }}
@@ -150,6 +148,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        haptics.impactLight();
                         setShowPortsPopover(false);
                         navigate(`/project/${projectId}/scripts`);
                       }}

@@ -99,7 +99,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
     setCreating(true);
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
-      navigate(`/project/${projectId}/chats/${data.chat.id}`);
+      navigate(`/project/${projectId}/chats/${data.chat.id}`, { state: { isNewChat: true } });
     } catch (err) {
       console.error('Failed to create chat:', err);
     } finally {

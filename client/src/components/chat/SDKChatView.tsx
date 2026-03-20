@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
@@ -17,6 +17,7 @@ interface SDKChatViewProps {
 export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
+  const location = useLocation();
   const { refreshProject, setActiveChatStatus } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
@@ -35,7 +36,9 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   } = useSDKMessages(socket, chatId);
 
   const [connecting, setConnecting] = useState(true);
-  const [isNewChat, setIsNewChat] = useState(false);
+
+  // Determine autoFocus from navigation state (only set when explicitly creating a new chat)
+  const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
   // Publish status to ProjectContext for the header
   useEffect(() => {
@@ -50,7 +53,6 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     if (!socket || !chatId) return;
 
     setConnecting(true);
-    setIsNewChat(false);
 
     socket.emit('sdk:check-session', { chatId }, (result: { exists: boolean; status?: SDKSessionStatus }) => {
       setConnecting(false);
@@ -58,7 +60,6 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
         // Session already running, attach to get current state
         socket.emit('sdk:attach', { chatId });
       } else {
-        setIsNewChat(true);
         // Start new session
         socket.emit('sdk:start', { projectId, chatId });
       }
