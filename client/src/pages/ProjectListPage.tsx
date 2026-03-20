@@ -108,13 +108,14 @@ export default function ProjectListPage() {
       .catch(() => {});
   }, []);
 
-  // On mobile: trap back gesture to open sidebar
+  // On mobile: trap back gesture so it does nothing on the root page
+  // (silently re-push state without opening sidebar)
   useEffect(() => {
     if (window.innerWidth >= 768) return;
+    setOpenMobile(false);
     window.history.pushState({ sidebarTrap: true }, '', window.location.href);
     function handlePopState() {
       window.history.pushState({ sidebarTrap: true }, '', window.location.href);
-      setOpenMobile(true);
     }
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);

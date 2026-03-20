@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.tsx';
 import api from './utils/api.ts';
 import { ProjectProvider } from './context/ProjectContext.tsx';
@@ -91,34 +91,56 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
   return children;
 }
 
-// Swipe-right gesture to open sidebar (mobile only).
+// Swipe-right gesture: edge swipe navigates back, other swipes open sidebar.
 // Must be rendered inside SidebarProvider so it can call useSidebar().
 function SwipeHandler() {
   const { setOpenMobile } = useSidebar();
+  const navigate = useNavigate();
+  const location = useLocation();
   const touchRef = useRef<{ startX: number; startY: number } | null>(null);
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
 
   useEffect(() => {
     if (window.innerWidth >= 768) return; // desktop — no gesture needed
+    const native = isCapacitorNative();
+    const EDGE_ZONE = 30; // px from left edge for back-navigation gesture
 
     function handleTouchStart(e: TouchEvent) {
       const x = e.touches[0].clientX;
-      // Capacitor native: allow swipe from anywhere on screen
-      // Browser: only start tracking in the left edge zone (20–80px)
-      // 0-20px is reserved for iOS system back gesture
-      if (isCapacitorNative() || (x >= 20 && x <= 80)) {
+      // Native: track all swipes (edge for back, rest for sidebar)
+      // Browser: only left edge zone 20-80px (0-20 reserved for iOS system gesture)
+      if (native || (x >= 20 && x <= 80)) {
         touchRef.current = { startX: x, startY: e.touches[0].clientY };
       }
     }
 
     function handleTouchEnd(e: TouchEvent) {
       if (!touchRef.current) return;
+      const startX = touchRef.current.startX;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;
-      const dx = endX - touchRef.current.startX;
+      const dx = endX - startX;
       const dy = Math.abs(endY - touchRef.current.startY);
       touchRef.current = null;
       // Require 60px horizontal, mostly horizontal (dx > 2*dy)
       if (dx > 60 && dx > dy * 2) {
+        const path = pathnameRef.current;
+        const isRoot = path === '/' || path === '';
+
+        // Native edge swipe: navigate back (unless on root page)
+        if (native && startX < EDGE_ZONE && !isRoot) {
+          haptics.impactLight();
+          // Project sub-page → go back, project root → go to list
+          if (path.match(/^\/project\/[^/]+$/)) {
+            navigate('/');
+          } else {
+            navigate(-1);
+          }
+          return;
+        }
+
+        // All other qualifying swipes: open sidebar
         haptics.impactLight();
         setOpenMobile(true);
       }
@@ -130,7 +152,7 @@ function SwipeHandler() {
       document.removeEventListener('touchstart', handleTouchStart);
       document.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [setOpenMobile]);
+  }, [setOpenMobile, navigate]);
 
   return null;
 }
