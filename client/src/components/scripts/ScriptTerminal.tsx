@@ -1,11 +1,13 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useTerminal } from '../../hooks/useTerminal.ts';
 import { useProcessStatus } from '../../hooks/useProcessStatus.ts';
 import TerminalInputBar from './TerminalInputBar.tsx';
+import SendToChatDialog from './SendToChatDialog.tsx';
 import api from '../../utils/api.ts';
+import { stripAnsi } from '../../utils/ansi.ts';
 
 interface ScriptTerminalProps {
   projectId: string;
@@ -24,6 +26,9 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
     projectId,
     scriptId: scriptId!,
   });
+
+  const [showSendDialog, setShowSendDialog] = useState(false);
+  const [sendContent, setSendContent] = useState('');
 
   const isShell = scriptId?.startsWith('shell-') ?? false;
   const isRunning = status === 'running' || status === 'connected';
@@ -48,6 +53,17 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
     }
   }
 
+  async function handleSendToChat() {
+    try {
+      const data = await api.get<{ buffer: string }>(`/api/projects/${projectId}/scripts/processes/${scriptId}/buffer`);
+      setSendContent(stripAnsi(data.buffer));
+      setShowSendDialog(true);
+    } catch (err) {
+      console.error('Failed to fetch buffer:', err);
+    }
+  }
+
+  const displayLabel = isShell ? 'Terminal' : (currentProcess?.label || currentProcess?.command || scriptId || '');
   const statusLabel = isShell ? 'Terminal' : status;
 
   return (
@@ -75,6 +91,15 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
               :{port}
             </button>
           ))}
+          <button
+            onClick={handleSendToChat}
+            className="p-1.5 rounded-lg hover:bg-bg-hover text-text-dim hover:text-text transition-colors"
+            title="Send to Chat"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+            </svg>
+          </button>
           <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-success' : 'bg-text-dim'}`} />
           <span className="text-xs text-text-muted capitalize">{statusLabel}</span>
         </div>
@@ -83,6 +108,15 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
       <div ref={containerRef} className="flex-1 overflow-hidden" />
 
       <TerminalInputBar onSend={handleInputSend} disabled={!isRunning} projectId={projectId} />
+
+      {showSendDialog && (
+        <SendToChatDialog
+          projectId={projectId}
+          content={sendContent}
+          contentLabel={displayLabel}
+          onClose={() => setShowSendDialog(false)}
+        />
+      )}
     </div>
   );
 }

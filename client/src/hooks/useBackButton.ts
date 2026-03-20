@@ -41,8 +41,15 @@ export function useBackButton(sidebarOpen: boolean, closeSidebar: () => void) {
         return;
       }
 
+      // Root routes (/, /settings, /billing/*, /migrate) — no back, exit app
       if (path === '/' || path === '') {
         app.exitApp();
+        return;
+      }
+
+      // Other root-level pages (settings, billing, migrate) — go to project list
+      if (!path.startsWith('/project/')) {
+        navigateRef.current('/');
         return;
       }
 
