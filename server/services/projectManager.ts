@@ -166,12 +166,18 @@ function registerProject(name: string, projectPath: string): Project {
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; shellOverride?: string | null }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
   if (updates.name !== undefined) {
     db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(updates.name, projectId);
+  }
+  if (updates.path !== undefined) {
+    if (!fsSync.existsSync(updates.path) || !fsSync.statSync(updates.path).isDirectory()) {
+      throw new Error('Path does not exist or is not a directory');
+    }
+    db.prepare('UPDATE projects SET path = ? WHERE id = ?').run(updates.path, projectId);
   }
   if (updates.shellOverride !== undefined) {
     db.prepare('UPDATE projects SET shell_override = ? WHERE id = ?').run(updates.shellOverride, projectId);

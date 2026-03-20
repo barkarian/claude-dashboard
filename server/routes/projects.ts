@@ -83,9 +83,15 @@ router.post('/register', async (req: Request, res: Response) => {
 
 router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
+    if (req.body.path !== undefined && (!req.body.path || !fs.existsSync(req.body.path))) {
+      return res.status(400).json({ error: 'Path does not exist on disk' });
+    }
     const project = projectManager.updateProject(req.params.id, req.body);
     res.json({ project });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.message === 'Path does not exist or is not a directory') {
+      return res.status(400).json({ error: err.message });
+    }
     console.error('Error updating project:', err);
     res.status(500).json({ error: 'Failed to update project' });
   }

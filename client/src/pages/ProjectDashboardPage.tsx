@@ -15,6 +15,7 @@ import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
+import ProjectPathError from '../components/projects/ProjectPathError.tsx';
 import api from '../utils/api.ts';
 import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
@@ -31,10 +32,20 @@ export default function ProjectDashboardPage() {
   const { runningCount, processesWithPorts } = useProcessStatus(id);
   const keyboard = useKeyboardVisible();
   const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [dirExists, setDirExists] = useState<boolean | null>(null);
 
   useEffect(() => {
     loadProject(id!);
+    setDirExists(null);
   }, [id, loadProject]);
+
+  // Check if the project directory exists after project loads
+  useEffect(() => {
+    if (!project || !id) return;
+    api.get<{ exists: boolean }>(`/api/projects/${id}/directory-exists`)
+      .then((data) => setDirExists(data.exists))
+      .catch(() => setDirExists(false));
+  }, [project?.id, id]);
 
   // Fetch diff count for badge
   useEffect(() => {
@@ -189,6 +200,14 @@ export default function ProjectDashboardPage() {
             <p className="text-text-muted">This project may have been deleted</p>
           </div>
         </div>
+      ) : dirExists === false ? (
+        <ProjectPathError
+          projectId={project.id}
+          projectName={project.name}
+          projectPath={project.path}
+          onPathChanged={() => { loadProject(id!); setDirExists(null); }}
+          onDeleted={() => {}}
+        />
       ) : (
         <Routes>
           <Route path="/" element={<Navigate to="chats" replace />} />
@@ -212,8 +231,8 @@ export default function ProjectDashboardPage() {
         </Routes>
       )}
 
-      {/* Mobile bottom nav — hidden when keyboard is open */}
-      {!keyboard.visible && (
+      {/* Mobile bottom nav — hidden when keyboard is open or directory missing */}
+      {!keyboard.visible && dirExists !== false && (
         <MobileNav
           projectId={id}
           currentTab={currentTab}
