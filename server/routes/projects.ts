@@ -1,8 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
+import config from '../config.ts';
+
+const execFileAsync = promisify(execFile);
 
 const router = Router();
 
@@ -164,20 +169,33 @@ router.post('/:id/commit', async (req: Request<{ id: string }>, res: Response) =
   }
 });
 
+// Helper: detect GitHub token availability
+async function hasGithubToken(): Promise<boolean> {
+  if (config.githubToken) return true;
+  try {
+    const { stdout } = await execFileAsync('gh', ['auth', 'token']);
+    return !!stdout.trim();
+  } catch {
+    return false;
+  }
+}
+
 // Git info (bundled)
 router.get('/:id/git-info', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
     const isRepo = await gitService.checkIsRepo(projectPath);
+    const ghToken = await hasGithubToken();
     if (!isRepo) {
-      return res.json({ isRepo: false, branch: null, remotes: [], log: [] });
+      return res.json({ isRepo: false, branch: null, remotes: [], log: [], unpushedCount: 0, hasGithubToken: ghToken });
     }
-    const [branch, remotes, log] = await Promise.all([
+    const [branch, remotes, log, unpushedCount] = await Promise.all([
       gitService.getCurrentBranch(projectPath),
       gitService.getRemotes(projectPath),
       gitService.getLog(projectPath),
+      gitService.getUnpushedCount(projectPath),
     ]);
-    res.json({ isRepo, branch, remotes, log });
+    res.json({ isRepo, branch, remotes, log, unpushedCount, hasGithubToken: ghToken });
   } catch (err) {
     console.error('Error getting git info:', err);
     res.status(500).json({ error: 'Failed to get git info' });
@@ -209,6 +227,59 @@ router.post('/:id/git-remote', async (req: Request<{ id: string }>, res: Respons
   } catch (err) {
     console.error('Error adding remote:', err);
     res.status(500).json({ error: 'Failed to add remote' });
+  }
+});
+
+// Git push
+router.post('/:id/git-push', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    await gitService.push(projectPath);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error pushing:', err);
+    res.status(500).json({ error: err.message || 'Failed to push' });
+  }
+});
+
+// Search GitHub repos (requires gh CLI or GITHUB_TOKEN)
+router.get('/:id/github-repos', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const search = (req.query.q as string) || '';
+    if (!search) {
+      return res.json({ repos: [] });
+    }
+
+    const token = config.githubToken || await (async () => {
+      try {
+        const { stdout: t } = await execFileAsync('gh', ['auth', 'token']);
+        return t.trim();
+      } catch { return null; }
+    })();
+
+    if (!token) {
+      return res.json({ repos: [] });
+    }
+
+    const apiRes = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(search)}&per_page=10&sort=updated`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    });
+    if (!apiRes.ok) {
+      return res.json({ repos: [] });
+    }
+    const data = await apiRes.json() as any;
+    const repos = (data.items || []).map((r: any) => ({
+      name: r.name,
+      fullName: r.full_name,
+      url: r.clone_url,
+      description: r.description,
+      language: r.language,
+      private: r.private,
+    }));
+    res.json({ repos });
+  } catch (err) {
+    console.error('Error searching GitHub repos:', err);
+    res.json({ repos: [] });
   }
 });
 

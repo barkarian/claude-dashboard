@@ -150,14 +150,28 @@ async function addRemote(targetPath: string, name: string, url: string): Promise
 async function getLog(targetPath: string, maxCount = 20): Promise<GitLogEntry[]> {
   const git = simpleGit(targetPath);
   try {
-    const log = await git.log({ maxCount });
-    return log.all.map((entry) => ({
-      hash: entry.hash,
-      shortHash: entry.hash.slice(0, 7),
-      message: entry.message,
-      author: entry.author_name,
-      date: entry.date,
-    }));
+    const log = await git.log({ maxCount, '--stat': null } as any);
+    return log.all.map((entry) => {
+      // Parse stat from diff field (e.g. "3 files changed, 10 insertions(+), 5 deletions(-)")
+      const diff = (entry as any).diff || {};
+      const files = diff.files || [];
+      let additions = 0;
+      let deletions = 0;
+      for (const f of files) {
+        additions += f.insertions || 0;
+        deletions += f.deletions || 0;
+      }
+      return {
+        hash: entry.hash,
+        shortHash: entry.hash.slice(0, 7),
+        message: entry.message,
+        author: entry.author_name,
+        date: entry.date,
+        filesChanged: files.length,
+        additions,
+        deletions,
+      };
+    });
   } catch {
     // Empty repo with no commits
     return [];
@@ -168,6 +182,34 @@ async function getCurrentBranch(targetPath: string): Promise<string | null> {
   const git = simpleGit(targetPath);
   const status = await git.status();
   return status.current;
+}
+
+async function getUnpushedCount(targetPath: string): Promise<number> {
+  const git = simpleGit(targetPath);
+  try {
+    const remotes = await git.getRemotes();
+    if (remotes.length === 0) return 0;
+    // Fetch to make sure we have latest remote refs
+    try { await git.fetch(); } catch { /* offline is fine */ }
+    const log = await git.log(['@{u}..HEAD']);
+    return log.total;
+  } catch {
+    // No upstream set or other error
+    return 0;
+  }
+}
+
+async function push(targetPath: string): Promise<void> {
+  const git = simpleGit(targetPath);
+  const status = await git.status();
+  const branch = status.current;
+  if (!branch) throw new Error('No current branch');
+  // Try push; if no upstream, set it
+  try {
+    await git.push();
+  } catch {
+    await git.push(['-u', 'origin', branch]);
+  }
 }
 
 export default {
@@ -183,4 +225,6 @@ export default {
   addRemote,
   getLog,
   getCurrentBranch,
+  getUnpushedCount,
+  push,
 };

@@ -97,6 +97,9 @@ export interface GitLogEntry {
   message: string;
   author: string;
   date: string;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
 }
 
 export interface GitInfo {
@@ -104,4 +107,6 @@ export interface GitInfo {
   branch: string | null;
   remotes: GitRemote[];
   log: GitLogEntry[];
+  unpushedCount: number;
+  hasGithubToken: boolean;
 }
