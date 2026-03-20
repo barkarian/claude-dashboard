@@ -5,6 +5,7 @@ import { useProject } from '../context/ProjectContext.tsx';
 import { useSocket } from '../context/SocketContext.tsx';
 import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
 import { useProcessStatus } from '../hooks/useProcessStatus.ts';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible.ts';
 import { Toaster } from '../components/ui/sonner.tsx';
 import Header from '../components/layout/Header.tsx';
 import MobileNav from '../components/layout/MobileNav.tsx';
@@ -15,26 +16,8 @@ import SDKChatView from '../components/chat/SDKChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import api from '../utils/api.ts';
+import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
-
-function useKeyboardVisible() {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    function onResize() {
-      const keyboardOpen = window.innerHeight - vv!.height > 150;
-      setVisible(keyboardOpen);
-    }
-
-    vv.addEventListener('resize', onResize);
-    return () => vv.removeEventListener('resize', onResize);
-  }, []);
-
-  return visible;
-}
 
 export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
@@ -46,7 +29,7 @@ export default function ProjectDashboardPage() {
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
   const { runningCount, processesWithPorts } = useProcessStatus(id);
-  const isKeyboardVisible = useKeyboardVisible();
+  const keyboard = useKeyboardVisible();
   const [showProjectSettings, setShowProjectSettings] = useState(false);
 
   useEffect(() => {
@@ -106,6 +89,7 @@ export default function ProjectDashboardPage() {
       const chatLabel = chats.find((c) => c.id === chatId)?.label || 'Chat';
 
       if (prevStatus === 'thinking' && status === 'idle') {
+        haptics.notificationSuccess();
         toast(`${chatLabel} finished`, {
           action: {
             label: 'Go to chat',
@@ -113,6 +97,7 @@ export default function ProjectDashboardPage() {
           },
         });
       } else if (status === 'waiting-input' && prevStatus !== 'waiting-input') {
+        haptics.notificationWarning();
         toast(`${chatLabel} needs input`, {
           action: {
             label: 'Go to chat',
@@ -162,7 +147,10 @@ export default function ProjectDashboardPage() {
   const scriptCount = runningCount;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div
+      className="flex-1 flex flex-col overflow-hidden transition-[padding-bottom] duration-200"
+      style={{ paddingBottom: keyboard.height > 0 ? keyboard.height : undefined }}
+    >
       <Toaster />
       <Header
         projectName={project?.name || id || '...'}
@@ -225,7 +213,7 @@ export default function ProjectDashboardPage() {
       )}
 
       {/* Mobile bottom nav — hidden when keyboard is open */}
-      {!isKeyboardVisible && (
+      {!keyboard.visible && (
         <MobileNav
           projectId={id}
           currentTab={currentTab}

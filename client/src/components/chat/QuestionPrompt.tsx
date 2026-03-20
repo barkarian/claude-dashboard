@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { haptics } from '../../utils/haptics.ts';
 import type { PendingQuestion } from '../../hooks/useSDKMessages.ts';
 
 interface QuestionPromptProps {
@@ -24,6 +25,7 @@ export default function QuestionPrompt({ question, onRespond, onDismiss }: Quest
   const hasAnswer = currentSelected.length > 0 || currentCustom.trim().length > 0;
 
   function toggleOption(label: string, multiSelect: boolean) {
+    haptics.impactLight();
     setAnswers((prev) => {
       const current = prev[step] || [];
       if (multiSelect) {
@@ -48,11 +50,13 @@ export default function QuestionPrompt({ question, onRespond, onDismiss }: Quest
 
   function goNext() {
     if (!hasAnswer || isReviewStep) return;
+    haptics.impactLight();
     setStep((s) => s + 1);
   }
 
   function goBack() {
     if (step === 0) return;
+    haptics.impactLight();
     setStep((s) => s - 1);
   }
 
@@ -79,6 +83,7 @@ export default function QuestionPrompt({ question, onRespond, onDismiss }: Quest
   }
 
   function handleSubmit() {
+    haptics.notificationSuccess();
     onRespond(question.requestId, buildFinalAnswers());
   }
 

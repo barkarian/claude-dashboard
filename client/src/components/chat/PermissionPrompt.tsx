@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { haptics } from '../../utils/haptics.ts';
 import type { PendingPermission } from '../../hooks/useSDKMessages.ts';
 
 interface PermissionPromptProps {
@@ -41,13 +42,13 @@ export default function PermissionPrompt({ permission, onRespond }: PermissionPr
 
         <div className="flex gap-2">
           <button
-            onClick={() => onRespond(permission.requestId, true)}
+            onClick={() => { haptics.notificationSuccess(); onRespond(permission.requestId, true); }}
             className="flex-1 px-4 py-2 rounded-lg bg-success/20 text-success text-sm font-medium active:bg-success/40 transition-colors"
           >
             Allow
           </button>
           <button
-            onClick={() => onRespond(permission.requestId, false)}
+            onClick={() => { haptics.notificationError(); onRespond(permission.requestId, false); }}
             className="flex-1 px-4 py-2 rounded-lg bg-danger/20 text-danger text-sm font-medium active:bg-danger/40 transition-colors"
           >
             Deny

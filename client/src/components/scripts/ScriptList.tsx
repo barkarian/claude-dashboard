@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/button.tsx';
 import api from '../../utils/api.ts';
+import { haptics } from '../../utils/haptics.ts';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProcessStatus } from '../../hooks/useProcessStatus.ts';
 import ScriptCard from './ScriptCard.tsx';
@@ -9,6 +10,8 @@ import RunningProcessCard from './RunningProcessCard.tsx';
 import ExitedProcessCard from './ExitedProcessCard.tsx';
 import AddScriptModal from './AddScriptModal.tsx';
 import AIScriptGenerator from './AIScriptGenerator.tsx';
+import PullToRefresh from '../ui/PullToRefresh.tsx';
+import SwipeableRow from '../ui/SwipeableRow.tsx';
 import type { Project, ScriptWithStatus } from '../../../../shared/types/models.ts';
 
 interface ScriptListProps {
@@ -63,6 +66,7 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   }, [projectId]);
 
   async function handleDelete(scriptId: string) {
+    haptics.notificationError();
     try {
       await api.delete(`/api/projects/${projectId}/scripts/${scriptId}`);
       setScripts(scripts.filter(s => s.id !== scriptId));
@@ -106,7 +110,7 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   const hasExited = visibleExited.length > 0;
 
   return (
-    <div className="p-4 space-y-3">
+    <PullToRefresh onRefresh={loadScripts} className="p-4 space-y-3">
       {hasRunning && (
         <>
           <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
@@ -155,13 +159,14 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
         </div>
       ) : (
         scripts.map((script) => (
-          <ScriptCard
-            key={script.id}
-            script={script}
-            projectId={projectId}
-            onDelete={handleDelete}
-            onRefresh={handleRefresh}
-          />
+          <SwipeableRow key={script.id} onDelete={() => handleDelete(script.id)}>
+            <ScriptCard
+              script={script}
+              projectId={projectId}
+              onDelete={handleDelete}
+              onRefresh={handleRefresh}
+            />
+          </SwipeableRow>
         ))
       )}
 
@@ -223,6 +228,6 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
           onCreated={() => { setShowModal(false); handleRefresh(); }}
         />
       )}
-    </div>
+    </PullToRefresh>
   );
 }

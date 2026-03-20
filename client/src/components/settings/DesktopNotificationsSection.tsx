@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Switch } from '../ui/switch.tsx';
+import { haptics } from '../../utils/haptics.ts';
 
 declare global {
   interface Window {
@@ -56,6 +57,7 @@ export default function DesktopNotificationsSection() {
   }
 
   async function handleToggle(key: string) {
+    haptics.impactLight();
     const newValue = !toggles[key];
     setToggles(prev => ({ ...prev, [key]: newValue }));
     try {

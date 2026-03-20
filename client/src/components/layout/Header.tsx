@@ -2,6 +2,7 @@ import { useState, type ReactNode, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSidebar } from '../ui/sidebar.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
+import { haptics } from '../../utils/haptics.ts';
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
@@ -43,7 +44,11 @@ export default function Header({
   onProjectSettings,
 }: HeaderProps) {
   const navigate = useNavigate();
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar: _toggleSidebar } = useSidebar();
+  function toggleSidebar() {
+    haptics.impactLight();
+    _toggleSidebar();
+  }
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

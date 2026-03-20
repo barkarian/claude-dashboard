@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext.tsx';
 import { Card } from '../ui/card.tsx';
 import api from '../../utils/api.ts';
 import { stripAnsi } from '../../utils/ansi.ts';
+import { haptics } from '../../utils/haptics.ts';
 import SendToChatDialog from './SendToChatDialog.tsx';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 
@@ -33,6 +34,7 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
 
   function handleStop() {
     if (!socket) return;
+    haptics.impactMedium();
     socket.emit('terminal:stop', { projectId, scriptId: process.scriptId });
     setTimeout(onRefresh, 300);
   }

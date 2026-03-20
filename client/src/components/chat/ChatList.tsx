@@ -5,11 +5,16 @@ import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
+import { useLongPress } from '../../hooks/useLongPress.ts';
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import api from '../../utils/api.ts';
+import { haptics } from '../../utils/haptics.ts';
+import PullToRefresh from '../ui/PullToRefresh.tsx';
+import SwipeableRow from '../ui/SwipeableRow.tsx';
+import ContextMenu, { type ContextMenuItem } from '../ui/ContextMenu.tsx';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 
 const PAGE_SIZE = 20;
@@ -28,6 +33,9 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [contextMenu, setContextMenu] = useState<{ chat: Chat; position: { x: number; y: number } } | null>(null);
 
   // Paginated state
   const [chats, setChats] = useState<Chat[]>([]);
@@ -101,11 +109,13 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
 
   function promptDelete(chat: Chat, e: MouseEvent) {
     e.stopPropagation();
+    haptics.notificationWarning();
     setDeleteTarget(chat);
   }
 
   async function confirmDelete() {
     if (!deleteTarget) return;
+    haptics.notificationError();
     try {
       if (sessionStatuses[deleteTarget.id] && socket) {
         socket.emit('sdk:end', { chatId: deleteTarget.id });
@@ -120,10 +130,46 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
     setDeleteTarget(null);
   }
 
+  async function handleRename() {
+    if (!renameTarget || !renameValue.trim()) return;
+    try {
+      await api.patch(`/api/projects/${projectId}/chats/${renameTarget.id}`, { label: renameValue.trim() });
+      setChats(prev => prev.map(c => c.id === renameTarget.id ? { ...c, label: renameValue.trim() } : c));
+      refreshProject();
+    } catch (err) {
+      console.error('Failed to rename chat:', err);
+    }
+    setRenameTarget(null);
+  }
+
+  function getContextMenuItems(chat: Chat): ContextMenuItem[] {
+    return [
+      {
+        label: 'Rename',
+        icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>,
+        onAction: () => { setRenameTarget(chat); setRenameValue(chat.label); },
+      },
+      {
+        label: 'Delete',
+        variant: 'danger',
+        icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+        onAction: () => { haptics.notificationWarning(); setDeleteTarget(chat); },
+      },
+    ];
+  }
+
+  // Long-press: store which chat triggered it via ref
+  const longPressChatRef = useRef<Chat | null>(null);
+  const longPressHandlers = useLongPress((pos) => {
+    if (longPressChatRef.current) {
+      setContextMenu({ chat: longPressChatRef.current, position: pos });
+    }
+  });
+
   const showSearch = chats.length > 0 || searchQuery;
 
   return (
-    <div className="p-4 space-y-3">
+    <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3">
       {/* Search input */}
       {showSearch && (
         <div className="relative">
@@ -170,10 +216,14 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
       ) : (
         <>
           {chats.map((chat) => (
+            <SwipeableRow key={chat.id} onDelete={() => setDeleteTarget(chat)}>
             <Card
-              key={chat.id}
               className="text-left w-full hover:border-border-light transition-all group cursor-pointer"
               onClick={() => navigate(`/project/${projectId}/chats/${chat.id}`)}
+              onTouchStart={(e) => { longPressChatRef.current = chat; longPressHandlers.onTouchStart(e); }}
+              onTouchMove={longPressHandlers.onTouchMove}
+              onTouchEnd={longPressHandlers.onTouchEnd}
+              onContextMenu={longPressHandlers.onContextMenu}
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -217,6 +267,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                 </div>
               </div>
             </Card>
+            </SwipeableRow>
           ))}
 
           {/* Infinite scroll sentinel */}
@@ -253,6 +304,37 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+
+      {/* Rename dialog */}
+      <AlertDialog open={!!renameTarget} onOpenChange={(open) => !open && setRenameTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rename chat</AlertDialogTitle>
+            <AlertDialogDescription>
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+                className="w-full mt-2 px-3 py-2 bg-bg border border-border rounded-lg text-text text-sm focus:outline-none focus:border-primary"
+                autoFocus
+              />
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRename}>Rename</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Long-press context menu */}
+      <ContextMenu
+        open={!!contextMenu}
+        onClose={() => setContextMenu(null)}
+        position={contextMenu?.position || { x: 0, y: 0 }}
+        items={contextMenu ? getContextMenuItems(contextMenu.chat) : []}
+      />
+    </PullToRefresh>
   );
 }

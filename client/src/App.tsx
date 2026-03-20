@@ -15,6 +15,9 @@ import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx'
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
+import { initStatusBar } from './utils/statusBar.ts';
+import { haptics } from './utils/haptics.ts';
+import { useBackButton } from './hooks/useBackButton.ts';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -116,6 +119,7 @@ function SwipeHandler() {
       touchRef.current = null;
       // Require 60px horizontal, mostly horizontal (dx > 2*dy)
       if (dx > 60 && dx > dy * 2) {
+        haptics.impactLight();
         setOpenMobile(true);
       }
     }
@@ -131,9 +135,18 @@ function SwipeHandler() {
   return null;
 }
 
+// Android back button handler — must be inside SidebarProvider.
+function BackButtonHandler() {
+  const { openMobile, setOpenMobile } = useSidebar();
+  useBackButton(openMobile, () => setOpenMobile(false));
+  return null;
+}
+
 export default function App() {
   const sidebarRef = useRef<SidebarHandle>(null);
   const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
+
+  useEffect(() => { initStatusBar(); }, []);
 
   return (
     <Routes>
@@ -144,6 +157,7 @@ export default function App() {
               <AppSidebarContext.Provider value={{ refreshProjects }}>
                 <NewProjectDrawerProvider>
                   <SwipeHandler />
+                  <BackButtonHandler />
                   <div className="app-layout flex w-full overflow-hidden">
                     <AppSidebar ref={sidebarRef} />
                     <main className="flex-1 flex flex-col overflow-hidden">

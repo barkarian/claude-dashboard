@@ -8,6 +8,7 @@ import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
+import { haptics } from '../../utils/haptics.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
 interface SDKPromptInputProps {
@@ -109,6 +110,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   function handleSend() {
     let text = value.trim();
     if (!text || disabled || isStreaming) return;
+    haptics.impactMedium();
 
     // Expand #rec:ID tokens into formatted terminal output
     const recIds = extractRecordingIds(text);

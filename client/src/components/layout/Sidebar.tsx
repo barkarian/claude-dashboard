@@ -17,6 +17,7 @@ import {
 } from '../ui/sidebar.tsx';
 import api from '../../utils/api.ts';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
+import PullToRefresh from '../ui/PullToRefresh.tsx';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
@@ -164,6 +165,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         <SidebarGroup>
           <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Projects</SidebarGroupLabel>
           <SidebarGroupContent>
+            <PullToRefresh onRefresh={loadInitial}>
             {/* Search input */}
             <div className="px-2 pb-2 relative">
               <input
@@ -223,6 +225,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
+            </PullToRefresh>
           </SidebarGroupContent>
         </SidebarGroup>
 

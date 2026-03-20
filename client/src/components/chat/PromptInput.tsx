@@ -7,6 +7,7 @@ import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
+import { haptics } from '../../utils/haptics.ts';
 
 interface PromptInputProps {
   projectId: string;
@@ -91,6 +92,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
     // Otherwise send the text
     let trimmed = value.trim();
     if (!trimmed || disabled || isThinking) return;
+    haptics.impactMedium();
 
     // Expand #rec:ID tokens into formatted terminal output
     const recIds = extractRecordingIds(trimmed);

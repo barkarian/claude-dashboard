@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext.tsx';
+import { getPlugin, resolveHandle } from '../utils/capacitorBridge.ts';
 
 interface SocketContextValue {
   socket: Socket | null;
@@ -50,6 +51,22 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       s.disconnect();
     };
   }, [isAuthenticated]);
+
+  // Reconnect socket when app returns from background (Capacitor native)
+  useEffect(() => {
+    const app = getPlugin('App');
+    if (!app || !socket) return;
+
+    let handle: { remove: () => void } | null = null;
+    const result = app.addListener('appStateChange', ({ isActive }) => {
+      if (isActive && socket.disconnected) {
+        socket.connect();
+      }
+    });
+    resolveHandle(result, (h) => { handle = h; });
+
+    return () => { handle?.remove(); };
+  }, [socket]);
 
   return (
     <SocketContext.Provider value={{ socket, connected }}>

@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { Card } from '../ui/card.tsx';
 import EditScriptModal from './EditScriptModal.tsx';
+import { haptics } from '../../utils/haptics.ts';
+import { useLongPress } from '../../hooks/useLongPress.ts';
+import ContextMenu, { type ContextMenuItem } from '../ui/ContextMenu.tsx';
 import type { ScriptWithStatus, ProcessStatus } from '../../../../shared/types/models.ts';
 
 interface ScriptCardProps {
@@ -17,6 +20,34 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
   const { socket } = useSocket();
   const [status, setStatus] = useState<ProcessStatus>(script.status || 'stopped');
   const [showEdit, setShowEdit] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const longPressHandlers = useLongPress((pos) => setCtxMenu(pos));
+
+  function getContextMenuItems(): ContextMenuItem[] {
+    return [
+      {
+        label: 'Edit',
+        icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>,
+        onAction: () => setShowEdit(true),
+      },
+      status === 'running' ? {
+        label: 'Stop',
+        icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>,
+        onAction: handleStop,
+      } : {
+        label: 'Run',
+        icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5.14v14l11-7-11-7z" /></svg>,
+        onAction: handleStart,
+      },
+      {
+        label: 'Delete',
+        variant: 'danger' as const,
+        icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+        onAction: () => { haptics.notificationError(); onDelete(script.id); },
+      },
+    ];
+  }
 
   // Listen for terminal:status events broadcast to the project room
   useEffect(() => {
@@ -32,6 +63,7 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
 
   function handleStart() {
     if (!socket) return;
+    haptics.impactMedium();
     socket.emit('terminal:start', { projectId, scriptId: script.id });
     setStatus('running');
     setTimeout(onRefresh, 500);
@@ -39,6 +71,7 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
 
   function handleStop() {
     if (!socket) return;
+    haptics.impactMedium();
     socket.emit('terminal:stop', { projectId, scriptId: script.id });
     setStatus('stopped');
     setTimeout(onRefresh, 500);
@@ -51,7 +84,13 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
   };
 
   return (
-    <Card className="hover:border-border-light transition-all">
+    <Card
+      className="hover:border-border-light transition-all"
+      onTouchStart={longPressHandlers.onTouchStart}
+      onTouchMove={longPressHandlers.onTouchMove}
+      onTouchEnd={longPressHandlers.onTouchEnd}
+      onContextMenu={longPressHandlers.onContextMenu}
+    >
       <div className="flex items-center gap-3">
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColor[status] || 'bg-text-dim'}`} />
 
@@ -89,7 +128,7 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
           </button>
 
           <button
-            onClick={() => onDelete(script.id)}
+            onClick={() => { haptics.notificationError(); onDelete(script.id); }}
             className="p-2 rounded-lg hover:bg-bg-hover text-text-dim hover:text-danger transition-colors"
             title="Delete"
           >
@@ -108,6 +147,13 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
           onUpdated={() => { setShowEdit(false); onRefresh(); }}
         />
       )}
+
+      <ContextMenu
+        open={!!ctxMenu}
+        onClose={() => setCtxMenu(null)}
+        position={ctxMenu || { x: 0, y: 0 }}
+        items={getContextMenuItems()}
+      />
     </Card>
   );
 }
