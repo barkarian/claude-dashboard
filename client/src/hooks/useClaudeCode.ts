@@ -105,6 +105,7 @@ export function useClaudeCode(
     // containerRef sits inside an absolutely-positioned wrapper whose parent has flex-1,
     // so parentElement gives us the correct available dimensions.
     const scaleTarget = containerRef.current!.parentElement;
+    let currentScale = 1;
     function applyMobileScale() {
       const container = containerRef.current;
       if (!container || !scaleTarget) return;
@@ -113,6 +114,7 @@ export function useClaudeCode(
       const parentH = (scaleTarget as HTMLElement).offsetHeight;
       if (parentH === 0) return;
       const scale = Math.min(1, parentW / WIDE_WIDTH);
+      currentScale = scale;
 
       container.style.width = `${WIDE_WIDTH}px`;
       container.style.height = `${parentH / scale}px`;
@@ -122,9 +124,34 @@ export function useClaudeCode(
       doFit();
     }
 
+    // On mobile app, xterm's built-in touch scroll is broken by CSS scale transform.
+    // Take full control of touch scrolling with scale compensation.
+    let touchCleanup: (() => void) | null = null;
     if (isMobile) {
       requestAnimationFrame(applyMobileScale);
       setTimeout(applyMobileScale, 100);
+
+      const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
+      if (viewport) {
+        let lastTouchY = 0;
+        const onTouchStart = (e: TouchEvent) => {
+          lastTouchY = e.touches[0].clientY;
+        };
+        const onTouchMove = (e: TouchEvent) => {
+          const currentY = e.touches[0].clientY;
+          const delta = lastTouchY - currentY;
+          lastTouchY = currentY;
+          // Compensate for CSS scale and boost scroll speed
+          viewport.scrollTop += (delta / currentScale) * 1.5;
+          e.preventDefault();
+        };
+        viewport.addEventListener('touchstart', onTouchStart, { passive: true });
+        viewport.addEventListener('touchmove', onTouchMove, { passive: false });
+        touchCleanup = () => {
+          viewport.removeEventListener('touchstart', onTouchStart);
+          viewport.removeEventListener('touchmove', onTouchMove);
+        };
+      }
     } else {
       doFit();
     }
@@ -201,6 +228,7 @@ export function useClaudeCode(
     resizeObserver.observe(scaleTarget || containerRef.current);
 
     return () => {
+      touchCleanup?.();
       socket.off('cc:output', handleOutput);
       socket.off('cc:status', handleStatus);
       socket.off('cc:exit', handleExit);
