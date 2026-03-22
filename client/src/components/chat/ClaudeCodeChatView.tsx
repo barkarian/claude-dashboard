@@ -39,7 +39,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
 
-  const { status, write } = useClaudeCode(containerRef, {
+  const { terminal, status, write } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -49,15 +49,17 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Keep write ref up to date for the swipe handler
   writeRef.current = write;
 
-  // Register swipe override: map swipe gestures to arrow keys
+  // Register swipe override: map swipe gestures to arrow keys + scroll to bottom
   useEffect(() => {
     ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
       writeRef.current(ARROW_MAP[direction]);
+      // Delay scrollToBottom so the terminal processes the input first
+      setTimeout(() => terminal.current?.scrollToBottom(), 50);
     };
     return () => {
       ccSwipeOverride.current = null;
     };
-  }, []);
+  }, [terminal]);
 
   // Publish status to ProjectContext for the header badge
   useEffect(() => {
@@ -75,6 +77,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   const handleSend = useCallback((data: string) => {
     write(data);
+    terminal.current?.scrollToBottom();
 
     // Auto-title: on first real user message, rename the chat
     if (!firstMessageSentRef.current && chatId) {
@@ -100,7 +103,8 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   const handleArrow = useCallback((data: string) => {
     write(data);
-  }, [write]);
+    setTimeout(() => terminal.current?.scrollToBottom(), 50);
+  }, [write, terminal]);
 
   const handleInterrupt = useCallback(() => {
     write('\x03');

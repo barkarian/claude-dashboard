@@ -133,30 +133,35 @@ export function useClaudeCode(
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
-        // --- Custom scroll indicator (iOS ignores ::-webkit-scrollbar) ---
+        // Kill ALL native/xterm touch scrolling at the compositor level.
+        // This prevents the brief scroll-then-snap-back jitter on swipe.
+        viewport.style.touchAction = 'none';
+
+        // --- Always-visible draggable scrollbar (iOS ignores ::-webkit-scrollbar) ---
+        // Scrolling ONLY via scrollbar drag on mobile — content drag is disabled
+        // so it doesn't conflict with swipe gestures (arrow keys, sidebar, nav).
         const scrollTrack = document.createElement('div');
         const scrollThumb = document.createElement('div');
         Object.assign(scrollTrack.style, {
-          position: 'absolute', top: '0', right: '0', width: '5px',
-          height: '100%', zIndex: '50', pointerEvents: 'none',
+          position: 'absolute', top: '0', right: '0', width: '20px', // wide hit area
+          height: '100%', zIndex: '50', pointerEvents: 'auto',
         });
         Object.assign(scrollThumb.style, {
-          position: 'absolute', right: '0', width: '5px',
+          position: 'absolute', right: '2px', width: '6px',
           borderRadius: '3px', background: 'rgba(99, 102, 241, 0.5)',
-          minHeight: '30px', transition: 'opacity 0.3s',
-          opacity: '0',
+          minHeight: '30px', opacity: '1',
         });
         scrollTrack.appendChild(scrollThumb);
         // Attach to scaleTarget (the unscaled parent) so it isn't affected by CSS scale
         (scaleTarget || containerRef.current!).appendChild(scrollTrack);
 
-        let hideTimer = 0;
-        function updateScrollIndicator() {
+        function updateScrollbar() {
           const { scrollTop, scrollHeight, clientHeight } = viewport;
           if (scrollHeight <= clientHeight) {
-            scrollThumb.style.opacity = '0';
+            scrollThumb.style.opacity = '0.15';
             return;
           }
+          scrollThumb.style.opacity = '1';
           const trackH = (scaleTarget as HTMLElement).offsetHeight;
           const ratio = clientHeight / scrollHeight;
           const thumbH = Math.max(30, trackH * ratio);
@@ -164,84 +169,81 @@ export function useClaudeCode(
           const thumbTop = (scrollTop / (scrollHeight - clientHeight)) * maxTop;
           scrollThumb.style.height = `${thumbH}px`;
           scrollThumb.style.top = `${thumbTop}px`;
-          scrollThumb.style.opacity = '1';
-          clearTimeout(hideTimer);
-          hideTimer = window.setTimeout(() => { scrollThumb.style.opacity = '0'; }, 1200);
+        }
+        requestAnimationFrame(updateScrollbar);
+
+        // --- Thumb drag handlers (stopPropagation prevents SwipeHandler conflict) ---
+        let dragging = false;
+        let dragStartY = 0;
+        let dragStartScrollTop = 0;
+
+        function onThumbTouchStart(e: TouchEvent) {
+          e.stopPropagation();
+          dragging = true;
+          dragStartY = e.touches[0].clientY;
+          dragStartScrollTop = viewport.scrollTop;
+          scrollThumb.style.background = 'rgba(99, 102, 241, 0.8)';
+        }
+        function onDragMove(e: TouchEvent) {
+          if (!dragging) return;
+          e.preventDefault();
+          const dy = e.touches[0].clientY - dragStartY;
+          const trackH = (scaleTarget as HTMLElement).offsetHeight;
+          const { scrollHeight, clientHeight } = viewport;
+          const scrollRange = scrollHeight - clientHeight;
+          const ratio = clientHeight / scrollHeight;
+          const thumbH = Math.max(30, trackH * ratio);
+          const trackRange = trackH - thumbH;
+          if (trackRange <= 0) return;
+          viewport.scrollTop = dragStartScrollTop + (dy / trackRange) * scrollRange;
+          updateScrollbar();
+        }
+        function onDragEnd() {
+          if (!dragging) return;
+          dragging = false;
+          scrollThumb.style.background = 'rgba(99, 102, 241, 0.5)';
         }
 
-        let lastTouchY = 0;
-        let lastMoveTime = 0;
-        let velocity = 0;          // px per ms (in viewport-space)
-        let momentumRaf = 0;
+        // Tap on track: jump scroll position
+        function onTrackTap(e: TouchEvent) {
+          if (e.target === scrollThumb) return;
+          e.stopPropagation();
+          const trackRect = scrollTrack.getBoundingClientRect();
+          const tapY = e.touches[0].clientY - trackRect.top;
+          const { scrollHeight, clientHeight } = viewport;
+          viewport.scrollTop = (tapY / trackRect.height) * (scrollHeight - clientHeight);
+          updateScrollbar();
+        }
 
-        const onTouchStart = (e: TouchEvent) => {
-          // Stop any ongoing momentum animation
-          if (momentumRaf) {
-            cancelAnimationFrame(momentumRaf);
-            momentumRaf = 0;
+        // Block ALL content touch-scrolling on the viewport (swipes pass through for gestures)
+        function blockContentScroll(e: TouchEvent) {
+          if (!scrollTrack.contains(e.target as Node)) {
+            e.preventDefault();
           }
-          lastTouchY = e.touches[0].clientY;
-          lastMoveTime = performance.now();
-          velocity = 0;
-        };
+        }
 
-        const onTouchMove = (e: TouchEvent) => {
-          const currentY = e.touches[0].clientY;
-          const now = performance.now();
-          const delta = lastTouchY - currentY;          // positive = scroll down
-          const dt = now - lastMoveTime;
+        scrollThumb.addEventListener('touchstart', onThumbTouchStart, { passive: false });
+        scrollTrack.addEventListener('touchstart', onTrackTap, { passive: false });
+        document.addEventListener('touchmove', onDragMove, { passive: false });
+        document.addEventListener('touchend', onDragEnd, { passive: true });
+        document.addEventListener('touchcancel', onDragEnd, { passive: true });
+        viewport.addEventListener('touchmove', blockContentScroll, { passive: false });
 
-          // Track velocity with exponential smoothing to avoid jitter
-          if (dt > 0) {
-            const instantV = delta / dt;                // px/ms in screen-space
-            velocity = velocity * 0.4 + instantV * 0.6;
-          }
+        // Keep scrollbar in sync when terminal content changes
+        viewport.addEventListener('scroll', updateScrollbar, { passive: true });
+        const contentObserver = new MutationObserver(updateScrollbar);
+        contentObserver.observe(viewport, { childList: true, subtree: true, characterData: true });
 
-          lastTouchY = currentY;
-          lastMoveTime = now;
-
-          // Compensate for CSS scale + speed boost so scrolling feels native-fast
-          viewport.scrollTop += (delta / currentScale) * 1.8;
-          updateScrollIndicator();
-          e.preventDefault();
-        };
-
-        const onTouchEnd = () => {
-          // Kick off momentum / inertia scrolling
-          const FRICTION = 0.965;       // per-frame decay (higher = longer coast)
-          const MIN_V   = 0.02;         // px/ms threshold to stop
-          const FRAME   = 16;           // ~60 fps frame budget in ms
-
-          const coast = () => {
-            if (Math.abs(velocity) < MIN_V) {
-              velocity = 0;
-              momentumRaf = 0;
-              updateScrollIndicator();
-              return;
-            }
-            viewport.scrollTop += (velocity * FRAME) / currentScale;
-            velocity *= FRICTION;
-            updateScrollIndicator();
-            momentumRaf = requestAnimationFrame(coast);
-          };
-
-          if (Math.abs(velocity) >= MIN_V) {
-            momentumRaf = requestAnimationFrame(coast);
-          }
-        };
-
-        viewport.addEventListener('touchstart', onTouchStart, { passive: true });
-        viewport.addEventListener('touchmove', onTouchMove, { passive: false });
-        viewport.addEventListener('touchend', onTouchEnd, { passive: true });
-        viewport.addEventListener('touchcancel', onTouchEnd, { passive: true });
         touchCleanup = () => {
-          if (momentumRaf) cancelAnimationFrame(momentumRaf);
-          clearTimeout(hideTimer);
           scrollTrack.remove();
-          viewport.removeEventListener('touchstart', onTouchStart);
-          viewport.removeEventListener('touchmove', onTouchMove);
-          viewport.removeEventListener('touchend', onTouchEnd);
-          viewport.removeEventListener('touchcancel', onTouchEnd);
+          contentObserver.disconnect();
+          viewport.removeEventListener('scroll', updateScrollbar);
+          viewport.removeEventListener('touchmove', blockContentScroll);
+          scrollThumb.removeEventListener('touchstart', onThumbTouchStart);
+          scrollTrack.removeEventListener('touchstart', onTrackTap);
+          document.removeEventListener('touchmove', onDragMove);
+          document.removeEventListener('touchend', onDragEnd);
+          document.removeEventListener('touchcancel', onDragEnd);
         };
       }
     } else {
