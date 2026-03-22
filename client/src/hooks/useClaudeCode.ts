@@ -42,19 +42,39 @@ export function useClaudeCode(
     }
   }
 
-  // Read the current terminal line and extract text after the prompt symbol.
-  // Used to sync history recall (arrow up/down) into the textarea input.
+  // Read the Claude Code prompt line content from the terminal buffer.
+  // Claude Code's TUI prompt structure:
+  //   ──────────  (separator)
+  //   ❯ text      (prompt line)
+  //   ──────────  (separator)
+  //   ⏵⏵ info     (status line)
+  // We find the prompt line by locating a line bordered by ─── separators.
   const getPromptLine = useCallback((): string => {
     const term = termRef.current;
     if (!term) return '';
     const buffer = term.buffer.active;
-    const lineIndex = buffer.baseY + buffer.cursorY;
-    const line = buffer.getLine(lineIndex);
-    if (!line) return '';
-    const raw = line.translateToString(true);
-    // Strip prompt prefix: common prompt symbols (❯ > › $ % #) followed by space
-    const match = raw.match(/^\s*[❯>›$%#]\s+(.*)/);
-    return match ? match[1].trim() : '';
+    const cursorRow = buffer.baseY + buffer.cursorY;
+
+    const getLineText = (row: number): string => {
+      const line = buffer.getLine(row);
+      return line ? line.translateToString(true) : '';
+    };
+
+    const isSeparator = (text: string): boolean => {
+      const t = text.trim();
+      return t.length > 10 && /^─+$/.test(t);
+    };
+
+    // Scan rows near cursor to find a line bordered by ─── separators
+    for (let row = Math.max(0, cursorRow - 5); row <= cursorRow + 5; row++) {
+      if (isSeparator(getLineText(row - 1)) && isSeparator(getLineText(row + 1))) {
+        const text = getLineText(row);
+        // Strip the leading prompt symbol (any non-alphanumeric char like ❯) and spaces
+        return text.replace(/^\s*[^\w\s]\s*/, '').trim();
+      }
+    }
+
+    return '';
   }, []);
 
   useEffect(() => {
