@@ -18,6 +18,7 @@ import migrateRoutes from './routes/migrate.ts';
 import devicesRoutes from './routes/devices.ts';
 import filesystemRoutes from './routes/filesystem.ts';
 import registerSocketHandlers from './sockets/index.ts';
+import { killAllCCSessions } from './sockets/claude-code.ts';
 import processManager from './services/processManager.ts';
 import tunnelManager from './services/tunnelManager.ts';
 import { setSocketIO as setTunnelClientIO } from './services/tunnelClient.ts';
@@ -239,6 +240,7 @@ async function shutdown(): Promise<void> {
 
   // Kill local processes first (fast, no network)
   processManager.killAll();
+  killAllCCSessions();
   sdkSessionManager.endAllSessions();
   sdkSessionManager.stopIdleCleanup();
   fileService.stopAllWatching();

@@ -11,7 +11,7 @@ import RepoSelector from './RepoSelector.tsx';
 import FolderBrowser from './FolderBrowser.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
 import api from '../../utils/api.ts';
-import type { GitHubRepo, Project } from '../../../../shared/types/models.ts';
+import type { GitHubRepo, Project, ChatAdapter } from '../../../../shared/types/models.ts';
 
 type Tab = 'existing' | 'clone' | 'empty';
 
@@ -39,6 +39,9 @@ export default function NewProjectDrawer() {
   const [emptySelectedBrowserPath, setEmptySelectedBrowserPath] = useState('');
   const [emptyFolderNameEdited, setEmptyFolderNameEdited] = useState(false);
 
+  // Adapter state
+  const [defaultAdapter, setDefaultAdapter] = useState<ChatAdapter>('claude-agent-sdk');
+
   // Shared state
   const [projectName, setProjectName] = useState('');
   const [projectPath, setProjectPath] = useState('');
@@ -58,6 +61,7 @@ export default function NewProjectDrawer() {
     setEmptyDirPath('');
     setEmptySelectedBrowserPath('');
     setEmptyFolderNameEdited(false);
+    setDefaultAdapter('claude-agent-sdk');
     setCreating(false);
     setError('');
     setCreatedProjectId(null);
@@ -103,6 +107,7 @@ export default function NewProjectDrawer() {
       const data = await api.post<{ project: Project }>('/api/projects/register', {
         name: projectName,
         path: projectPath,
+        defaultAdapter,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -130,6 +135,7 @@ export default function NewProjectDrawer() {
         name: projectName,
         path: projectPath || undefined,
         repoUrl,
+        defaultAdapter,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -159,6 +165,7 @@ export default function NewProjectDrawer() {
         name: projectName,
         path: fullPath,
         repoUrl: null,
+        defaultAdapter,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -221,6 +228,35 @@ export default function NewProjectDrawer() {
                 >
                   Create Empty
                 </button>
+              </div>
+
+              {/* AI Chat Mode */}
+              <div className="mb-4 flex-shrink-0">
+                <Label className="text-xs text-text-dim uppercase tracking-wider mb-1.5 block">Chat Mode</Label>
+                <div className="flex gap-1 p-0.5 bg-bg rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setDefaultAdapter('claude-agent-sdk')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                      defaultAdapter === 'claude-agent-sdk'
+                        ? 'bg-primary text-white'
+                        : 'text-text-muted hover:text-text'
+                    }`}
+                  >
+                    Agent SDK
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDefaultAdapter('claude-code')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                      defaultAdapter === 'claude-code'
+                        ? 'bg-primary text-white'
+                        : 'text-text-muted hover:text-text'
+                    }`}
+                  >
+                    Claude Code
+                  </button>
+                </div>
               </div>
 
               {/* Scrollable content */}

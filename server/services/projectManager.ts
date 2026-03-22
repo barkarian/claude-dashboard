@@ -5,7 +5,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry, ChatAdapter } from '../../shared/types/models.ts';
 
 // === Project Methods ===
 
@@ -101,6 +101,7 @@ function getProject(projectId: string): Project | null {
     repo: row.repo || null,
     createdAt: row.created_at,
     shellOverride: row.shell_override || null,
+    defaultAdapter: (row.default_adapter as ChatAdapter) || 'claude-agent-sdk',
     scripts,
     chats,
   };
@@ -136,6 +137,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     repo: repoUrl || null,
     createdAt: now,
     shellOverride: null,
+    defaultAdapter: 'claude-agent-sdk',
     scripts: [],
     chats: [],
   };
@@ -161,12 +163,13 @@ function registerProject(name: string, projectPath: string): Project {
     repo: null,
     createdAt: now,
     shellOverride: null,
+    defaultAdapter: 'claude-agent-sdk',
     scripts: [],
     chats: [],
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -181,6 +184,9 @@ function updateProject(projectId: string, updates: { name?: string; path?: strin
   }
   if (updates.shellOverride !== undefined) {
     db.prepare('UPDATE projects SET shell_override = ? WHERE id = ?').run(updates.shellOverride, projectId);
+  }
+  if (updates.defaultAdapter !== undefined) {
+    db.prepare('UPDATE projects SET default_adapter = ? WHERE id = ?').run(updates.defaultAdapter, projectId);
   }
 
   return getProject(projectId);
@@ -275,6 +281,8 @@ function listChats(projectId: string): Chat[] {
     createdAt: r.created_at,
     history: [],
     sdkSessionId: r.sdk_session_id || null,
+    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    ccConversationId: r.cc_conversation_id || null,
   }));
 }
 
@@ -297,6 +305,8 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
     createdAt: r.created_at,
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
+    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    ccConversationId: r.cc_conversation_id || null,
   }));
 
   return { chats, total };
@@ -310,19 +320,24 @@ function listChatsWithHistory(projectId: string): Chat[] {
     createdAt: r.created_at,
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
+    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    ccConversationId: r.cc_conversation_id || null,
   }));
 }
 
-function createChat(projectId: string, label?: string): Chat {
+function createChat(projectId: string, label?: string, adapter?: ChatAdapter): Chat {
   const id = uuidv4();
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO chats (id, project_id, label, created_at) VALUES (?, ?, ?, ?)').run(id, projectId, label || 'New Chat', now);
+  const chatAdapter = adapter || 'claude-agent-sdk';
+  db.prepare('INSERT INTO chats (id, project_id, label, adapter, created_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, label || 'New Chat', chatAdapter, now);
   return {
     id,
     label: label || 'New Chat',
     createdAt: now,
     history: [],
     sdkSessionId: null,
+    adapter: chatAdapter,
+    ccConversationId: null,
   };
 }
 
@@ -335,15 +350,18 @@ function getChat(chatId: string): Chat | null {
     createdAt: row.created_at,
     history: getChatMessages(chatId),
     sdkSessionId: row.sdk_session_id || null,
+    adapter: (row.adapter as ChatAdapter) || 'claude-agent-sdk',
+    ccConversationId: row.cc_conversation_id || null,
   };
 }
 
-function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null }): Chat | null {
+function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null }): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
   if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
   if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
+  if (updates.ccConversationId !== undefined) db.prepare('UPDATE chats SET cc_conversation_id = ? WHERE id = ?').run(updates.ccConversationId, chatId);
 
   return getChat(chatId);
 }

@@ -94,6 +94,27 @@ try {
   // Column already exists — ignore
 }
 
+// Add default_adapter column to projects
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN default_adapter TEXT DEFAULT 'claude-agent-sdk'`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Add adapter column to chats
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN adapter TEXT DEFAULT 'claude-agent-sdk'`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Add cc_conversation_id column to chats
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN cc_conversation_id TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

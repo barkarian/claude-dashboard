@@ -13,12 +13,29 @@ import ScriptList from '../components/scripts/ScriptList.tsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
+import ClaudeCodeChatView from '../components/chat/ClaudeCodeChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
 import api from '../utils/api.ts';
 import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
+
+function ChatViewRouter({ projectId }: { projectId: string }) {
+  const { chatId } = useParams();
+  const location = useLocation();
+  const { project } = useProject();
+  const chat = project?.chats?.find(c => c.id === chatId);
+
+  // Use nav state adapter as fallback when project data is stale (just-created chat)
+  const navAdapter = (location.state as { adapter?: string } | null)?.adapter;
+  const adapter = chat?.adapter || navAdapter;
+
+  if (adapter === 'claude-code') {
+    return <ClaudeCodeChatView projectId={projectId} />;
+  }
+  return <SDKChatView projectId={projectId} />;
+}
 
 export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
@@ -124,7 +141,9 @@ export default function ProjectDashboardPage() {
   async function handleNewChat() {
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat' });
-      navigate(`/project/${id}/chats/${data.chat.id}`, { state: { isNewChat: true } });
+      navigate(`/project/${id}/chats/${data.chat.id}`, {
+        state: { isNewChat: true, adapter: data.chat.adapter },
+      });
     } catch (err) {
       console.error('Failed to create chat:', err);
     }
@@ -143,8 +162,13 @@ export default function ProjectDashboardPage() {
   async function handleDeleteChat() {
     if (!activeChatId) return;
     try {
-      if (sessionStatuses[activeChatId] && socket) {
-        socket.emit('sdk:end', { chatId: activeChatId });
+      if (socket) {
+        const chatToDelete = (project?.chats || []).find(c => c.id === activeChatId);
+        if (chatToDelete?.adapter === 'claude-code') {
+          socket.emit('cc:stop', { chatId: activeChatId });
+        } else if (sessionStatuses[activeChatId]) {
+          socket.emit('sdk:end', { chatId: activeChatId });
+        }
       }
       await api.delete(`/api/projects/${id}/chats/${activeChatId}`);
       await refreshProject();
@@ -185,7 +209,9 @@ export default function ProjectDashboardPage() {
           projectName={project.name}
           projectPath={project.path}
           shellOverride={project.shellOverride}
+          defaultAdapter={project.defaultAdapter || 'claude-agent-sdk'}
           onShellChanged={refreshProject}
+          onAdapterChanged={refreshProject}
         />
       )}
 
@@ -222,7 +248,7 @@ export default function ProjectDashboardPage() {
               <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />
             </div>
           } />
-          <Route path="chats/:chatId" element={<SDKChatView projectId={id!} />} />
+          <Route path="chats/:chatId" element={<ChatViewRouter projectId={id!} />} />
           <Route path="files" element={
             <div className="flex-1 flex flex-col overflow-hidden">
               <FilesPage projectId={id!} />

@@ -103,7 +103,9 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
     setCreating(true);
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
-      navigate(`/project/${projectId}/chats/${data.chat.id}`, { state: { isNewChat: true } });
+      navigate(`/project/${projectId}/chats/${data.chat.id}`, {
+        state: { isNewChat: true, adapter: data.chat.adapter },
+      });
     } catch (err) {
       console.error('Failed to create chat:', err);
     } finally {
@@ -121,8 +123,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
     if (!deleteTarget) return;
     haptics.notificationError();
     try {
-      if (sessionStatuses[deleteTarget.id] && socket) {
-        socket.emit('sdk:end', { chatId: deleteTarget.id });
+      if (socket) {
+        if (deleteTarget.adapter === 'claude-code') {
+          socket.emit('cc:stop', { chatId: deleteTarget.id });
+        } else if (sessionStatuses[deleteTarget.id]) {
+          socket.emit('sdk:end', { chatId: deleteTarget.id });
+        }
       }
       await api.delete(`/api/projects/${projectId}/chats/${deleteTarget.id}`);
       setChats(prev => prev.filter(c => c.id !== deleteTarget.id));
@@ -248,7 +254,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
             </svg>
             <div className="min-w-0 flex-1">
-              <div className="text-sm text-text truncate">{chat.label || 'Untitled Chat'}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm text-text truncate">{chat.label || 'Untitled Chat'}</span>
+                {chat.adapter === 'claude-code' && (
+                  <span className="flex-shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-primary/10 text-primary">CC</span>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
                 <span>{(chat.history || []).length} messages</span>
                 <span className="text-border">&middot;</span>
@@ -304,9 +315,16 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-medium text-text group-hover-hover:text-primary transition-colors truncate">
-                    {chat.label}
-                  </h4>
+                  <div className="flex items-center gap-1.5">
+                    <h4 className="font-medium text-text group-hover-hover:text-primary transition-colors truncate">
+                      {chat.label}
+                    </h4>
+                    {chat.adapter === 'claude-code' && (
+                      <span className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                        CC
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
                     <span>{(chat.history || []).length} messages</span>
                     <span className="text-border">&middot;</span>

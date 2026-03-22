@@ -49,11 +49,16 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath, repoUrl } = req.body;
+    const { name, path: projectPath, repoUrl, defaultAdapter } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
     const result = await projectManager.createProject(name, projectPath, repoUrl);
+    // Set default adapter if specified
+    if (defaultAdapter && result.project) {
+      projectManager.updateProject(result.project.id, { defaultAdapter });
+      result.project.defaultAdapter = defaultAdapter;
+    }
     res.status(201).json(result);
   } catch (err) {
     console.error('Error creating project:', err);
@@ -64,7 +69,7 @@ router.post('/', async (req: Request, res: Response) => {
 // Register an existing directory as a project
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath } = req.body;
+    const { name, path: projectPath, defaultAdapter } = req.body;
     if (!name || !projectPath) {
       return res.status(400).json({ error: 'Name and path are required' });
     }
@@ -72,6 +77,11 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Path does not exist on disk' });
     }
     const project = projectManager.registerProject(name, projectPath);
+    // Set default adapter if specified
+    if (defaultAdapter) {
+      projectManager.updateProject(project.id, { defaultAdapter });
+      project.defaultAdapter = defaultAdapter;
+    }
     res.status(201).json({ project });
   } catch (err: any) {
     console.error('Error registering project:', err);
@@ -394,12 +404,14 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
 
 router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const { label } = req.body;
+    const { label, adapter } = req.body;
     const project = projectManager.getProject(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
-    const chat = projectManager.createChat(req.params.id, label);
+    // Use explicit adapter if provided, otherwise fall back to project default
+    const chatAdapter = adapter || project.defaultAdapter || 'claude-agent-sdk';
+    const chat = projectManager.createChat(req.params.id, label, chatAdapter);
     res.status(201).json({ chat });
   } catch (err) {
     console.error('Error creating chat:', err);

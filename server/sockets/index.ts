@@ -1,6 +1,7 @@
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import registerTerminalEvents from './terminal.ts';
 import registerSDKClaudeEvents from './claude-sdk.ts';
+import registerClaudeCodeEvents from './claude-code.ts';
 import registerFileEvents from './files.ts';
 import registerAIGenerateEvents from './ai-generate.ts';
 
@@ -10,6 +11,7 @@ export default function registerSocketHandlers(io: SocketIOServer): void {
 
     registerTerminalEvents(socket, io);
     registerSDKClaudeEvents(socket, io);
+    registerClaudeCodeEvents(socket, io);
     registerFileEvents(socket, io);
     registerAIGenerateEvents(socket, io);
 

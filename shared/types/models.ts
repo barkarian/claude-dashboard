@@ -1,5 +1,7 @@
 // === Core Data Models ===
 
+export type ChatAdapter = 'claude-agent-sdk' | 'claude-code';
+
 export interface Script {
   id: string;
   label: string;
@@ -20,6 +22,8 @@ export interface Chat {
   createdAt: string;
   history: ChatHistoryEntry[];
   sdkSessionId: string | null;
+  adapter: ChatAdapter;
+  ccConversationId: string | null;
 }
 
 export interface Project {
@@ -29,6 +33,7 @@ export interface Project {
   repo: string | null;
   createdAt: string;
   shellOverride: string | null;
+  defaultAdapter: ChatAdapter;
   scripts: Script[];
   chats: Chat[];
 }

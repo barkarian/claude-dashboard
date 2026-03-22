@@ -67,6 +67,52 @@ export interface TerminalShellSpawnedPayload {
   scriptId: string;
 }
 
+// === Claude Code Socket Event Payloads ===
+
+export interface CCStartPayload {
+  projectId: string;
+  chatId: string;
+  conversationId?: string; // for resume
+}
+
+export interface CCInputPayload {
+  chatId: string;
+  data: string;
+}
+
+export interface CCResizePayload {
+  chatId: string;
+  cols: number;
+  rows: number;
+}
+
+export interface CCStopPayload {
+  chatId: string;
+}
+
+export interface CCAttachPayload {
+  chatId: string;
+}
+
+export interface CCDetachPayload {
+  chatId: string;
+}
+
+export interface CCOutputPayload {
+  chatId: string;
+  data: string;
+}
+
+export interface CCExitPayload {
+  chatId: string;
+  exitCode: number;
+}
+
+export interface CCStatusPayload {
+  chatId: string;
+  status: 'running' | 'exited' | 'error';
+}
+
 // === File Socket Event Payloads ===
 
 export interface FilesListPayload {

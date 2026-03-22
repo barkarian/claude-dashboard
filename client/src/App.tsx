@@ -19,6 +19,7 @@ import { initStatusBar } from './utils/statusBar.ts';
 import { haptics } from './utils/haptics.ts';
 import { useBackButton } from './hooks/useBackButton.ts';
 import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
+import { ccSwipeOverride } from './utils/ccSwipeOverride.ts';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -109,6 +110,11 @@ function SwipeHandler() {
 
     function handleTouchStart(e: TouchEvent) {
       const x = e.touches[0].clientX;
+      // CC override: track all swipes for arrow key mapping
+      if (ccSwipeOverride.current) {
+        touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        return;
+      }
       // Native: track all swipes (edge for back, rest for sidebar)
       // Browser: only left edge zone 20-80px (0-20 reserved for iOS system gesture)
       if (native || (x >= 20 && x <= 80)) {
@@ -124,13 +130,30 @@ function SwipeHandler() {
         return;
       }
       const startX = touchRef.current.startX;
+      const startY = touchRef.current.startY;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;
       const dx = endX - startX;
-      const dy = Math.abs(endY - touchRef.current.startY);
+      const dy = endY - startY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
       touchRef.current = null;
+
+      // Claude Code chat override: map swipes to arrow directions
+      if (ccSwipeOverride.current) {
+        const MIN_DIST = 40;
+        if (absDx > absDy && absDx > MIN_DIST) {
+          haptics.impactLight();
+          ccSwipeOverride.current(dx > 0 ? 'right' : 'left');
+        } else if (absDy > absDx && absDy > MIN_DIST) {
+          haptics.impactLight();
+          ccSwipeOverride.current(dy > 0 ? 'down' : 'up');
+        }
+        return;
+      }
+
       // Require 60px horizontal, mostly horizontal (dx > 2*dy)
-      if (dx > 60 && dx > dy * 2) {
+      if (dx > 60 && dx > absDy * 2) {
         const path = pathnameRef.current;
         const isRoot = path === '/' || path === '';
 

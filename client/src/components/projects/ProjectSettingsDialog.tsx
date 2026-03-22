@@ -30,7 +30,9 @@ interface ProjectSettingsDialogProps {
   projectName: string;
   projectPath: string;
   shellOverride: string | null;
+  defaultAdapter: string;
   onShellChanged?: () => void;
+  onAdapterChanged?: () => void;
 }
 
 interface ShellPreference {
@@ -46,7 +48,9 @@ export default function ProjectSettingsDialog({
   projectName,
   projectPath,
   shellOverride,
+  defaultAdapter,
   onShellChanged,
+  onAdapterChanged,
 }: ProjectSettingsDialogProps) {
   const navigate = useNavigate();
   const { refreshProjects } = useAppSidebar();
@@ -55,6 +59,10 @@ export default function ProjectSettingsDialog({
   const [shellPref, setShellPref] = useState<ShellPreference | null>(null);
   const [localShellOverride, setLocalShellOverride] = useState<string>(shellOverride || '');
   const [savingShell, setSavingShell] = useState(false);
+
+  // Adapter state
+  const [localAdapter, setLocalAdapter] = useState<string>(defaultAdapter || 'claude-agent-sdk');
+  const [savingAdapter, setSavingAdapter] = useState(false);
 
   // Delete state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -65,6 +73,7 @@ export default function ProjectSettingsDialog({
   useEffect(() => {
     if (!open) return;
     setLocalShellOverride(shellOverride || '');
+    setLocalAdapter(defaultAdapter || 'claude-agent-sdk');
     // Fetch account shell preference
     api.get<ShellPreference>('/api/shell-preference')
       .then(setShellPref)
@@ -85,6 +94,22 @@ export default function ProjectSettingsDialog({
       setSavingShell(false);
     }
   }
+
+  async function handleSaveAdapter() {
+    if (localAdapter === (defaultAdapter || 'claude-agent-sdk')) return;
+    setSavingAdapter(true);
+    try {
+      await api.patch(`/api/projects/${projectId}`, { defaultAdapter: localAdapter });
+      toast.success(`Default chat mode set to ${localAdapter === 'claude-code' ? 'Claude Code' : 'Agent SDK'}`);
+      onAdapterChanged?.();
+    } catch {
+      toast.error('Failed to update chat mode');
+    } finally {
+      setSavingAdapter(false);
+    }
+  }
+
+  const adapterChanged = localAdapter !== (defaultAdapter || 'claude-agent-sdk');
 
   async function openDeleteConfirm() {
     setShowDeleteConfirm(true);
@@ -163,6 +188,49 @@ export default function ProjectSettingsDialog({
                   disabled={savingShell}
                 >
                   {savingShell ? 'Saving...' : 'Save'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* AI Chat Mode */}
+          <div className="border-t border-border pt-4 mt-1">
+            <label className="text-xs font-medium text-text-dim uppercase tracking-wider">AI Chat Mode</label>
+            <p className="text-xs text-text-muted mt-0.5 mb-2">
+              Default adapter for new chats. Existing chats keep their original mode.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setLocalAdapter('claude-agent-sdk')}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                    localAdapter === 'claude-agent-sdk'
+                      ? 'bg-primary text-white'
+                      : 'text-text-muted hover:text-text'
+                  }`}
+                >
+                  Agent SDK
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocalAdapter('claude-code')}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                    localAdapter === 'claude-code'
+                      ? 'bg-primary text-white'
+                      : 'text-text-muted hover:text-text'
+                  }`}
+                >
+                  Claude Code
+                </button>
+              </div>
+              {adapterChanged && (
+                <Button
+                  size="sm"
+                  onClick={handleSaveAdapter}
+                  disabled={savingAdapter}
+                >
+                  {savingAdapter ? 'Saving...' : 'Save'}
                 </Button>
               )}
             </div>
