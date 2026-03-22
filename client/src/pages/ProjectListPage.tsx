@@ -1,116 +1,38 @@
-import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { Button } from '../components/ui/button.tsx';
 import { useSidebar } from '../components/ui/sidebar.tsx';
 import { useNewProjectDrawer } from '../context/NewProjectDrawerContext.tsx';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog.tsx';
-import { Input } from '../components/ui/input.tsx';
 import MobileSearchSheet from '../components/ui/MobileSearchSheet.tsx';
-import TruncatedPath from '../components/ui/truncated-path.tsx';
+import ProjectCard from '../components/projects/ProjectCard.tsx';
+import PullToRefresh from '../components/ui/PullToRefresh.tsx';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll.ts';
 import { useIsMobile } from '../hooks/use-mobile.tsx';
-import { isCapacitorNative } from '../utils/platform.ts';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
 
-const swarmHintStyle = `
-@keyframes swarmFadeIn {
-  0%   { opacity: 0; transform: translateX(-8px); }
-  100% { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes swarmEdgeTop {
-  0%   { transform: scaleX(0) translateY(0); }
-  30%  { transform: scaleX(0.5) translateY(-6px); }
-  60%  { transform: scaleX(0.85) translateY(-2px); }
-  100% { transform: scaleX(1) translateY(0); }
-}
-
-@keyframes swarmEdgeBottom {
-  0%   { transform: scaleX(0) translateY(0); }
-  30%  { transform: scaleX(0.45) translateY(6px); }
-  60%  { transform: scaleX(0.8) translateY(2px); }
-  100% { transform: scaleX(1) translateY(0); }
-}
-
-@keyframes arrowBounce {
-  0%   { transform: translateX(0); }
-  50%  { transform: translateX(-5px); }
-  100% { transform: translateX(0); }
-}
-
-.swarm-hint {
-  position: relative;
-  animation: swarmFadeIn 0.4s ease-out both;
-  border-top-color: transparent !important;
-  border-bottom-color: transparent !important;
-}
-
-.swarm-hint::before,
-.swarm-hint::after {
-  content: '';
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  height: 1px;
-  background: #2a2d3a;
-  transform-origin: left center;
-  pointer-events: none;
-  will-change: transform;
-}
-
-.swarm-hint::before {
-  top: -1px;
-  border-radius: 8px 8px 0 0;
-  animation: swarmEdgeTop 0.8s ease-out 0.1s both;
-}
-
-.swarm-hint::after {
-  bottom: -1px;
-  border-radius: 0 0 8px 8px;
-  animation: swarmEdgeBottom 0.8s ease-out 0.15s both;
-}
-`;
+const PAGE_SIZE = 5;
 
 export default function ProjectListPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const { openDrawer } = useNewProjectDrawer();
   const isMobile = useIsMobile();
-  const isNative = isCapacitorNative();
 
-  // Prompt state
-  const [message, setMessage] = useState('');
-  const [selectedProject, setSelectedProject] = useState<ProjectSummary | null>(null);
-  const [sending, setSending] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  // Command dialog state
-  const [cmdOpen, setCmdOpen] = useState(false);
-  const [cmdProjects, setCmdProjects] = useState<ProjectSummary[]>([]);
-  const [cmdSearch, setCmdSearch] = useState('');
-  const [cmdLoading, setCmdLoading] = useState(false);
-  const cmdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cmdInputRef = useRef<HTMLInputElement>(null);
-
-  // Animation re-trigger key
-  const [hintKey, setHintKey] = useState(0);
-  useEffect(() => {
-    setHintKey(k => k + 1);
-  }, [location.key]);
-
-  // Auto-select latest project for prompt picker
-  useEffect(() => {
-    if (selectedProject) return;
-    api.get<{ projects: ProjectSummary[]; total: number }>('/api/projects?limit=1&offset=0')
-      .then((data) => {
-        if (data.projects?.length) setSelectedProject(data.projects[0]);
-      })
-      .catch(() => {});
-  }, []);
+  // Paginated state
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const offsetRef = useRef(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   // On mobile: trap back gesture so it does nothing on the root page
-  // (silently re-push state without opening sidebar)
   useEffect(() => {
     if (window.innerWidth >= 768) return;
     setOpenMobile(false);
@@ -122,75 +44,60 @@ export default function ProjectListPage() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [setOpenMobile]);
 
-  // Auto-resize textarea
+  // Debounce search query
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Fetch projects on mount and search change
+  useEffect(() => {
+    loadProjects(true);
+  }, [debouncedSearch]);
+
+  async function loadProjects(reset: boolean) {
+    const currentOffset = reset ? 0 : offsetRef.current;
+    if (!reset) setLoadingMore(true);
+    if (reset) {
+      setInitialLoading(true);
+      setHasMore(false);
     }
-  }, [message]);
 
-  // --- Command dialog ---
-  function openCmd() {
-    setCmdOpen(true);
-    setCmdSearch('');
-    fetchCmdProjects('');
-    setTimeout(() => cmdInputRef.current?.focus(), 100);
-  }
-
-  function fetchCmdProjects(q: string) {
-    setCmdLoading(true);
-    const searchParam = q ? `&search=${encodeURIComponent(q)}` : '';
-    api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=20&offset=0${searchParam}`)
-      .then((data) => setCmdProjects(data.projects || []))
-      .catch(() => {})
-      .finally(() => setCmdLoading(false));
-  }
-
-  function handleCmdSearchChange(value: string) {
-    setCmdSearch(value);
-    if (cmdTimerRef.current) clearTimeout(cmdTimerRef.current);
-    cmdTimerRef.current = setTimeout(() => fetchCmdProjects(value), 300);
-  }
-
-  function handleCmdSelect(project: ProjectSummary) {
-    setSelectedProject(project);
-    setCmdOpen(false);
-  }
-
-  function handleCmdNewProject() {
-    setCmdOpen(false);
-    openDrawer();
-  }
-
-  // --- Prompt handlers ---
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
-
-  async function handleSend() {
-    if (!message.trim() || !selectedProject || sending) return;
-    setSending(true);
     try {
-      const data = await api.post<{ chat: { id: string } }>(`/api/projects/${selectedProject.id}/chats`, {
-        label: message.trim().slice(0, 60),
-      });
-      navigate(`/project/${selectedProject.id}/chats/${data.chat.id}`, {
-        state: { isNewChat: true, prefillContent: message.trim(), autoSend: true },
-      });
-    } catch (err) {
-      console.error('Failed to create chat:', err);
-      setSending(false);
+      const searchParam = debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : '';
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(
+        `/api/projects?limit=${PAGE_SIZE}&offset=${currentOffset}${searchParam}`
+      );
+      const newProjects = data.projects || [];
+      if (reset) {
+        setProjects(newProjects);
+      } else {
+        setProjects(prev => [...prev, ...newProjects]);
+      }
+      const newOffset = currentOffset + newProjects.length;
+      setTotal(data.total || 0);
+      offsetRef.current = newOffset;
+      setHasMore(newOffset < (data.total || 0));
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false);
+      setInitialLoading(false);
     }
   }
+
+  const loadMore = useCallback(() => {
+    if (!loadingMore && hasMore) {
+      loadProjects(false);
+    }
+  }, [loadingMore, hasMore, debouncedSearch]);
+
+  const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
+
+  const showSearch = projects.length > 0 || searchQuery;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <style>{swarmHintStyle}</style>
-
       {/* Header */}
       <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
         <div className="flex items-center justify-between h-12 px-4">
@@ -219,186 +126,127 @@ export default function ProjectListPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-xl mx-auto w-full px-4 py-6">
-          {/* ===== PROMPT BOX ===== */}
-          <div className="bg-bg-surface border border-border rounded-xl overflow-hidden">
-            {/* Textarea */}
-            <textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="w-full bg-transparent px-4 pt-3 pb-2 text-text placeholder-text-dim focus:outline-none resize-none min-h-[80px] max-h-[200px]"
-              placeholder="What do you want to build?"
-              rows={3}
-            />
+        <PullToRefresh onRefresh={() => loadProjects(true)} className="max-w-xl mx-auto w-full px-4 py-4 space-y-3">
+          {/* New Project button */}
+          <Button onClick={openDrawer} variant="outline" className="w-full">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New Project
+          </Button>
 
-            {/* Bottom bar: project picker button + send */}
-            <div className="border-t border-border px-3 py-2 flex items-center gap-2">
+          {/* Search input */}
+          {showSearch && (
+            <div className="relative">
+              <svg className="w-4 h-4 text-text-dim absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={(e) => {
+                  if (isMobile) {
+                    e.target.blur();
+                    setSheetOpen(true);
+                  }
+                }}
+                placeholder="Search projects..."
+                readOnly={isMobile}
+                className="w-full pl-9 pr-8 py-2 text-sm bg-bg-surface border border-border rounded-lg text-text placeholder:text-text-dim focus:outline-none focus:border-primary transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                  aria-label="Clear search"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Mobile search sheet */}
+          <MobileSearchSheet
+            open={sheetOpen}
+            onOpenChange={(open) => {
+              setSheetOpen(open);
+              if (!open && !searchQuery) setSearchQuery('');
+            }}
+            title="Search Projects"
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Search projects..."
+            loading={initialLoading}
+            emptyContent={
+              projects.length === 0 && searchQuery
+                ? <div className="py-4 text-sm text-text-muted text-center">No matching projects</div>
+                : projects.length === 0
+                  ? <div className="py-4 text-sm text-text-muted text-center">No projects yet</div>
+                  : undefined
+            }
+          >
+            {projects.map((project) => (
               <button
-                onClick={openCmd}
-                className="flex items-center gap-1.5 text-xs bg-bg rounded-md px-2 py-1.5 border border-border hover:border-primary/50 transition-colors min-w-0 flex-1"
+                key={project.id}
+                onClick={() => {
+                  setSheetOpen(false);
+                  navigate(`/project/${project.id}`);
+                }}
+                className="w-full text-left px-3 py-2.5 rounded-lg active:bg-bg-hover transition-colors flex items-center gap-2"
               >
-                <svg className="w-3.5 h-3.5 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                 </svg>
-                <span className="text-text truncate">
-                  {selectedProject ? selectedProject.name : 'Select project...'}
-                </span>
-                <svg className="w-3 h-3 text-text-dim flex-shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-text truncate">{project.name}</div>
+                  <div className="text-xs text-text-muted mt-0.5">
+                    {project.chatsCount || 0} chats · {project.scriptsCount || 0} scripts
+                  </div>
+                </div>
+                <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                 </svg>
               </button>
+            ))}
+          </MobileSearchSheet>
 
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-xs text-text-dim hidden sm:inline">Cmd+Enter</span>
-                <Button
-                  onClick={handleSend}
-                  disabled={!message.trim() || !selectedProject || sending}
-                  className="h-7 px-3 text-xs gap-1"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                  </svg>
-                  Send
-                </Button>
-              </div>
+          {/* Project list */}
+          {initialLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
             </div>
-          </div>
-
-          {/* ===== PROJECT PICKER ===== */}
-          {isMobile ? (
-            <MobileSearchSheet
-              open={cmdOpen}
-              onOpenChange={(open) => !open && setCmdOpen(false)}
-              title="Select Project"
-              searchValue={cmdSearch}
-              onSearchChange={handleCmdSearchChange}
-              searchPlaceholder="Search projects..."
-              loading={cmdLoading}
-              emptyContent={
-                cmdProjects.length === 0 && !cmdLoading
-                  ? <div className="py-4 text-sm text-text-muted text-center">No projects found</div>
-                  : undefined
-              }
-              actionSlot={
-                <button
-                  onClick={handleCmdNewProject}
-                  className="flex items-center gap-1 text-xs font-medium text-primary px-2 py-1 rounded-md hover:bg-bg-hover transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  New
-                </button>
-              }
-            >
-              {cmdProjects.map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => handleCmdSelect(project)}
-                  className="w-full text-left px-3 py-2.5 rounded-lg active:bg-bg-hover transition-colors flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-                  </svg>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm text-text truncate">{project.name}</div>
-                    {project.path && <TruncatedPath path={project.path} />}
-                  </div>
-                  {selectedProject?.id === project.id && (
-                    <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                  )}
-                </button>
-              ))}
-            </MobileSearchSheet>
-          ) : (
-            <Dialog open={cmdOpen} onOpenChange={(open) => !open && setCmdOpen(false)}>
-              <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
-                <DialogHeader>
-                  <DialogTitle>Select Project</DialogTitle>
-                </DialogHeader>
-
-                <div className="mb-3">
-                  <Input
-                    ref={cmdInputRef}
-                    type="text"
-                    value={cmdSearch}
-                    onChange={(e) => handleCmdSearchChange(e.target.value)}
-                    className="text-sm py-1.5"
-                    placeholder="Search projects..."
-                  />
-                </div>
-
-                <div className="overflow-y-auto flex-1 -mx-6 px-6">
-                  <button
-                    onClick={handleCmdNewProject}
-                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2 mb-1"
-                  >
-                    <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    <span className="text-sm font-medium text-primary">New Project</span>
-                  </button>
-
-                  {cmdLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
-                    </div>
-                  ) : cmdProjects.length === 0 ? (
-                    <div className="py-4 text-sm text-text-muted text-center">No projects found</div>
-                  ) : (
-                    cmdProjects.map((project) => (
-                      <button
-                        key={project.id}
-                        onClick={() => handleCmdSelect(project)}
-                        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-                        </svg>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm text-text truncate">{project.name}</div>
-                          {project.path && <TruncatedPath path={project.path} />}
-                        </div>
-                        {selectedProject?.id === project.id && (
-                          <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          {/* ===== MOBILE HINT BAR ===== */}
-          {isMobile && (
-            <button
-              key={hintKey}
-              onClick={() => setOpenMobile(true)}
-              className="swarm-hint mt-8 w-full flex items-center gap-2.5 px-3 py-3 rounded-lg bg-bg-surface border border-border hover:bg-bg-hover transition-colors"
-            >
-              <svg
-                className="w-4 h-4 text-text-muted flex-shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                style={{ animation: 'arrowBounce 1.5s ease-in-out 1s 2' }}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          ) : projects.length === 0 && !searchQuery ? (
+            <div className="text-center py-12">
+              <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
               </svg>
-              <span className="text-sm text-text-muted">
-                {isNative ? 'Swipe right to see all projects' : 'Projects'}
-              </span>
-            </button>
+              <h3 className="text-text font-medium mb-1">No projects yet</h3>
+              <p className="text-text-muted text-sm mb-4">Create your first project to get started</p>
+            </div>
+          ) : projects.length === 0 && searchQuery ? (
+            <div className="text-center py-8">
+              <p className="text-text-muted text-sm">No matching projects</p>
+            </div>
+          ) : (
+            <>
+              {projects.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+
+              {/* Infinite scroll sentinel */}
+              <div ref={sentinelRef} />
+              {loadingMore && (
+                <div className="flex justify-center py-2">
+                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                </div>
+              )}
+            </>
           )}
-        </div>
+        </PullToRefresh>
       </div>
     </div>
   );
