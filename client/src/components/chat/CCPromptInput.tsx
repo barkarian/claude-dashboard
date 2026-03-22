@@ -17,6 +17,7 @@ interface CCPromptInputProps {
   onArrow: (data: string) => void;
   onInterrupt: () => void;
   autoFocus?: boolean;
+  promptSuggestion?: { text: string; id: number } | null;
 }
 
 // ANSI escape sequences
@@ -28,7 +29,7 @@ const ESC = '\x1b';
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';
 
-export default function CCPromptInput({ projectId, status, onSend, onArrow, onInterrupt, autoFocus }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion }: CCPromptInputProps) {
   const [value, setValue] = useState('');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
   const [swipeInfoDismissed, setSwipeInfoDismissed] = useState(false);
@@ -39,6 +40,15 @@ export default function CCPromptInput({ projectId, status, onSend, onArrow, onIn
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
+
+  // Sync prompt suggestion from terminal history (arrow up/down) into textarea
+  const lastSuggestionIdRef = useRef(-1);
+  useEffect(() => {
+    if (promptSuggestion && promptSuggestion.id !== lastSuggestionIdRef.current) {
+      lastSuggestionIdRef.current = promptSuggestion.id;
+      setValue(promptSuggestion.text);
+    }
+  }, [promptSuggestion]);
 
   useEffect(() => {
     if (textareaRef.current) {

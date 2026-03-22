@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
@@ -39,22 +39,35 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
 
-  const { terminal, status, write } = useClaudeCode(containerRef, {
+  const { terminal, status, write, getPromptLine } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
     conversationId,
   });
 
-  // Keep write ref up to date for the swipe handler
+  // Prompt suggestion: syncs terminal history recall into the textarea
+  const [promptSuggestion, setPromptSuggestion] = useState<{ text: string; id: number } | null>(null);
+  const suggestionIdRef = useRef(0);
+
+  // Keep refs up to date for the swipe handler
   writeRef.current = write;
+  const getPromptLineRef = useRef(getPromptLine);
+  getPromptLineRef.current = getPromptLine;
 
   // Register swipe override: map swipe gestures to arrow keys + scroll to bottom
   useEffect(() => {
     ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
       writeRef.current(ARROW_MAP[direction]);
-      // Delay scrollToBottom so the terminal processes the input first
-      setTimeout(() => terminal.current?.scrollToBottom(), 50);
+      setTimeout(() => {
+        terminal.current?.scrollToBottom();
+        // After up/down swipe, extract prompt content into textarea
+        if (direction === 'up' || direction === 'down') {
+          const content = getPromptLineRef.current();
+          suggestionIdRef.current++;
+          setPromptSuggestion({ text: content, id: suggestionIdRef.current });
+        }
+      }, 150);
     };
     return () => {
       ccSwipeOverride.current = null;
@@ -76,8 +89,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   }, [status, setActiveChatStatus]);
 
   const handleSend = useCallback((data: string) => {
-    write(data);
+    // Clear the terminal's current line first (Ctrl+U) to avoid sending
+    // both the history-recalled text and the new textarea text
+    write('\x15' + data);
     terminal.current?.scrollToBottom();
+    setPromptSuggestion(null);
 
     // Auto-title: on first real user message, rename the chat
     if (!firstMessageSentRef.current && chatId) {
@@ -103,8 +119,16 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   const handleArrow = useCallback((data: string) => {
     write(data);
-    setTimeout(() => terminal.current?.scrollToBottom(), 50);
-  }, [write, terminal]);
+    setTimeout(() => {
+      terminal.current?.scrollToBottom();
+      // After up/down arrow, extract prompt content into textarea
+      if (data === '\x1b[A' || data === '\x1b[B') {
+        const content = getPromptLine();
+        suggestionIdRef.current++;
+        setPromptSuggestion({ text: content, id: suggestionIdRef.current });
+      }
+    }, 150);
+  }, [write, terminal, getPromptLine]);
 
   const handleInterrupt = useCallback(() => {
     write('\x03');
@@ -156,6 +180,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         onArrow={handleArrow}
         onInterrupt={handleInterrupt}
         autoFocus={isNewChat}
+        promptSuggestion={promptSuggestion}
       />
     </div>
   );

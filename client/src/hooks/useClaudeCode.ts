@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -19,6 +19,7 @@ interface UseClaudeCodeReturn {
   status: 'disconnected' | 'running' | 'exited' | 'error';
   write: (data: string) => void;
   stop: () => void;
+  getPromptLine: () => string;
 }
 
 export function useClaudeCode(
@@ -40,6 +41,21 @@ export function useClaudeCode(
       socket.emit('cc:stop', { chatId });
     }
   }
+
+  // Read the current terminal line and extract text after the prompt symbol.
+  // Used to sync history recall (arrow up/down) into the textarea input.
+  const getPromptLine = useCallback((): string => {
+    const term = termRef.current;
+    if (!term) return '';
+    const buffer = term.buffer.active;
+    const lineIndex = buffer.baseY + buffer.cursorY;
+    const line = buffer.getLine(lineIndex);
+    if (!line) return '';
+    const raw = line.translateToString(true);
+    // Strip prompt prefix: common prompt symbols (❯ > › $ % #) followed by space
+    const match = raw.match(/^\s*[❯>›$%#]\s+(.*)/);
+    return match ? match[1].trim() : '';
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || !socket) return;
@@ -334,5 +350,5 @@ export function useClaudeCode(
     };
   }, [containerRef, socket, projectId, chatId]);
 
-  return { terminal: termRef, status, write, stop };
+  return { terminal: termRef, status, write, stop, getPromptLine };
 }
