@@ -15,6 +15,10 @@ import type { GitHubRepo, Project } from '../../../../shared/types/models.ts';
 
 type Tab = 'existing' | 'clone' | 'empty';
 
+function toFolderName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
 export default function NewProjectDrawer() {
   const { isOpen, closeDrawer } = useNewProjectDrawer();
   const { refreshProjects } = useAppSidebar();
@@ -28,6 +32,12 @@ export default function NewProjectDrawer() {
   // Clone tab state
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [customUrl, setCustomUrl] = useState('');
+
+  // Empty tab state
+  const [emptyFolderName, setEmptyFolderName] = useState('');
+  const [emptyDirPath, setEmptyDirPath] = useState('');
+  const [emptySelectedBrowserPath, setEmptySelectedBrowserPath] = useState('');
+  const [emptyFolderNameEdited, setEmptyFolderNameEdited] = useState(false);
 
   // Shared state
   const [projectName, setProjectName] = useState('');
@@ -44,6 +54,10 @@ export default function NewProjectDrawer() {
     setCustomUrl('');
     setProjectName('');
     setProjectPath('');
+    setEmptyFolderName('');
+    setEmptyDirPath('');
+    setEmptySelectedBrowserPath('');
+    setEmptyFolderNameEdited(false);
     setCreating(false);
     setError('');
     setCreatedProjectId(null);
@@ -64,6 +78,10 @@ export default function NewProjectDrawer() {
     setCustomUrl('');
     setProjectName('');
     setProjectPath('');
+    setEmptyFolderName('');
+    setEmptyDirPath('');
+    setEmptySelectedBrowserPath('');
+    setEmptyFolderNameEdited(false);
     setError('');
     setCreatedProjectId(null);
     setSuccess(false);
@@ -124,14 +142,22 @@ export default function NewProjectDrawer() {
   }
 
   // --- Empty tab ---
+  function handleEmptyFolderSelect(path: string) {
+    setEmptyDirPath(path);
+    setEmptySelectedBrowserPath(path);
+  }
+
   async function handleCreateEmpty() {
-    if (!projectName.trim()) return;
+    if (!projectName.trim() || !emptyFolderName.trim()) return;
     setCreating(true);
     setError('');
     try {
+      const fullPath = emptyDirPath
+        ? `${emptyDirPath}/${emptyFolderName}`.replace('//', '/')
+        : undefined;
       const data = await api.post<{ project: Project }>('/api/projects', {
         name: projectName,
-        path: projectPath || undefined,
+        path: fullPath,
         repoUrl: null,
       });
       setCreatedProjectId(data.project.id);
@@ -289,18 +315,33 @@ export default function NewProjectDrawer() {
                       <Input
                         type="text"
                         value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
-                        placeholder="my-project"
+                        onChange={(e) => {
+                          setProjectName(e.target.value);
+                          if (!emptyFolderNameEdited) {
+                            setEmptyFolderName(toFolderName(e.target.value));
+                          }
+                        }}
+                        placeholder="My New Project"
                       />
                     </div>
                     <div>
-                      <Label>Directory Path (optional)</Label>
+                      <Label>Folder Name</Label>
                       <Input
                         type="text"
-                        value={projectPath}
-                        onChange={(e) => setProjectPath(e.target.value)}
+                        value={emptyFolderName}
+                        onChange={(e) => {
+                          setEmptyFolderName(e.target.value);
+                          setEmptyFolderNameEdited(true);
+                        }}
                         className="font-mono"
-                        placeholder="Leave empty for default ~/projects/"
+                        placeholder="my-new-project"
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-2 block">Parent Directory</Label>
+                      <FolderBrowser
+                        onSelect={handleEmptyFolderSelect}
+                        selectedPath={emptySelectedBrowserPath}
                       />
                     </div>
                   </div>
@@ -350,18 +391,26 @@ export default function NewProjectDrawer() {
                   </Button>
                 )}
                 {tab === 'empty' && (
-                  <Button
-                    onClick={handleCreateEmpty}
-                    className="w-full"
-                    disabled={creating || !projectName.trim()}
-                  >
-                    {creating ? (
-                      <>
-                        <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        Creating...
-                      </>
-                    ) : 'Create Empty Project'}
-                  </Button>
+                  <div className="space-y-1">
+                    <Button
+                      onClick={handleCreateEmpty}
+                      className="w-full"
+                      disabled={creating || !projectName.trim() || !emptyFolderName.trim()}
+                    >
+                      {creating ? (
+                        <>
+                          <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                          Creating...
+                        </>
+                      ) : 'Create Empty Project'}
+                    </Button>
+                    {emptyFolderName && (
+                      <TruncatedPath
+                        path={emptyDirPath ? `${emptyDirPath}/${emptyFolderName}` : `~/projects/${emptyFolderName}`}
+                        className="justify-center"
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             </>

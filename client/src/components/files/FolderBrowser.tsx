@@ -200,7 +200,15 @@ function FileTreeRow({ node, style, dragHandle, isMobile, projectId, getNameColo
   return (
     <div
       ref={dragHandle}
-      style={style}
+      style={{
+        ...style,
+        ...(isMobile && node.isLeaf ? {
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+          touchAction: 'pan-y',
+        } as React.CSSProperties : {}),
+      }}
       className={`flex items-center gap-2 px-3 cursor-pointer hover:bg-bg-hover rounded text-sm group ${
         node.isSelected ? 'bg-bg-hover' : ''
       }`}

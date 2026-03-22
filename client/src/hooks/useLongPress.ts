@@ -23,11 +23,15 @@ export function useLongPress(onActivate: (position: { x: number; y: number }) =>
     startPos.current = null;
   }, []);
 
+  const firedRef = useRef(false);
+
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     startPos.current = { x: touch.clientX, y: touch.clientY };
+    firedRef.current = false;
 
     timerRef.current = setTimeout(() => {
+      firedRef.current = true;
       haptics.impactLight();
       onActivate({ x: touch.clientX, y: touch.clientY });
       timerRef.current = null;
@@ -44,11 +48,15 @@ export function useLongPress(onActivate: (position: { x: number; y: number }) =>
     }
   }, [cancel]);
 
-  const onTouchEnd = useCallback(() => {
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    // If long-press already fired, prevent the click/tap from propagating
+    if (firedRef.current) {
+      e.preventDefault();
+    }
     cancel();
   }, [cancel]);
 
-  const onContextMenu = useCallback((e: React.MouseEvent) => {
+  const onContextMenu = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
   }, []);
 
