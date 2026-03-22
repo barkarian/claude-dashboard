@@ -87,10 +87,16 @@ body::before {
   border-radius: 3px;
 }
 
-/* Mobile: prevent terminal scroll from chaining to the page */
+/* Mobile: prevent terminal scroll from chaining to the page + enable momentum */
 @media (max-width: 767px) {
   .xterm .xterm-viewport {
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide native scrollbar on mobile — custom DOM indicator is used instead */
+  .xterm .xterm-viewport::-webkit-scrollbar {
+    display: none;
   }
 }
 

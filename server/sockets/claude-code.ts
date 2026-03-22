@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
@@ -48,8 +49,14 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       // Build claude command args
       const args = ['--dangerously-skip-permissions'];
-      if (conversationId) {
-        args.push('--resume', conversationId);
+      let sessionId = conversationId;
+      if (sessionId) {
+        args.push('--resume', sessionId);
+      } else {
+        // Generate a new session ID so we can resume later
+        sessionId = randomUUID();
+        args.push('--session-id', sessionId);
+        projectManager.updateChat(chatId, { ccConversationId: sessionId });
       }
 
       const ptyProcess = pty.spawn('claude', args, {
