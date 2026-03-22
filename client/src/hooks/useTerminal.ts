@@ -112,8 +112,10 @@ export function useTerminal(
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
-        // Kill ALL native/xterm touch scrolling at the compositor level.
+        // Completely lock viewport scrolling — only our scrollbar thumb can
+        // change scrollTop programmatically.
         viewport.style.touchAction = 'none';
+        viewport.style.overflowY = 'hidden';
 
         // --- Always-visible draggable scrollbar (iOS ignores ::-webkit-scrollbar) ---
         const scrollTrack = document.createElement('div');
@@ -188,18 +190,11 @@ export function useTerminal(
           updateScrollbar();
         }
 
-        function blockContentScroll(e: TouchEvent) {
-          if (!scrollTrack.contains(e.target as Node)) {
-            e.preventDefault();
-          }
-        }
-
         scrollThumb.addEventListener('touchstart', onThumbTouchStart, { passive: false });
         scrollTrack.addEventListener('touchstart', onTrackTap, { passive: false });
         document.addEventListener('touchmove', onDragMove, { passive: false });
         document.addEventListener('touchend', onDragEnd, { passive: true });
         document.addEventListener('touchcancel', onDragEnd, { passive: true });
-        viewport.addEventListener('touchmove', blockContentScroll, { passive: false });
 
         viewport.addEventListener('scroll', updateScrollbar, { passive: true });
         const contentObserver = new MutationObserver(updateScrollbar);
@@ -209,7 +204,6 @@ export function useTerminal(
           scrollTrack.remove();
           contentObserver.disconnect();
           viewport.removeEventListener('scroll', updateScrollbar);
-          viewport.removeEventListener('touchmove', blockContentScroll);
           scrollThumb.removeEventListener('touchstart', onThumbTouchStart);
           scrollTrack.removeEventListener('touchstart', onTrackTap);
           document.removeEventListener('touchmove', onDragMove);

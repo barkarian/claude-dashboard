@@ -133,9 +133,11 @@ export function useClaudeCode(
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
-        // Kill ALL native/xterm touch scrolling at the compositor level.
-        // This prevents the brief scroll-then-snap-back jitter on swipe.
+        // Completely lock viewport scrolling — only our scrollbar thumb can
+        // change scrollTop programmatically. This prevents xterm's internal
+        // touch-scroll handler from causing jitter on swipe gestures.
         viewport.style.touchAction = 'none';
+        viewport.style.overflowY = 'hidden';
 
         // --- Always-visible draggable scrollbar (iOS ignores ::-webkit-scrollbar) ---
         // Scrolling ONLY via scrollbar drag on mobile — content drag is disabled
@@ -215,19 +217,11 @@ export function useClaudeCode(
           updateScrollbar();
         }
 
-        // Block ALL content touch-scrolling on the viewport (swipes pass through for gestures)
-        function blockContentScroll(e: TouchEvent) {
-          if (!scrollTrack.contains(e.target as Node)) {
-            e.preventDefault();
-          }
-        }
-
         scrollThumb.addEventListener('touchstart', onThumbTouchStart, { passive: false });
         scrollTrack.addEventListener('touchstart', onTrackTap, { passive: false });
         document.addEventListener('touchmove', onDragMove, { passive: false });
         document.addEventListener('touchend', onDragEnd, { passive: true });
         document.addEventListener('touchcancel', onDragEnd, { passive: true });
-        viewport.addEventListener('touchmove', blockContentScroll, { passive: false });
 
         // Keep scrollbar in sync when terminal content changes
         viewport.addEventListener('scroll', updateScrollbar, { passive: true });
@@ -238,7 +232,6 @@ export function useClaudeCode(
           scrollTrack.remove();
           contentObserver.disconnect();
           viewport.removeEventListener('scroll', updateScrollbar);
-          viewport.removeEventListener('touchmove', blockContentScroll);
           scrollThumb.removeEventListener('touchstart', onThumbTouchStart);
           scrollTrack.removeEventListener('touchstart', onTrackTap);
           document.removeEventListener('touchmove', onDragMove);
