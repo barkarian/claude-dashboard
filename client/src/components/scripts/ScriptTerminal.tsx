@@ -105,7 +105,9 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
         </div>
       </div>
 
-      <div ref={containerRef} className="flex-1 overflow-hidden" />
+      <div className="flex-1 overflow-hidden relative">
+        <div ref={containerRef} className="absolute inset-0" />
+      </div>
 
       <TerminalInputBar onSend={handleInputSend} disabled={!isRunning} projectId={projectId} />
 

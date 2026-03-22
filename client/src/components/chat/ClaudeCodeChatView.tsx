@@ -120,8 +120,10 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Terminal container */}
-      <div ref={containerRef} className="flex-1 overflow-hidden" />
+      {/* Terminal wrapper: flex-1 for correct height, terminal positioned inside */}
+      <div className="flex-1 overflow-hidden relative">
+        <div ref={containerRef} className="absolute inset-0" />
+      </div>
 
       {/* Status bar when exited */}
       {status === 'exited' && (

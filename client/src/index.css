@@ -87,6 +87,13 @@ body::before {
   border-radius: 3px;
 }
 
+/* Mobile: prevent terminal scroll from chaining to the page */
+@media (max-width: 767px) {
+  .xterm .xterm-viewport {
+    overscroll-behavior: contain;
+  }
+}
+
 /* Custom diff viewer */
 .diff-viewer table {
   border-spacing: 0;

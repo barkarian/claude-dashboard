@@ -4,8 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
 
-// Width in px that fits ~120 cols at fontSize 14
-const WIDE_WIDTH = 1024;
+// Width in px that fits ~58 cols at fontSize 14 (mobile-friendly, keeps Claude Code UI readable)
+const WIDE_WIDTH = 800;
 
 interface UseTerminalOptions {
   socket: Socket | null;
@@ -64,6 +64,7 @@ export function useTerminal(
       },
       disableStdin: readOnly,
       scrollback: 5000,
+      scrollSensitivity: isMobile ? 5 : 1,
     });
 
     const fitAddon = new FitAddon();
@@ -79,7 +80,9 @@ export function useTerminal(
       } catch {}
     }
 
-    // On mobile: stretch container so FitAddon computes ~120 cols, then scale down
+    // On mobile: stretch container so FitAddon computes wider cols, then scale down.
+    // containerRef sits inside an absolutely-positioned wrapper whose parent has flex-1,
+    // so parentElement gives us the correct available dimensions.
     const scaleTarget = wrapperRef?.current || containerRef.current!.parentElement;
     function applyMobileScale() {
       const container = containerRef.current;
@@ -87,6 +90,7 @@ export function useTerminal(
 
       const parentW = (scaleTarget as HTMLElement).offsetWidth;
       const parentH = (scaleTarget as HTMLElement).offsetHeight;
+      if (parentH === 0) return;
       const scale = Math.min(1, parentW / WIDE_WIDTH);
 
       container.style.width = `${WIDE_WIDTH}px`;
