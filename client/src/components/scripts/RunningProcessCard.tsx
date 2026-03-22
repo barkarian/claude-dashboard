@@ -35,7 +35,11 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
   function handleStop() {
     if (!socket) return;
     haptics.impactMedium();
-    socket.emit('terminal:stop', { projectId, scriptId: process.scriptId });
+    if (isCCProcess) {
+      socket.emit('cc:stop', { chatId: process.chatId });
+    } else {
+      socket.emit('terminal:stop', { projectId, scriptId: process.scriptId });
+    }
     setTimeout(onRefresh, 300);
   }
 
@@ -54,9 +58,10 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
     stopped: 'bg-text-dim',
   };
 
-  const isShell = process.scriptId.startsWith('shell-');
-  const displayLabel = isShell ? '> Terminal' : (process.label || process.command);
-  const displayCommand = isShell ? 'bash --login' : process.command;
+  const isCCProcess = process.source === 'claude-code';
+  const isShell = process.source === 'shell' || process.scriptId.startsWith('shell-');
+  const displayLabel = isCCProcess ? 'Claude Code' : isShell ? '> Terminal' : (process.label || process.command);
+  const displayCommand = isCCProcess ? 'claude' : isShell ? 'bash --login' : process.command;
   const ports = process.detectedPorts || [];
 
   const startTime = new Date(process.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -67,7 +72,7 @@ export default function RunningProcessCard({ process, projectId, onRefresh }: Ru
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColor[process.status] || 'bg-text-dim'} ${process.status === 'running' ? 'animate-pulse' : ''}`} />
 
         <button
-          onClick={() => navigate(`/project/${projectId}/scripts/${process.scriptId}`)}
+          onClick={() => navigate(isCCProcess ? `/project/${projectId}/chats/${process.chatId}` : `/project/${projectId}/scripts/${process.scriptId}`)}
           className="flex-1 text-left min-w-0"
         >
           <div className="font-medium text-text truncate">{displayLabel}</div>

@@ -30,11 +30,13 @@ export default function ExitedProcessCard({ process, projectId, onDismiss }: Exi
     }
   }
 
-  const displayLabel = process.scriptId.startsWith('shell-') ? '> Terminal' : (process.label || process.command);
-  const displayCommand = process.scriptId.startsWith('shell-') ? 'bash --login' : process.command;
+  const isCCProcess = process.source === 'claude-code';
+  const isShell = process.source === 'shell' || process.scriptId.startsWith('shell-');
+  const displayLabel = isCCProcess ? 'Claude Code' : isShell ? '> Terminal' : (process.label || process.command);
+  const displayCommand = isCCProcess ? 'claude' : isShell ? 'bash --login' : process.command;
 
   return (
-    <Card className="hover-hover:border-border-light transition-all group cursor-pointer" onClick={() => navigate(`/project/${projectId}/scripts/${process.scriptId}`)}>
+    <Card className="hover-hover:border-border-light transition-all group cursor-pointer" onClick={() => navigate(isCCProcess ? `/project/${projectId}/chats/${process.chatId}` : `/project/${projectId}/scripts/${process.scriptId}`)}>
       <div className="flex items-center gap-3">
         {/* Badge */}
         <Badge variant={isSuccess ? 'success' : 'danger'} className="flex-shrink-0">

@@ -87,6 +87,8 @@ export interface RunningProcess {
   isShell?: boolean;
   detectedPorts?: number[];
   tunnelUrls?: Record<number, string>;
+  source?: 'script' | 'shell' | 'claude-code';
+  chatId?: string;
 }
 
 // === Git Models ===

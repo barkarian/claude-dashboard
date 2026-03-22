@@ -1,42 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
-import tunnelManager from '../services/tunnelManager.ts';
-import type { RunningProcess } from '../../shared/types/models.ts';
 
 const router = Router({ mergeParams: true });
 
 router.get('/processes', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const projectId = req.params.id;
-
-    const scripts = projectManager.listScripts(projectId);
-    const projectProcesses = processManager.getProjectProcesses(projectId);
-
-    const processes: RunningProcess[] = [];
-    for (const [scriptId, entry] of projectProcesses) {
-      const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
-      const isShell = scriptId.startsWith('shell-');
-      const detectedPorts = entry.status === 'running'
-        ? await processManager.getDetectedPorts(projectId, scriptId)
-        : [];
-      const tunnelUrls = (entry.status === 'running' && detectedPorts.length > 0)
-        ? await tunnelManager.getTunnelUrls(detectedPorts, `${projectId}:${scriptId}`)
-        : {};
-      processes.push({
-        scriptId,
-        command: entry.command,
-        status: entry.status,
-        startedAt: entry.startedAt,
-        exitCode: entry.exitCode,
-        label: isShell ? 'Terminal' : matchedScript?.label,
-        isShell,
-        detectedPorts,
-        tunnelUrls,
-      });
-    }
-
-    const runningCount = processes.filter((p: RunningProcess) => p.status === 'running').length;
+    const processes = await processManager.getProcessesList(req.params.id);
+    const runningCount = processes.filter(p => p.status === 'running').length;
     res.json({ processes, runningCount });
   } catch (err) {
     console.error('Error listing processes:', err);

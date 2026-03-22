@@ -1,6 +1,7 @@
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
+import processManager from '../services/processManager.ts';
 import type {
   CCStartPayload,
   CCInputPayload,
@@ -70,6 +71,17 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
       };
 
       sessions.set(chatId, session);
+
+      // Register with processManager for port detection
+      processManager.registerExternalProcess({
+        projectId,
+        scriptId: `cc-${chatId}`,
+        chatId,
+        pty: ptyProcess,
+        command: 'claude',
+        label: 'Claude Code',
+        io,
+      });
 
       const room = `cc:${chatId}`;
       socket.join(room);
@@ -157,6 +169,9 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 function killSession(chatId: string): void {
   const session = sessions.get(chatId);
   if (!session || session.status !== 'running') return;
+
+  // Unregister from processManager before killing
+  processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
 
   try {
     session.pty.kill('SIGTERM');

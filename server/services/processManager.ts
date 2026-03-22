@@ -1,7 +1,8 @@
 import pty, { type IPty } from 'node-pty';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { ProcessStatus, RunningProcess } from '../../shared/types/models.ts';
-import { detectPorts } from './portDetector.ts';
+import { detectPortsByPid } from './pidPortDetector.ts';
+import { hasPortHint } from './portDetector.ts';
 import tunnelManager from './tunnelManager.ts';
 import projectManager from './projectManager.ts';
 import { emitSidecarEvent } from './sidecarEmitter.ts';
@@ -75,6 +76,7 @@ function getPreferredShell(): string | null {
 // Cached port detection state
 const cachedPorts = new Map<string, number[]>();
 const portCheckTimers = new Map<string, NodeJS.Timeout>();
+const periodicPortTimers = new Map<string, NodeJS.Timeout>();
 
 // Store io ref for broadcasting from non-spawn contexts
 let ioRef: SocketIOServer | null = null;
@@ -100,6 +102,10 @@ interface ProcessEntry {
   command: string;
   projectId: string;
   scriptId: string;
+  source: 'script' | 'shell' | 'claude-code';
+  chatId?: string;
+  label?: string;
+  emitTerminalOutput: boolean;
 }
 
 // Map<projectId, Map<scriptId, ProcessEntry>>
@@ -121,6 +127,56 @@ function getProcess(projectId: string, scriptId: string): ProcessEntry | null {
   return projectMap.get(scriptId) || null;
 }
 
+/** Run PID-based port detection and broadcast if ports changed. */
+async function runPortDetection(key: string, entry: ProcessEntry): Promise<void> {
+  if (entry.status !== 'running') return;
+  try {
+    const newPorts = await detectPortsByPid(entry.pty.pid);
+    const oldPorts = cachedPorts.get(key) || [];
+    if (JSON.stringify(newPorts) !== JSON.stringify(oldPorts)) {
+      cachedPorts.set(key, newPorts);
+      broadcastProcesses(entry.projectId);
+    }
+  } catch {
+    // lsof or pgrep failed — ignore
+  }
+}
+
+/** Schedule a hint-triggered port check with 500ms debounce. */
+function scheduleHintPortCheck(key: string, entry: ProcessEntry): void {
+  if (portCheckTimers.has(key)) return;
+  portCheckTimers.set(key, setTimeout(() => {
+    portCheckTimers.delete(key);
+    runPortDetection(key, entry);
+  }, 500));
+}
+
+/** Start periodic port check every 5s. */
+function startPeriodicPortCheck(key: string, entry: ProcessEntry): void {
+  if (periodicPortTimers.has(key)) return;
+  periodicPortTimers.set(key, setInterval(() => {
+    runPortDetection(key, entry);
+  }, 5000));
+}
+
+/** Stop periodic port check. */
+function stopPeriodicPortCheck(key: string): void {
+  const timer = periodicPortTimers.get(key);
+  if (timer) {
+    clearInterval(timer);
+    periodicPortTimers.delete(key);
+  }
+}
+
+/** Clean up all timers/ports/tunnels for a process key. */
+function cleanupProcessTimers(key: string): void {
+  const hintTimer = portCheckTimers.get(key);
+  if (hintTimer) { clearTimeout(hintTimer); portCheckTimers.delete(key); }
+  stopPeriodicPortCheck(key);
+  cachedPorts.delete(key);
+  tunnelManager.closeTunnelsForProcess(key).catch(() => {});
+}
+
 /** Build the full RunningProcess[] for a project (using cached ports). */
 async function getProcessesList(projectId: string): Promise<RunningProcess[]> {
   const scripts = projectManager.listScripts(projectId);
@@ -129,22 +185,39 @@ async function getProcessesList(projectId: string): Promise<RunningProcess[]> {
 
   for (const [scriptId, entry] of projectProcesses) {
     const matchedScript = scripts.find((s: { id: string }) => s.id === scriptId);
-    const isShell = scriptId.startsWith('shell-');
+    const isCCProcess = entry.source === 'claude-code';
+    const isShell = entry.source === 'shell';
     const key = getKey(projectId, scriptId);
     const ports = entry.status === 'running' ? (cachedPorts.get(key) || []) : [];
     const tunnelUrls = (entry.status === 'running' && ports.length > 0)
       ? await tunnelManager.getTunnelUrls(ports, key)
       : {};
+
+    let label: string | undefined;
+    let source: 'script' | 'shell' | 'claude-code';
+    if (isCCProcess) {
+      label = entry.label || 'Claude Code';
+      source = 'claude-code';
+    } else if (isShell) {
+      label = 'Terminal';
+      source = 'shell';
+    } else {
+      label = matchedScript?.label;
+      source = 'script';
+    }
+
     result.push({
       scriptId,
       command: entry.command,
       status: entry.status,
       startedAt: entry.startedAt,
       exitCode: entry.exitCode,
-      label: isShell ? 'Terminal' : matchedScript?.label,
+      label,
       isShell,
       detectedPorts: ports,
       tunnelUrls,
+      source,
+      chatId: entry.chatId,
     });
   }
 
@@ -157,22 +230,6 @@ async function broadcastProcesses(projectId: string): Promise<void> {
   const processList = await getProcessesList(projectId);
   const runningCount = processList.filter(p => p.status === 'running').length;
   ioRef.to(`project:${projectId}`).emit('processes:updated', { projectId, processes: processList, runningCount });
-}
-
-/** Schedule debounced port detection for a process (runs 2s after last call). */
-function schedulePortCheck(projectId: string, scriptId: string, entry: ProcessEntry): void {
-  const key = getKey(projectId, scriptId);
-  if (portCheckTimers.has(key)) return; // already scheduled
-  portCheckTimers.set(key, setTimeout(async () => {
-    portCheckTimers.delete(key);
-    if (entry.status !== 'running') return;
-    const newPorts = await detectPorts(entry.buffer.join(''));
-    const oldPorts = cachedPorts.get(key) || [];
-    if (JSON.stringify(newPorts) !== JSON.stringify(oldPorts)) {
-      cachedPorts.set(key, newPorts);
-      broadcastProcesses(projectId);
-    }
-  }, 2000));
 }
 
 function spawnProcess(projectId: string, scriptId: string, command: string, cwd: string, io: SocketIOServer): ProcessEntry {
@@ -204,6 +261,8 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     command,
     projectId,
     scriptId,
+    source: 'script',
+    emitTerminalOutput: true,
   };
 
   if (!processes.has(projectId)) {
@@ -223,18 +282,15 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
     if (io) {
       io.to(room).emit('terminal:output', { projectId, scriptId, data });
     }
-    schedulePortCheck(projectId, scriptId, entry);
+    if (hasPortHint(data)) {
+      scheduleHintPortCheck(key, entry);
+    }
   });
 
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
-    // Clean up port detection state
-    const k = getKey(projectId, scriptId);
-    cachedPorts.delete(k);
-    const timer = portCheckTimers.get(k);
-    if (timer) { clearTimeout(timer); portCheckTimers.delete(k); }
-    tunnelManager.closeTunnelsForProcess(k).catch(() => {});
+    cleanupProcessTimers(key);
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
@@ -250,6 +306,8 @@ function spawnProcess(projectId: string, scriptId: string, command: string, cwd:
       event: exitCode === 0 ? 'build-complete' : 'build-failed',
     });
   });
+
+  startPeriodicPortCheck(key, entry);
 
   if (io) {
     io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
@@ -289,6 +347,8 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     command: shell,
     projectId,
     scriptId,
+    source: 'shell',
+    emitTerminalOutput: true,
   };
 
   if (!processes.has(projectId)) {
@@ -308,17 +368,15 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     if (io) {
       io.to(room).emit('terminal:output', { projectId, scriptId, data });
     }
-    schedulePortCheck(projectId, scriptId, entry);
+    if (hasPortHint(data)) {
+      scheduleHintPortCheck(key, entry);
+    }
   });
 
   ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
     entry.status = 'exited';
     entry.exitCode = exitCode;
-    const k = getKey(projectId, scriptId);
-    cachedPorts.delete(k);
-    const timer = portCheckTimers.get(k);
-    if (timer) { clearTimeout(timer); portCheckTimers.delete(k); }
-    tunnelManager.closeTunnelsForProcess(k).catch(() => {});
+    cleanupProcessTimers(key);
     if (io) {
       io.to(room).emit('terminal:exit', { projectId, scriptId, exitCode });
       io.to(room).emit('terminal:status', { projectId, scriptId, status: 'exited', exitCode });
@@ -326,6 +384,8 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
     }
     broadcastProcesses(projectId);
   });
+
+  startPeriodicPortCheck(key, entry);
 
   if (io) {
     io.to(room).emit('terminal:status', { projectId, scriptId, status: 'running' });
@@ -336,11 +396,93 @@ function spawnShell(projectId: string, scriptId: string, cwd: string, io: Socket
   return entry;
 }
 
+/** Register an externally-spawned PTY (e.g. Claude Code session) for port detection. */
+function registerExternalProcess(opts: {
+  projectId: string;
+  scriptId: string;
+  chatId: string;
+  pty: IPty;
+  command: string;
+  label: string;
+  io: SocketIOServer;
+}): void {
+  ioRef = opts.io;
+  const { projectId, scriptId, chatId, command, label } = opts;
+  const ptyProcess = opts.pty;
+
+  const buffer: string[] = [];
+  const entry: ProcessEntry = {
+    pty: ptyProcess,
+    buffer,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    exitCode: null,
+    command,
+    projectId,
+    scriptId,
+    source: 'claude-code',
+    chatId,
+    label,
+    emitTerminalOutput: false,
+  };
+
+  if (!processes.has(projectId)) {
+    processes.set(projectId, new Map());
+  }
+  processes.get(projectId)!.set(scriptId, entry);
+
+  const key = getKey(projectId, scriptId);
+  cachedPorts.set(key, []);
+
+  // Buffer output for port detection only — do NOT emit terminal:output
+  ptyProcess.onData((data: string) => {
+    buffer.push(data);
+    if (buffer.length > MAX_BUFFER_LINES) {
+      buffer.splice(0, buffer.length - MAX_BUFFER_LINES);
+    }
+    if (hasPortHint(data)) {
+      scheduleHintPortCheck(key, entry);
+    }
+  });
+
+  // Handle exit — cleanup ports/timers/tunnels, do NOT emit terminal events
+  ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+    // Guard against already-cleaned-up entries
+    const existing = getProcess(projectId, scriptId);
+    if (!existing) return;
+
+    existing.status = 'exited';
+    existing.exitCode = exitCode;
+    cleanupProcessTimers(key);
+    broadcastProcesses(projectId);
+  });
+
+  startPeriodicPortCheck(key, entry);
+  broadcastProcesses(projectId);
+}
+
+/** Unregister an external process (idempotent). */
+function unregisterExternalProcess(projectId: string, scriptId: string): void {
+  const entry = getProcess(projectId, scriptId);
+  if (!entry) return;
+
+  const key = getKey(projectId, scriptId);
+  cleanupProcessTimers(key);
+
+  // Mark exited but keep in map so it shows in "Previously Run"
+  if (entry.status === 'running') {
+    entry.status = 'exited';
+  }
+
+  broadcastProcesses(projectId);
+}
+
 function killProcess(projectId: string, scriptId: string): ProcessEntry | undefined {
   const entry = getProcess(projectId, scriptId);
   if (!entry || entry.status !== 'running') return;
 
-  tunnelManager.closeTunnelsForProcess(`${projectId}:${scriptId}`).catch(() => {});
+  const key = getKey(projectId, scriptId);
+  cleanupProcessTimers(key);
 
   try {
     entry.pty.kill('SIGTERM');
@@ -387,14 +529,16 @@ function getBuffer(projectId: string, scriptId: string): string {
 
 async function getDetectedPorts(projectId: string, scriptId: string): Promise<number[]> {
   const entry = getProcess(projectId, scriptId);
-  if (!entry) return [];
-  return detectPorts(entry.buffer.join(''));
+  if (!entry || !entry.pty.pid) return [];
+  return detectPortsByPid(entry.pty.pid);
 }
 
 function killAllForProject(projectId: string): void {
   const projectMap = processes.get(projectId);
   if (!projectMap) return;
   for (const [scriptId] of projectMap) {
+    const key = getKey(projectId, scriptId);
+    cleanupProcessTimers(key);
     killProcess(projectId, scriptId);
   }
   processes.delete(projectId);
@@ -422,4 +566,6 @@ export default {
   fetchPreferredShell,
   setPreferredShell,
   getPreferredShell,
+  registerExternalProcess,
+  unregisterExternalProcess,
 };
