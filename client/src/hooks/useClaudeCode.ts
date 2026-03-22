@@ -133,19 +133,25 @@ export function useClaudeCode(
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
-        // Completely lock viewport scrolling — only our scrollbar thumb can
-        // change scrollTop programmatically. This prevents xterm's internal
-        // touch-scroll handler from causing jitter on swipe gestures.
-        viewport.style.touchAction = 'none';
-        viewport.style.overflowY = 'hidden';
+        const parentEl = scaleTarget || containerRef.current!;
 
-        // --- Always-visible draggable scrollbar (iOS ignores ::-webkit-scrollbar) ---
-        // Scrolling ONLY via scrollbar drag on mobile — content drag is disabled
-        // so it doesn't conflict with swipe gestures (arrow keys, sidebar, nav).
+        // --- Touch blocker overlay ---
+        // Sits on top of xterm so its JS touch-scroll handler never fires.
+        // Touches still bubble to document for SwipeHandler gesture detection.
+        // Scrollbar track (z-index 50) sits above this so it stays interactive.
+        const touchBlocker = document.createElement('div');
+        Object.assign(touchBlocker.style, {
+          position: 'absolute', top: '0', left: '0', bottom: '0',
+          right: '20px',   // leave scrollbar hit area clear
+          zIndex: '40',
+        });
+        parentEl.appendChild(touchBlocker);
+
+        // --- Always-visible draggable scrollbar ---
         const scrollTrack = document.createElement('div');
         const scrollThumb = document.createElement('div');
         Object.assign(scrollTrack.style, {
-          position: 'absolute', top: '0', right: '0', width: '20px', // wide hit area
+          position: 'absolute', top: '0', right: '0', width: '20px',
           height: '100%', zIndex: '50', pointerEvents: 'auto',
         });
         Object.assign(scrollThumb.style, {
@@ -154,8 +160,7 @@ export function useClaudeCode(
           minHeight: '30px', opacity: '1',
         });
         scrollTrack.appendChild(scrollThumb);
-        // Attach to scaleTarget (the unscaled parent) so it isn't affected by CSS scale
-        (scaleTarget || containerRef.current!).appendChild(scrollTrack);
+        parentEl.appendChild(scrollTrack);
 
         function updateScrollbar() {
           const { scrollTop, scrollHeight, clientHeight } = viewport;
@@ -164,7 +169,7 @@ export function useClaudeCode(
             return;
           }
           scrollThumb.style.opacity = '1';
-          const trackH = (scaleTarget as HTMLElement).offsetHeight;
+          const trackH = (parentEl as HTMLElement).offsetHeight;
           const ratio = clientHeight / scrollHeight;
           const thumbH = Math.max(30, trackH * ratio);
           const maxTop = trackH - thumbH;
@@ -174,7 +179,7 @@ export function useClaudeCode(
         }
         requestAnimationFrame(updateScrollbar);
 
-        // --- Thumb drag handlers (stopPropagation prevents SwipeHandler conflict) ---
+        // --- Thumb drag (stopPropagation prevents SwipeHandler conflict) ---
         let dragging = false;
         let dragStartY = 0;
         let dragStartScrollTop = 0;
@@ -190,7 +195,7 @@ export function useClaudeCode(
           if (!dragging) return;
           e.preventDefault();
           const dy = e.touches[0].clientY - dragStartY;
-          const trackH = (scaleTarget as HTMLElement).offsetHeight;
+          const trackH = (parentEl as HTMLElement).offsetHeight;
           const { scrollHeight, clientHeight } = viewport;
           const scrollRange = scrollHeight - clientHeight;
           const ratio = clientHeight / scrollHeight;
@@ -229,6 +234,7 @@ export function useClaudeCode(
         contentObserver.observe(viewport, { childList: true, subtree: true, characterData: true });
 
         touchCleanup = () => {
+          touchBlocker.remove();
           scrollTrack.remove();
           contentObserver.disconnect();
           viewport.removeEventListener('scroll', updateScrollbar);

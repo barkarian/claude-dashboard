@@ -112,12 +112,18 @@ export function useTerminal(
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
-        // Completely lock viewport scrolling — only our scrollbar thumb can
-        // change scrollTop programmatically.
-        viewport.style.touchAction = 'none';
-        viewport.style.overflowY = 'hidden';
+        const parentEl = scaleTarget || containerRef.current!;
 
-        // --- Always-visible draggable scrollbar (iOS ignores ::-webkit-scrollbar) ---
+        // Touch blocker overlay — absorbs touches so xterm's JS touch-scroll never fires.
+        // Touches still bubble to document for SwipeHandler gesture detection.
+        const touchBlocker = document.createElement('div');
+        Object.assign(touchBlocker.style, {
+          position: 'absolute', top: '0', left: '0', bottom: '0',
+          right: '20px', zIndex: '40',
+        });
+        parentEl.appendChild(touchBlocker);
+
+        // --- Always-visible draggable scrollbar ---
         const scrollTrack = document.createElement('div');
         const scrollThumb = document.createElement('div');
         Object.assign(scrollTrack.style, {
@@ -130,7 +136,7 @@ export function useTerminal(
           minHeight: '30px', opacity: '1',
         });
         scrollTrack.appendChild(scrollThumb);
-        (scaleTarget || containerRef.current!).appendChild(scrollTrack);
+        parentEl.appendChild(scrollTrack);
 
         function updateScrollbar() {
           const { scrollTop, scrollHeight, clientHeight } = viewport;
@@ -139,7 +145,7 @@ export function useTerminal(
             return;
           }
           scrollThumb.style.opacity = '1';
-          const trackH = (scaleTarget as HTMLElement).offsetHeight;
+          const trackH = (parentEl as HTMLElement).offsetHeight;
           const ratio = clientHeight / scrollHeight;
           const thumbH = Math.max(30, trackH * ratio);
           const maxTop = trackH - thumbH;
@@ -164,7 +170,7 @@ export function useTerminal(
           if (!dragging) return;
           e.preventDefault();
           const dy = e.touches[0].clientY - dragStartY;
-          const trackH = (scaleTarget as HTMLElement).offsetHeight;
+          const trackH = (parentEl as HTMLElement).offsetHeight;
           const { scrollHeight, clientHeight } = viewport;
           const scrollRange = scrollHeight - clientHeight;
           const ratio = clientHeight / scrollHeight;
@@ -201,6 +207,7 @@ export function useTerminal(
         contentObserver.observe(viewport, { childList: true, subtree: true, characterData: true });
 
         touchCleanup = () => {
+          touchBlocker.remove();
           scrollTrack.remove();
           contentObserver.disconnect();
           viewport.removeEventListener('scroll', updateScrollbar);
