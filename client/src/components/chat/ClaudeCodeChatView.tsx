@@ -39,7 +39,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
 
-  const { terminal, status, write, getPromptLine } = useClaudeCode(containerRef, {
+  const { terminal, status, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -54,20 +54,24 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   writeRef.current = write;
   const getPromptLineRef = useRef(getPromptLine);
   getPromptLineRef.current = getPromptLine;
+  const onNextOutputRef = useRef(onNextOutput);
+  onNextOutputRef.current = onNextOutput;
 
   // Register swipe override: map swipe gestures to arrow keys + scroll to bottom
   useEffect(() => {
     ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
       writeRef.current(ARROW_MAP[direction]);
-      setTimeout(() => {
-        terminal.current?.scrollToBottom();
-        // After up/down swipe, extract prompt content into textarea
-        if (direction === 'up' || direction === 'down') {
+      if (direction === 'up' || direction === 'down') {
+        // Wait for actual terminal output, then extract prompt content
+        onNextOutputRef.current(() => {
+          terminal.current?.scrollToBottom();
           const content = getPromptLineRef.current();
           suggestionIdRef.current++;
           setPromptSuggestion({ text: content, id: suggestionIdRef.current });
-        }
-      }, 150);
+        });
+      } else {
+        setTimeout(() => terminal.current?.scrollToBottom(), 50);
+      }
     };
     return () => {
       ccSwipeOverride.current = null;
@@ -119,16 +123,18 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   const handleArrow = useCallback((data: string) => {
     write(data);
-    setTimeout(() => {
-      terminal.current?.scrollToBottom();
-      // After up/down arrow, extract prompt content into textarea
-      if (data === '\x1b[A' || data === '\x1b[B') {
+    if (data === '\x1b[A' || data === '\x1b[B') {
+      // Wait for actual terminal output, then extract prompt content
+      onNextOutput(() => {
+        terminal.current?.scrollToBottom();
         const content = getPromptLine();
         suggestionIdRef.current++;
         setPromptSuggestion({ text: content, id: suggestionIdRef.current });
-      }
-    }, 150);
-  }, [write, terminal, getPromptLine]);
+      });
+    } else {
+      setTimeout(() => terminal.current?.scrollToBottom(), 50);
+    }
+  }, [write, terminal, getPromptLine, onNextOutput]);
 
   const handleInterrupt = useCallback(() => {
     write('\x03');

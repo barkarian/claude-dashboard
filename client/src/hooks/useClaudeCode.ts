@@ -20,6 +20,7 @@ interface UseClaudeCodeReturn {
   write: (data: string) => void;
   stop: () => void;
   getPromptLine: () => string;
+  onNextOutput: (cb: () => void) => void;
 }
 
 export function useClaudeCode(
@@ -42,13 +43,31 @@ export function useClaudeCode(
     }
   }
 
-  // Read the Claude Code prompt line content from the terminal buffer.
+  // Callback mechanism: wait for actual terminal output before reading the buffer.
+  // Avoids stale reads caused by fixed timeouts that fire before PTY responds.
+  const outputNotifyRef = useRef<(() => void) | null>(null);
+  const outputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onNextOutput = useCallback((cb: () => void) => {
+    outputNotifyRef.current = cb;
+    // Clear any existing timer and set a 500ms fallback in case no output arrives
+    if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
+    outputTimerRef.current = setTimeout(() => {
+      if (outputNotifyRef.current) {
+        outputNotifyRef.current();
+        outputNotifyRef.current = null;
+      }
+    }, 500);
+  }, []);
+
+  // Read the Claude Code prompt content from the terminal buffer.
   // Claude Code's TUI prompt structure:
   //   ──────────  (separator)
-  //   ❯ text      (prompt line)
+  //   ❯ text      (prompt line, may span multiple lines)
   //   ──────────  (separator)
   //   ⏵⏵ info     (status line)
-  // We find the prompt line by locating a line bordered by ─── separators.
+  // We find the top separator, scan forward for the bottom, and collect all
+  // lines between them. This handles multi-line messages correctly.
   const getPromptLine = useCallback((): string => {
     const term = termRef.current;
     if (!term) return '';
@@ -65,16 +84,37 @@ export function useClaudeCode(
       return t.length > 10 && /^─+$/.test(t);
     };
 
-    // Scan rows near cursor to find a line bordered by ─── separators
-    for (let row = Math.max(0, cursorRow - 5); row <= cursorRow + 5; row++) {
-      if (isSeparator(getLineText(row - 1)) && isSeparator(getLineText(row + 1))) {
-        const text = getLineText(row);
-        // Strip the leading prompt symbol (any non-alphanumeric char like ❯) and spaces
-        return text.replace(/^\s*[^\w\s]\s*/, '').trim();
+    // Scan backward from cursor to find the top ─── separator
+    let topSep = -1;
+    for (let row = cursorRow; row >= Math.max(0, cursorRow - 10); row--) {
+      if (isSeparator(getLineText(row))) {
+        topSep = row;
+        break;
       }
     }
+    if (topSep < 0) return '';
 
-    return '';
+    // Scan forward from top separator to find the bottom ─── separator
+    let bottomSep = -1;
+    for (let row = topSep + 1; row <= cursorRow + 10; row++) {
+      if (isSeparator(getLineText(row))) {
+        bottomSep = row;
+        break;
+      }
+    }
+    if (bottomSep < 0 || bottomSep === topSep + 1) return '';
+
+    // Collect all lines between the separators
+    const lines: string[] = [];
+    for (let row = topSep + 1; row < bottomSep; row++) {
+      let text = getLineText(row);
+      if (row === topSep + 1) {
+        // First line: strip the prompt symbol (❯, >, etc.) and trailing spaces
+        text = text.replace(/^\s*[^\w\s]\s*/, '');
+      }
+      lines.push(text);
+    }
+    return lines.join('\n').trim();
   }, []);
 
   useEffect(() => {
@@ -303,6 +343,14 @@ export function useClaudeCode(
     const handleOutput = ({ chatId: cid, data }: { chatId: string; data: string }) => {
       if (cid === chatId) {
         term.write(data);
+        // If a caller is waiting for output, debounce 80ms to let chunks settle
+        if (outputNotifyRef.current) {
+          if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
+          outputTimerRef.current = setTimeout(() => {
+            outputNotifyRef.current?.();
+            outputNotifyRef.current = null;
+          }, 80);
+        }
       }
     };
 
@@ -357,6 +405,8 @@ export function useClaudeCode(
     resizeObserver.observe(scaleTarget || containerRef.current);
 
     return () => {
+      if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
+      outputNotifyRef.current = null;
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
       socket.off('cc:status', handleStatus);
@@ -370,5 +420,5 @@ export function useClaudeCode(
     };
   }, [containerRef, socket, projectId, chatId]);
 
-  return { terminal: termRef, status, write, stop, getPromptLine };
+  return { terminal: termRef, status, write, stop, getPromptLine, onNextOutput };
 }
