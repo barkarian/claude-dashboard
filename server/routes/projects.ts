@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
+import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
@@ -280,6 +281,39 @@ router.post('/:id/git-checkout', async (req: Request<{ id: string }>, res: Respo
   } catch (err: any) {
     console.error('Error checking out branch:', err);
     res.status(500).json({ error: err.message || 'Failed to checkout branch' });
+  }
+});
+
+// File download (binary-safe, streams with Content-Disposition)
+router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+    if (!filePath) {
+      return res.status(400).json({ error: 'path query parameter is required' });
+    }
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    // Guard against path traversal
+    const fullPath = path.resolve(path.join(projectPath, filePath));
+    if (!fullPath.startsWith(path.resolve(projectPath))) {
+      return res.status(403).json({ error: 'Path traversal detected' });
+    }
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    const basename = path.basename(fullPath);
+    res.setHeader('Content-Disposition', `attachment; filename="${basename.replace(/"/g, '\\"')}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    const stream = fs.createReadStream(fullPath);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      console.error('File download stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream file' });
+      }
+    });
+  } catch (err: any) {
+    console.error('Error downloading file:', err);
+    res.status(500).json({ error: 'Failed to download file' });
   }
 });
 
