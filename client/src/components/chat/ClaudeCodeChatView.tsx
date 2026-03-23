@@ -39,7 +39,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
 
-  const { terminal, status, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
+  const { terminal, status, isSelectionMode, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -201,6 +201,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       <CCPromptInput
         projectId={projectId}
         status={status}
+        isSelectionMode={isSelectionMode}
         onSend={handleSend}
         onArrow={handleArrow}
         onInterrupt={handleInterrupt}

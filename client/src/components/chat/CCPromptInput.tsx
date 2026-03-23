@@ -13,6 +13,7 @@ import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 interface CCPromptInputProps {
   projectId: string;
   status: 'disconnected' | 'running' | 'exited' | 'error';
+  isSelectionMode?: boolean;
   onSend: (data: string) => void;
   onArrow: (data: string) => void;
   onInterrupt: () => void;
@@ -29,7 +30,7 @@ const ESC = '\x1b';
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';
 
-export default function CCPromptInput({ projectId, status, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion }: CCPromptInputProps) {
   const [value, setValue] = useState('');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
   const [swipeInfoDismissed, setSwipeInfoDismissed] = useState(false);
@@ -288,7 +289,7 @@ export default function CCPromptInput({ projectId, status, onSend, onArrow, onIn
           </button>
         </div>
 
-        {/* Right: Enter + info icon */}
+        {/* Right: info icon */}
         <div className="flex items-center gap-1">
           {native && !swipeInfoDismissed && (
             <button
@@ -302,15 +303,6 @@ export default function CCPromptInput({ projectId, status, onSend, onArrow, onIn
               </svg>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => btn('\r')}
-            disabled={disabled}
-            className="px-3 py-1.5 rounded text-[11px] font-semibold text-primary bg-primary/10 border border-primary/30 hover:bg-primary/20 active:bg-primary/20 transition-colors disabled:opacity-30"
-            title="Enter"
-          >
-            Enter
-          </button>
         </div>
       </div>
 
@@ -359,16 +351,33 @@ export default function CCPromptInput({ projectId, status, onSend, onArrow, onIn
             disabled={disabled}
           />
 
-          <Button
-            onClick={handleSend}
-            disabled={disabled}
-            className="flex-shrink-0 py-2.5"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-            Send
-          </Button>
+          {/* Unified Send / Select button */}
+          {(() => {
+            const showSelect = !!(isSelectionMode && !value.trim());
+            return (
+              <Button
+                onClick={handleSend}
+                disabled={disabled}
+                className="flex-shrink-0 py-2.5"
+              >
+                {showSelect ? (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    Select
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                    </svg>
+                    Send
+                  </>
+                )}
+              </Button>
+            );
+          })()}
         </div>
       </div>
 

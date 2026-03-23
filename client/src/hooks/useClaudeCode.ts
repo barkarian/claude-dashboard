@@ -17,6 +17,7 @@ interface UseClaudeCodeOptions {
 interface UseClaudeCodeReturn {
   terminal: RefObject<Terminal | null>;
   status: 'disconnected' | 'running' | 'exited' | 'error';
+  isSelectionMode: boolean;
   write: (data: string) => void;
   stop: () => void;
   getPromptLine: () => string;
@@ -30,6 +31,8 @@ export function useClaudeCode(
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function write(data: string) {
     if (socket) {
@@ -113,6 +116,28 @@ export function useClaudeCode(
       lines.push(text);
     }
     return lines.join('\n').trim();
+  }, []);
+
+  // Detect whether the terminal is showing a numbered option menu (plan interview).
+  // Returns true when ❯ is on a numbered option that isn't "Type something".
+  const detectSelectionMode = useCallback((): boolean => {
+    const term = termRef.current;
+    if (!term) return false;
+    const buffer = term.buffer.active;
+    const end = buffer.length - 1;
+
+    for (let row = end; row >= Math.max(0, end - 40); row--) {
+      const line = buffer.getLine(row);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      // Match: optional spaces, ❯, optional spaces, digit(s), dot, space
+      if (/^\s*❯\s*\d+\.\s/.test(text)) {
+        // If the highlighted option is "Type something", it's not selection mode
+        if (/type\s+something/i.test(text)) return false;
+        return true;
+      }
+    }
+    return false;
   }, []);
 
   useEffect(() => {
@@ -349,6 +374,11 @@ export function useClaudeCode(
             outputNotifyRef.current = null;
           }, 80);
         }
+        // Debounce selection mode detection
+        if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+        selectionTimerRef.current = setTimeout(() => {
+          setIsSelectionMode(detectSelectionMode());
+        }, 100);
       }
     };
 
@@ -404,6 +434,7 @@ export function useClaudeCode(
 
     return () => {
       if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
+      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
       outputNotifyRef.current = null;
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
@@ -418,5 +449,5 @@ export function useClaudeCode(
     };
   }, [containerRef, socket, projectId, chatId]);
 
-  return { terminal: termRef, status, write, stop, getPromptLine, onNextOutput };
+  return { terminal: termRef, status, isSelectionMode, write, stop, getPromptLine, onNextOutput };
 }

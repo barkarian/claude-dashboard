@@ -30,6 +30,12 @@ export function useProcessStatus(projectId: string | undefined) {
     };
   }, [socket, projectId]);
 
+  // Exclude claude-code processes from the badge count
+  const scriptRunningCount = useMemo(
+    () => processes.filter(p => p.status === 'running' && p.source !== 'claude-code').length,
+    [processes]
+  );
+
   const processesWithPorts = useMemo(
     () => processes.filter(
       p => p.status === 'running' && p.detectedPorts && p.detectedPorts.length > 0
@@ -37,5 +43,5 @@ export function useProcessStatus(projectId: string | undefined) {
     [processes]
   );
 
-  return { processes, runningCount, processesWithPorts };
+  return { processes, runningCount: scriptRunningCount, processesWithPorts };
 }
