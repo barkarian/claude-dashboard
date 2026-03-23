@@ -26,8 +26,8 @@ interface ScriptListProps {
 export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [scripts, setScripts] = useState<ScriptWithStatus[]>([]);
   const { processes } = useProcessStatus(projectId);
-  const runningProcesses = processes.filter(p => p.status === 'running');
-  const exitedProcesses = processes.filter(p => p.status === 'exited');
+  const runningProcesses = processes.filter(p => p.status === 'running' && p.source !== 'claude-code');
+  const exitedProcesses = processes.filter(p => p.status === 'exited' && p.source !== 'claude-code');
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(`dismissed-processes:${projectId}`);
