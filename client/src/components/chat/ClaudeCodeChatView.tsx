@@ -49,6 +49,9 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Prompt suggestion: syncs terminal history recall into the textarea
   const [promptSuggestion, setPromptSuggestion] = useState<{ text: string; id: number } | null>(null);
   const suggestionIdRef = useRef(0);
+  // Ref mirrors state so handleSend can read it without a dependency
+  const promptSuggestionRef = useRef(promptSuggestion);
+  promptSuggestionRef.current = promptSuggestion;
 
   // Keep refs up to date for the swipe handler
   writeRef.current = write;
@@ -93,9 +96,22 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   }, [status, setActiveChatStatus]);
 
   const handleSend = useCallback((data: string) => {
-    // Clear the terminal's current line first (Ctrl+U) to avoid sending
-    // both the history-recalled text and the new textarea text
-    write('\x15' + data);
+    const userText = data.replace(/\r$/, '');
+    const suggestion = promptSuggestionRef.current?.text ?? '';
+
+    if (promptSuggestionRef.current && userText === suggestion) {
+      // Text unchanged from history recall — it's already in the terminal,
+      // just press Enter instead of re-typing it
+      write('\r');
+    } else if (promptSuggestionRef.current && suggestion) {
+      // User edited the recalled text — delete the original with backspaces,
+      // then type the new text
+      write('\x7f'.repeat(suggestion.length) + data);
+    } else {
+      // No active suggestion — fresh input, write normally
+      write(data);
+    }
+
     terminal.current?.scrollToBottom();
     setPromptSuggestion(null);
 
@@ -103,8 +119,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     if (!firstMessageSentRef.current && chatId) {
       firstMessageSentRef.current = true;
 
-      // Extract the text before the \r, trim whitespace
-      const text = data.replace(/\r$/, '').trim();
+      const text = userText.trim();
       if (text && text.length > 0) {
         const newLabel = text.slice(0, 50) + (text.length > 50 ? '...' : '');
         api.patch(`/api/projects/${projectId}/chats/${chatId}`, { label: newLabel })
