@@ -60,8 +60,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const onNextOutputRef = useRef(onNextOutput);
   onNextOutputRef.current = onNextOutput;
 
-  // Register swipe override: map swipe gestures to arrow keys + scroll to bottom
+  // Register swipe override: map swipe gestures to arrow keys + scroll to bottom.
+  // Also set containerEl so only swipes starting on the terminal trigger arrows.
   useEffect(() => {
+    // The terminal wrapper is containerRef's parent (div.flex-1.overflow-hidden.relative)
+    ccSwipeOverride.containerEl = containerRef.current?.parentElement || null;
     ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
       writeRef.current(ARROW_MAP[direction]);
       if (direction === 'up' || direction === 'down') {
@@ -78,6 +81,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     };
     return () => {
       ccSwipeOverride.current = null;
+      ccSwipeOverride.containerEl = null;
     };
   }, [terminal]);
 

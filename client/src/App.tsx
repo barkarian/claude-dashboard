@@ -110,10 +110,17 @@ function SwipeHandler() {
 
     function handleTouchStart(e: TouchEvent) {
       const x = e.touches[0].clientX;
-      // CC override: track all swipes for arrow key mapping,
-      // but still track the start position so edge swipes can navigate back
+      // CC override: only track swipes that start inside the terminal area.
+      // Swipes on the prompt/keys area are ignored so they don't interfere
+      // with text selection. Edge swipes still navigate back.
       if (ccSwipeOverride.current) {
-        touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        const container = ccSwipeOverride.containerEl;
+        if (container && container.contains(e.target as Node)) {
+          touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        } else if (native && x < EDGE_ZONE) {
+          // Allow edge swipe back even from outside terminal
+          touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        }
         return;
       }
       // Native: track all swipes (edge for back, rest for sidebar)
@@ -161,10 +168,12 @@ function SwipeHandler() {
         const MIN_DIST = 40;
         if (absDx > absDy && absDx > MIN_DIST) {
           haptics.impactLight();
-          ccSwipeOverride.current(dx > 0 ? 'right' : 'left');
+          // Natural scroll: swipe right = arrow left, swipe left = arrow right
+          ccSwipeOverride.current(dx > 0 ? 'left' : 'right');
         } else if (absDy > absDx && absDy > MIN_DIST) {
           haptics.impactLight();
-          ccSwipeOverride.current(dy > 0 ? 'down' : 'up');
+          // Natural scroll: swipe up = arrow down, swipe down = arrow up
+          ccSwipeOverride.current(dy > 0 ? 'up' : 'down');
         }
         return;
       }
