@@ -216,7 +216,7 @@ export function useClaudeCode(
         const touchBlocker = document.createElement('div');
         Object.assign(touchBlocker.style, {
           position: 'absolute', top: '0', left: '0', bottom: '0',
-          right: '20px',   // leave scrollbar hit area clear
+          right: '80px',   // leave scrollbar hit area clear
           zIndex: '40',
         });
         parentEl.appendChild(touchBlocker);
@@ -225,13 +225,13 @@ export function useClaudeCode(
         const scrollTrack = document.createElement('div');
         const scrollThumb = document.createElement('div');
         Object.assign(scrollTrack.style, {
-          position: 'absolute', top: '0', right: '0', width: '20px',
+          position: 'absolute', top: '0', right: '0', width: '80px',
           height: '100%', zIndex: '50', pointerEvents: 'auto',
         });
         Object.assign(scrollThumb.style, {
-          position: 'absolute', right: '2px', width: '6px',
-          borderRadius: '3px', background: 'rgba(99, 102, 241, 0.5)',
-          minHeight: '30px', opacity: '1',
+          position: 'absolute', right: '4px', width: '12px',
+          borderRadius: '6px', background: 'rgba(99, 102, 241, 0.5)',
+          minHeight: '40px', opacity: '1',
         });
         scrollTrack.appendChild(scrollThumb);
         parentEl.appendChild(scrollTrack);
