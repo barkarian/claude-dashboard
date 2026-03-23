@@ -47,7 +47,7 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] sm:max-h-[80vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="max-w-2xl max-h-[calc(100vh-env(safe-area-inset-top,0px)-2rem)] sm:max-h-[80vh] flex flex-col p-0 overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
           <div>
             <div className="flex items-center gap-2">
