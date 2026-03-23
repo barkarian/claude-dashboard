@@ -8,6 +8,7 @@ import TerminalInputBar from './TerminalInputBar.tsx';
 import SendToChatDialog from './SendToChatDialog.tsx';
 import api from '../../utils/api.ts';
 import { stripAnsi } from '../../utils/ansi.ts';
+import { haptics } from '../../utils/haptics.ts';
 
 interface ScriptTerminalProps {
   projectId: string;
@@ -63,6 +64,12 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
     }
   }
 
+  function handleStop() {
+    if (!socket) return;
+    haptics.impactMedium();
+    socket.emit('terminal:stop', { projectId, scriptId });
+  }
+
   const displayLabel = isShell ? 'Terminal' : (currentProcess?.label || currentProcess?.command || scriptId || '');
   const statusLabel = isShell ? 'Terminal' : status;
 
@@ -79,6 +86,17 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
           Back to Scripts
         </button>
         <div className="flex items-center gap-2">
+          {isRunning && (
+            <button
+              onClick={handleStop}
+              className="p-1.5 rounded-lg hover:bg-bg-hover text-danger transition-colors"
+              title="Stop"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
+            </button>
+          )}
           {detectedPorts.map((port) => (
             <button
               key={port}
