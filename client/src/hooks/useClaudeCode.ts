@@ -61,15 +61,12 @@ export function useClaudeCode(
   }, []);
 
   // Read the Claude Code prompt content from the terminal buffer.
-  // Claude Code's TUI prompt structure:
+  // Only extract when the prompt is the simple input form:
   //   ──────────  (separator)
-  //   ❯ text      (prompt line, may span multiple lines)
+  //   ❯ text      (single line starting with ❯)
   //   ──────────  (separator)
-  //   ⏵⏵ info     (status line)
-  //
-  // Strategy: scan from the BOTTOM of the buffer upward to find the last two
-  // ─── separator lines. The content between them is the prompt text.
-  // This is cursor-position independent and handles multi-line messages.
+  // Menus, questions, multi-option screens are ignored — they have multiple
+  // lines between separators or don't start with ❯.
   const getPromptLine = useCallback((): string => {
     const term = termRef.current;
     if (!term) return '';
@@ -101,13 +98,17 @@ export function useClaudeCode(
     }
     if (topSep < 0 || bottomSep < 0 || bottomSep <= topSep + 1) return '';
 
-    // Collect all lines between the separators
+    // Only extract when the first line after the top separator starts with ❯
+    // (the simple input prompt). Menus/questions have other content first.
+    const firstLine = getLineText(topSep + 1);
+    if (!/^\s*❯/.test(firstLine)) return '';
+
+    // Collect all lines between separators (message may be multi-line)
     const lines: string[] = [];
     for (let row = topSep + 1; row < bottomSep; row++) {
       let text = getLineText(row);
       if (row === topSep + 1) {
-        // First line: strip the prompt symbol (❯, >, etc.)
-        text = text.replace(/^\s*[^\w\s]\s*/, '');
+        text = text.replace(/^\s*❯\s*/, '');
       }
       lines.push(text);
     }
