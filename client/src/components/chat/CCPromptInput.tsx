@@ -33,7 +33,6 @@ const SHIFT_TAB = '\x1b[Z';
 export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion }: CCPromptInputProps) {
   const [value, setValue] = useState('');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
-  const [swipeInfoDismissed, setSwipeInfoDismissed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Recording state
@@ -175,7 +174,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
       )}
 
       {/* Capacitor swipe info overlay */}
-      {native && showSwipeInfo && !swipeInfoDismissed && (
+      {native && showSwipeInfo && (
         <div className="absolute bottom-full left-0 right-0 mb-1 mx-3 z-[60]">
           <div className="bg-bg-surface border border-border rounded-lg p-3 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-start justify-between gap-2">
@@ -202,7 +201,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
                 <p className="text-text-dim">Swipe on the terminal area to navigate menus and selections.</p>
               </div>
               <button
-                onClick={() => { setShowSwipeInfo(false); setSwipeInfoDismissed(true); }}
+                onClick={() => setShowSwipeInfo(false)}
                 className="flex-shrink-0 p-1 rounded hover:bg-bg-hover text-text-dim"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -216,52 +215,67 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
 
       {/* Navigation bar */}
       <div className="flex items-center px-2 py-1.5 bg-bg-surface/50">
-        {/* Left: Keys popover (Esc, Tab, Shift+Tab, ^C) */}
-        <Popover>
-          <PopoverTrigger asChild>
+        {/* Left: Keys popover + info icon */}
+        <div className="flex items-center gap-1">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                disabled={disabled}
+                className="px-2 py-1.5 rounded text-[11px] font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                </svg>
+                Keys
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="p-1.5 min-w-[140px]">
+              <button
+                onClick={() => btn(ESC)}
+                disabled={disabled}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
+              >
+                Esc
+              </button>
+              <button
+                onClick={() => btn(TAB)}
+                disabled={disabled}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
+              >
+                Tab
+              </button>
+              <button
+                onClick={() => btn(SHIFT_TAB)}
+                disabled={disabled}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
+              >
+                Shift+Tab
+              </button>
+              <div className="my-1 border-t border-border" />
+              <button
+                onClick={() => { haptics.impactMedium(); onInterrupt(); }}
+                disabled={disabled}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors text-danger disabled:opacity-30"
+              >
+                Ctrl+C
+              </button>
+            </PopoverContent>
+          </Popover>
+
+          {native && (
             <button
               type="button"
-              disabled={disabled}
-              className="px-2 py-1.5 rounded text-[11px] font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 flex items-center gap-1"
+              onClick={() => setShowSwipeInfo(prev => !prev)}
+              className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
+              title="Swipe gesture info"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
               </svg>
-              Keys
             </button>
-          </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="p-1.5 min-w-[140px]">
-            <button
-              onClick={() => btn(ESC)}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-            >
-              Esc
-            </button>
-            <button
-              onClick={() => btn(TAB)}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-            >
-              Tab
-            </button>
-            <button
-              onClick={() => btn(SHIFT_TAB)}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-            >
-              Shift+Tab
-            </button>
-            <div className="my-1 border-t border-border" />
-            <button
-              onClick={() => { haptics.impactMedium(); onInterrupt(); }}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors text-danger disabled:opacity-30"
-            >
-              Ctrl+C
-            </button>
-          </PopoverContent>
-        </Popover>
+          )}
+        </div>
 
         {/* Center: Arrow keys */}
         <div className="flex-1 flex items-center justify-center gap-0.5">
@@ -289,21 +303,16 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
           </button>
         </div>
 
-        {/* Right: info icon */}
-        <div className="flex items-center gap-1">
-          {native && !swipeInfoDismissed && (
-            <button
-              type="button"
-              onClick={() => setShowSwipeInfo(prev => !prev)}
-              className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
-              title="Swipe gesture info"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-              </svg>
-            </button>
-          )}
-        </div>
+        {/* Right: Rec button (mobile only) */}
+        {native && (
+          <div className="flex items-center">
+            <TerminalRecordButton
+              onOpenScriptPicker={() => setShowScriptPicker(true)}
+              onOpenLivePreview={() => setShowLivePreview(true)}
+              disabled={disabled}
+            />
+          </div>
+        )}
       </div>
 
       {/* Prompt input area */}
@@ -316,11 +325,13 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
         />
 
         <div className="flex items-end gap-2">
-          <TerminalRecordButton
-            onOpenScriptPicker={() => setShowScriptPicker(true)}
-            onOpenLivePreview={() => setShowLivePreview(true)}
-            disabled={disabled}
-          />
+          {!native && (
+            <TerminalRecordButton
+              onOpenScriptPicker={() => setShowScriptPicker(true)}
+              onOpenLivePreview={() => setShowLivePreview(true)}
+              disabled={disabled}
+            />
+          )}
 
           <textarea
             ref={textareaRef}
