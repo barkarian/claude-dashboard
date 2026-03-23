@@ -43,6 +43,31 @@ pub enum SidecarState {
     Stopped,
 }
 
+// ── Shell PATH resolution ─────────────────────────────────────────
+
+/// When launched from a .app bundle, macOS provides a minimal PATH
+/// (/usr/bin:/bin:/usr/sbin:/sbin). Resolve the user's full login
+/// shell PATH so child processes can find tools like `claude`, `npm`, etc.
+fn resolve_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            log::info!("Resolved shell PATH: {}", path);
+            return Some(path);
+        }
+    }
+    log::warn!("Failed to resolve shell PATH, using system default");
+    None
+}
+
 // ── Manager ────────────────────────────────────────────────────────
 
 pub struct SidecarManager {
@@ -84,8 +109,8 @@ impl SidecarManager {
             entry.display()
         );
 
-        let mut child = Command::new(node)
-            .arg("--import")
+        let mut cmd = Command::new(node);
+        cmd.arg("--import")
             .arg("tsx")
             .arg(entry.to_str().unwrap_or("index.ts"))
             .current_dir(&self.server_path)
@@ -95,7 +120,15 @@ impl SidecarManager {
             .env("TUNNEL_SERVICE_URL", "https://tunnel-api.claw-dev.com")
             .env("TUNNEL_DOMAIN", "claw-dev.com")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // Inject the user's full login shell PATH so child processes
+        // (claude, npm, etc.) are discoverable from the .app bundle
+        if let Some(shell_path) = resolve_shell_path() {
+            cmd.env("PATH", shell_path);
+        }
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
