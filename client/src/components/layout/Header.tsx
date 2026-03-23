@@ -25,6 +25,7 @@ interface HeaderProps {
   statusLabel?: string;
   onNewChat?: () => void;
   onProjectSettings?: () => void;
+  chatActions?: ReactNode;
 }
 
 export default function Header({
@@ -42,6 +43,7 @@ export default function Header({
   statusLabel,
   onNewChat,
   onProjectSettings,
+  chatActions,
 }: HeaderProps) {
   const navigate = useNavigate();
   const { toggleSidebar: _toggleSidebar } = useSidebar();
@@ -198,6 +200,7 @@ export default function Header({
                 <span className="text-xs text-text-muted capitalize">{statusLabel}</span>
               </>
             )}
+            {chatActions}
             {onDeleteChat && (
               <button
                 onClick={() => setShowDeleteConfirm(true)}

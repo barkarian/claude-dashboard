@@ -156,7 +156,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
     <div className="flex-shrink-0 border-t border-border relative">
       {/* Recording popups above input */}
       {showScriptPicker && !activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-10">
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <ScriptPickerPanel
             projectId={projectId}
             onClose={() => setShowScriptPicker(false)}
@@ -166,7 +166,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
       )}
 
       {showLivePreview && activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-10">
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <RecordingPreviewPanel
             onClose={() => setShowLivePreview(false)}
             onStop={handleStopAndInsert}
@@ -176,7 +176,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
 
       {/* Capacitor swipe info overlay */}
       {native && showSwipeInfo && !swipeInfoDismissed && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 mx-3 z-10">
+        <div className="absolute bottom-full left-0 right-0 mb-1 mx-3 z-[60]">
           <div className="bg-bg-surface border border-border rounded-lg p-3 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-start justify-between gap-2">
               <div className="space-y-2 text-xs text-text-muted">
@@ -319,7 +319,6 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
           <TerminalRecordButton
             onOpenScriptPicker={() => setShowScriptPicker(true)}
             onOpenLivePreview={() => setShowLivePreview(true)}
-            onStop={handleRecordingStopped}
             disabled={disabled}
           />
 

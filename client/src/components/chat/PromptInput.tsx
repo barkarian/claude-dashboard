@@ -136,7 +136,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
     <div className="relative border-t border-border p-3">
       {/* Popups above input */}
       {showFilePicker && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <FilePicker
             projectId={projectId}
             onSelect={handleFileSelect}
@@ -146,7 +146,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
       )}
 
       {showScriptPicker && !activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <ScriptPickerPanel
             projectId={projectId}
             onClose={() => setShowScriptPicker(false)}
@@ -156,7 +156,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
       )}
 
       {showLivePreview && activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3">
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <RecordingPreviewPanel
             onClose={() => setShowLivePreview(false)}
             onStop={handleStopAndInsert}
@@ -178,7 +178,6 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
         <TerminalRecordButton
           onOpenScriptPicker={() => setShowScriptPicker(true)}
           onOpenLivePreview={() => setShowLivePreview(true)}
-          onStop={handleRecordingStopped}
           disabled={disabled}
         />
 

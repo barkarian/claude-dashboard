@@ -140,6 +140,13 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     }
   }, [hasTitle]);
 
+  // On desktop, auto-focus the terminal so keyboard input goes directly to xterm
+  useEffect(() => {
+    if (status === 'running' && window.innerWidth >= 768) {
+      setTimeout(() => terminal.current?.focus(), 200);
+    }
+  }, [status]);
+
   const handleArrow = useCallback((data: string) => {
     write(data);
     if (data === '\x1b[A' || data === '\x1b[B') {
@@ -197,17 +204,19 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         </div>
       )}
 
-      {/* Prompt input with navigation controls */}
-      <CCPromptInput
-        projectId={projectId}
-        status={status}
-        isSelectionMode={isSelectionMode}
-        onSend={handleSend}
-        onArrow={handleArrow}
-        onInterrupt={handleInterrupt}
-        autoFocus={isNewChat}
-        promptSuggestion={promptSuggestion}
-      />
+      {/* Prompt input with navigation controls — mobile only, hidden on desktop via CSS */}
+      <div className="flex-shrink-0 md:hidden">
+        <CCPromptInput
+          projectId={projectId}
+          status={status}
+          isSelectionMode={isSelectionMode}
+          onSend={handleSend}
+          onArrow={handleArrow}
+          onInterrupt={handleInterrupt}
+          autoFocus={isNewChat}
+          promptSuggestion={promptSuggestion}
+        />
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import ClaudeCodeChatView from '../components/chat/ClaudeCodeChatView.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
+import DesktopRecordingControls from '../components/chat/DesktopRecordingControls.tsx';
 import api from '../utils/api.ts';
 import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
@@ -199,6 +200,11 @@ export default function ProjectDashboardPage() {
         statusDot={statusDotClass}
         statusLabel={statusLabel}
         onProjectSettings={() => setShowProjectSettings(true)}
+        chatActions={activeChatId && activeChat?.adapter === 'claude-code' ? (
+          <div className="hidden md:flex items-center">
+            <DesktopRecordingControls projectId={id!} />
+          </div>
+        ) : undefined}
       />
 
       {project && (
