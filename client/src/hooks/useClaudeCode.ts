@@ -34,17 +34,17 @@ export function useClaudeCode(
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function write(data: string) {
+  const write = useCallback((data: string) => {
     if (socket) {
       socket.emit('cc:input', { chatId, data });
     }
-  }
+  }, [socket, chatId]);
 
-  function stop() {
+  const stop = useCallback(() => {
     if (socket) {
       socket.emit('cc:stop', { chatId });
     }
-  }
+  }, [socket, chatId]);
 
   // Callback mechanism: wait for actual terminal output before reading the buffer.
   // Avoids stale reads caused by fixed timeouts that fire before PTY responds.
