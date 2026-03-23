@@ -1,5 +1,6 @@
 mod events;
 mod permissions;
+mod power;
 mod sidecar;
 mod tray;
 
@@ -44,6 +45,9 @@ pub fn run() {
 
             // Store manager in Tauri state for shutdown
             app.manage(manager.clone());
+
+            // Prevent system sleep while app is running
+            power::prevent_sleep();
 
             // Setup system tray
             if let Err(e) = tray::setup(&handle) {
@@ -115,6 +119,7 @@ pub fn run() {
         .expect("Error building Tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                power::allow_sleep();
                 if let Some(manager) = app.try_state::<Arc<sidecar::SidecarManager>>() {
                     manager.shutdown();
                 }
