@@ -12,6 +12,7 @@ interface ScriptProcess {
   status: string;
   detectedPorts?: number[];
   tunnelUrls?: Record<number, string>;
+  source?: 'script' | 'shell' | 'claude-code';
 }
 
 interface ScriptPickerPanelProps {
@@ -34,7 +35,7 @@ export default function ScriptPickerPanel({ projectId, onClose, onStarted }: Scr
       try {
         const data = await api.get<{ processes: ScriptProcess[]; runningCount: number }>(`/api/projects/${projectId}/scripts/processes`);
         if (!cancelled) {
-          setProcesses(data.processes.filter(p => p.status === 'running'));
+          setProcesses(data.processes.filter(p => p.status === 'running' && p.source !== 'claude-code'));
           setLoading(false);
         }
       } catch {
