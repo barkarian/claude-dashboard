@@ -85,11 +85,13 @@ export function useClaudeCode(
       return t.length > 10 && /^[─━]+$/.test(t);
     };
 
-    // Scan from the bottom of the buffer upward for the last two separators
-    const end = buffer.length - 1;
+    // Scan from around the cursor position (not buffer end, which may have many
+    // empty rows below on mobile where the terminal is CSS-scaled to be very tall).
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
     let bottomSep = -1;
     let topSep = -1;
-    for (let row = end; row >= Math.max(0, end - 30); row--) {
+    for (let row = scanStart; row >= Math.max(0, scanStart - 30); row--) {
       if (isSeparator(getLineText(row))) {
         if (bottomSep < 0) {
           bottomSep = row;
@@ -124,9 +126,10 @@ export function useClaudeCode(
     const term = termRef.current;
     if (!term) return false;
     const buffer = term.buffer.active;
-    const end = buffer.length - 1;
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
 
-    for (let row = end; row >= Math.max(0, end - 40); row--) {
+    for (let row = scanStart; row >= Math.max(0, scanStart - 40); row--) {
       const line = buffer.getLine(row);
       if (!line) continue;
       const text = line.translateToString(true);
