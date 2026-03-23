@@ -46,25 +46,55 @@ pub enum SidecarState {
 // ── Shell PATH resolution ─────────────────────────────────────────
 
 /// When launched from a .app bundle, macOS provides a minimal PATH
-/// (/usr/bin:/bin:/usr/sbin:/sbin). Resolve the user's full login
-/// shell PATH so child processes can find tools like `claude`, `npm`, etc.
+/// (/usr/bin:/bin:/usr/sbin:/sbin). Resolve the user's full interactive
+/// login shell PATH so child processes can find tools like `claude`, `npm`, etc.
+///
+/// Uses `-l -i` because tools like claude (installed via npm to ~/.local/bin)
+/// and nvm paths are typically added in .zshrc (interactive), not .zprofile (login-only).
 fn resolve_shell_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let output = Command::new(&shell)
-        .args(["-l", "-c", "echo $PATH"])
+    let home = std::env::var("HOME")
+        .or_else(|_| dirs::home_dir().map(|p| p.to_string_lossy().to_string()).ok_or(()))
+        .unwrap_or_default();
+
+    // Try interactive login shell first (-l -i sources both .zprofile and .zshrc)
+    if let Some(path) = run_shell_for_path(&shell, &["-l", "-i", "-c", "echo $PATH"], &home) {
+        return Some(path);
+    }
+
+    // Fallback to login-only shell
+    if let Some(path) = run_shell_for_path(&shell, &["-l", "-c", "echo $PATH"], &home) {
+        return Some(path);
+    }
+
+    log::warn!("Failed to resolve shell PATH, using system default");
+    None
+}
+
+fn run_shell_for_path(shell: &str, args: &[&str], home: &str) -> Option<String> {
+    let output = Command::new(shell)
+        .args(args)
+        .env("HOME", home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
         .ok()?;
     if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // Take the last non-empty line (in case shell config prints other output)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let path = stdout
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty() && l.contains('/'))
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if !path.is_empty() {
-            log::info!("Resolved shell PATH: {}", path);
+            log::info!("Resolved shell PATH ({}): {}", args.join(" "), path);
             return Some(path);
         }
     }
-    log::warn!("Failed to resolve shell PATH, using system default");
     None
 }
 
