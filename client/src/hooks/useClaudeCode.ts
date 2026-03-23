@@ -66,13 +66,14 @@ export function useClaudeCode(
   //   ❯ text      (prompt line, may span multiple lines)
   //   ──────────  (separator)
   //   ⏵⏵ info     (status line)
-  // We find the top separator, scan forward for the bottom, and collect all
-  // lines between them. This handles multi-line messages correctly.
+  //
+  // Strategy: scan from the BOTTOM of the buffer upward to find the last two
+  // ─── separator lines. The content between them is the prompt text.
+  // This is cursor-position independent and handles multi-line messages.
   const getPromptLine = useCallback((): string => {
     const term = termRef.current;
     if (!term) return '';
     const buffer = term.buffer.active;
-    const cursorRow = buffer.baseY + buffer.cursorY;
 
     const getLineText = (row: number): string => {
       const line = buffer.getLine(row);
@@ -81,35 +82,31 @@ export function useClaudeCode(
 
     const isSeparator = (text: string): boolean => {
       const t = text.trim();
-      return t.length > 10 && /^─+$/.test(t);
+      return t.length > 10 && /^[─━]+$/.test(t);
     };
 
-    // Scan backward from cursor to find the top ─── separator
-    let topSep = -1;
-    for (let row = cursorRow; row >= Math.max(0, cursorRow - 10); row--) {
-      if (isSeparator(getLineText(row))) {
-        topSep = row;
-        break;
-      }
-    }
-    if (topSep < 0) return '';
-
-    // Scan forward from top separator to find the bottom ─── separator
+    // Scan from the bottom of the buffer upward for the last two separators
+    const end = buffer.length - 1;
     let bottomSep = -1;
-    for (let row = topSep + 1; row <= cursorRow + 10; row++) {
+    let topSep = -1;
+    for (let row = end; row >= Math.max(0, end - 30); row--) {
       if (isSeparator(getLineText(row))) {
-        bottomSep = row;
-        break;
+        if (bottomSep < 0) {
+          bottomSep = row;
+        } else {
+          topSep = row;
+          break;
+        }
       }
     }
-    if (bottomSep < 0 || bottomSep === topSep + 1) return '';
+    if (topSep < 0 || bottomSep < 0 || bottomSep <= topSep + 1) return '';
 
     // Collect all lines between the separators
     const lines: string[] = [];
     for (let row = topSep + 1; row < bottomSep; row++) {
       let text = getLineText(row);
       if (row === topSep + 1) {
-        // First line: strip the prompt symbol (❯, >, etc.) and trailing spaces
+        // First line: strip the prompt symbol (❯, >, etc.)
         text = text.replace(/^\s*[^\w\s]\s*/, '');
       }
       lines.push(text);
