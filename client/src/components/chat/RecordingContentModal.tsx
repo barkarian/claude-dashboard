@@ -47,8 +47,8 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[calc(100dvh-2rem)] sm:max-h-[80vh] flex flex-col p-0">
-        <div className="flex items-center justify-between p-4 border-b border-border">
+      <DialogContent className="max-w-2xl max-h-[calc(100vh-2rem)] sm:max-h-[80vh] flex flex-col p-0 overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
           <div>
             <div className="flex items-center gap-2">
               {isLive && <span className="recording-pulse w-2.5 h-2.5 rounded-full bg-danger" />}
@@ -83,7 +83,7 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
         </div>
 
         {hasBrowser && (
-          <div className="flex border-b border-border">
+          <div className="flex border-b border-border flex-shrink-0">
             <button
               onClick={() => setTab('terminal')}
               className={`flex-1 text-xs py-2 text-center transition-colors ${tab === 'terminal' ? 'text-text font-medium border-b-2 border-primary' : 'text-text-muted hover:text-text'}`}
@@ -99,7 +99,7 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
           </div>
         )}
 
-        <div ref={scrollRef} className="overflow-y-auto flex-1 p-4 bg-[#0f1117]">
+        <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 p-4 bg-[#0f1117]">
           <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
             {displayLines.join('\n') || (tab === 'browser' ? 'No browser logs captured.' : '')}
           </pre>
