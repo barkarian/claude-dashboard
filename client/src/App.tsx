@@ -110,7 +110,8 @@ function SwipeHandler() {
 
     function handleTouchStart(e: TouchEvent) {
       const x = e.touches[0].clientX;
-      // CC override: track all swipes for arrow key mapping
+      // CC override: track all swipes for arrow key mapping,
+      // but still track the start position so edge swipes can navigate back
       if (ccSwipeOverride.current) {
         touchRef.current = { startX: x, startY: e.touches[0].clientY };
         return;
@@ -139,8 +140,24 @@ function SwipeHandler() {
       const absDy = Math.abs(dy);
       touchRef.current = null;
 
-      // Claude Code chat override: map swipes to arrow directions
+      // Claude Code chat override: map swipes to arrow directions,
+      // BUT edge swipes (from left edge) still navigate back
       if (ccSwipeOverride.current) {
+        // Edge swipe right on native → navigate back instead of sending arrow
+        if (native && startX < EDGE_ZONE && dx > 60 && dx > absDy * 2) {
+          const path = pathnameRef.current;
+          const isRoot = path === '/' || path === '';
+          if (!isRoot) {
+            haptics.impactLight();
+            if (path.match(/^\/project\/[^/]+$/)) {
+              navigate('/');
+            } else {
+              navigate(-1);
+            }
+            return;
+          }
+        }
+
         const MIN_DIST = 40;
         if (absDx > absDy && absDx > MIN_DIST) {
           haptics.impactLight();
