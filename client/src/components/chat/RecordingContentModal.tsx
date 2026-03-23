@@ -47,12 +47,12 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[calc(100vh-env(safe-area-inset-top,0px)-2rem)] sm:max-h-[80vh] flex flex-col p-0 overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
-          <div>
+      <DialogContent className="max-w-2xl max-h-[calc(100vh-env(safe-area-inset-top,0px)-6rem)] sm:max-h-[80vh] flex flex-col p-0 overflow-hidden">
+        <div className="flex items-center gap-2 p-4 pr-12 border-b border-border flex-shrink-0">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               {isLive && <span className="recording-pulse w-2.5 h-2.5 rounded-full bg-danger" />}
-              <span className="font-medium text-sm">{scriptNames}</span>
+              <span className="font-medium text-sm truncate">{scriptNames}</span>
             </div>
             <div className="text-xs text-text-muted mt-1">
               {lineCount} lines &middot; {startTime}
@@ -61,7 +61,7 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
           </div>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
+            className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
             title="Copy to clipboard"
           >
             {copied ? (
