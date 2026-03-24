@@ -40,7 +40,7 @@ const sessions = new Map<string, CCSession>();
 
 export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOServer): void {
 
-  socket.on('cc:start', ({ projectId, chatId, conversationId }: CCStartPayload) => {
+  socket.on('cc:start', ({ projectId, chatId, conversationId, cols, rows }: CCStartPayload) => {
     try {
       // Kill existing session for this chat if any
       killSession(chatId);
@@ -61,8 +61,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       const ptyProcess = pty.spawn('claude', args, {
         name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
+        cols: cols || 120,
+        rows: rows || 30,
         cwd: projectPath,
         env: getChildEnv(),
       });
@@ -141,12 +141,16 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
     killSession(chatId);
   });
 
-  socket.on('cc:attach', ({ chatId }: CCAttachPayload) => {
+  socket.on('cc:attach', ({ chatId, cols, rows }: CCAttachPayload) => {
     const room = `cc:${chatId}`;
     socket.join(room);
 
     const session = sessions.get(chatId);
     if (session) {
+      // Resize PTY to match the client terminal before replaying buffer
+      if (cols && rows && session.status === 'running') {
+        try { session.pty.resize(cols, rows); } catch {}
+      }
       // Replay buffer
       const fullBuffer = session.buffer.join('');
       if (fullBuffer) {

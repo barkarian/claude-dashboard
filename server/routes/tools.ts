@@ -82,6 +82,16 @@ router.post('/permissions/open-settings', async (req: Request, res: Response) =>
   res.json({ success });
 });
 
+// POST /api/tools/permissions/request-sleep-prevention — prompt for admin to enable pmset disablesleep
+router.post('/permissions/request-sleep-prevention', async (_req: Request, res: Response) => {
+  try {
+    const result = await permissionManager.requestSleepPrevention();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, output: err.message || 'Failed' });
+  }
+});
+
 // POST /api/tools/permissions/run-command — run a permission-granting command
 router.post('/permissions/run-command', async (req: Request, res: Response) => {
   const { command } = req.body;

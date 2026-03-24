@@ -73,6 +73,8 @@ export interface CCStartPayload {
   projectId: string;
   chatId: string;
   conversationId?: string; // for resume
+  cols?: number;
+  rows?: number;
 }
 
 export interface CCInputPayload {
@@ -92,6 +94,8 @@ export interface CCStopPayload {
 
 export interface CCAttachPayload {
   chatId: string;
+  cols?: number;
+  rows?: number;
 }
 
 export interface CCDetachPayload {

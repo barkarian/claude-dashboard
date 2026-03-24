@@ -153,18 +153,19 @@ async function getMacosPermissions(): Promise<PermissionCheck[]> {
     },
   ];
 
-  // Check if sleep prevention is active (for the desktop app)
+  // Check if full sleep prevention (pmset disablesleep) is active.
+  // This is distinct from caffeinate which only prevents idle sleep, not lid-close.
   try {
-    const { stdout } = await execFileAsync('pmset', ['-g', 'assertions']);
-    const sleepDisabled = stdout.includes('PreventUserIdleSystemSleep') || stdout.includes('disablesleep');
+    const { stdout } = await execFileAsync('pmset', ['-g']);
+    const sleepDisabled = /SleepDisabled\s+1/.test(stdout);
     permissions.push({
       id: 'macos_sleep_prevention',
       label: 'Sleep Prevention',
-      description: 'Prevents Mac from sleeping while the app is running, keeping tunnels and agents active.',
+      description: 'Prevents Mac from sleeping (including lid close), keeping tunnels and agents active. Requires admin.',
       granted: sleepDisabled,
       instructions: sleepDisabled
-        ? 'Sleep prevention is active. The Mac will stay awake while the app runs.'
-        : 'Sleep prevention is handled automatically by the Claw Dev desktop app. If running in terminal mode, use: caffeinate -s',
+        ? 'Sleep prevention is active (pmset disablesleep). The Mac will stay awake even with the lid closed while the app runs. Sleep is automatically re-enabled when the app exits.'
+        : 'Grant admin access to fully prevent sleep (including lid close). Without this, only idle sleep is prevented via caffeinate.',
       actionType: 'manual',
       category: 'execution',
     });
@@ -433,8 +434,39 @@ async function runCommand(command: string): Promise<{ success: boolean; output: 
   }
 }
 
+/**
+ * Request admin privileges to enable pmset disablesleep 1 (macOS only).
+ * Shows the standard macOS admin password dialog.
+ * Spawns a background monitor that re-enables sleep when this process exits.
+ */
+async function requestSleepPrevention(): Promise<{ success: boolean; output: string }> {
+  if (process.platform !== 'darwin') {
+    return { success: false, output: 'Only supported on macOS' };
+  }
+
+  const pid = process.pid;
+
+  // Uses POSIX-compatible >/dev/null 2>&1 (NOT &> which breaks in /bin/sh).
+  // The background monitor watches this Node.js process PID — when it dies
+  // (app exit, crash, etc.), sleep is automatically re-enabled within ~5s.
+  const script = [
+    'do shell script',
+    `"pmset disablesleep 1; (while kill -0 ${pid} 2>/dev/null; do sleep 5; done; pmset disablesleep 0) >/dev/null 2>&1 &"`,
+    'with administrator privileges',
+  ].join(' ');
+
+  try {
+    await execFileAsync('osascript', ['-e', script], { timeout: 60000 });
+    return { success: true, output: 'Sleep prevention activated' };
+  } catch (err: any) {
+    const msg = err.stderr || err.message || 'Admin auth denied or failed';
+    return { success: false, output: msg };
+  }
+}
+
 export default {
   detectPermissions,
   openSettings,
   runCommand,
+  requestSleepPrevention,
 };

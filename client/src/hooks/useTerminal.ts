@@ -85,13 +85,18 @@ export function useTerminal(
     // so parentElement gives us the correct available dimensions.
     const scaleTarget = wrapperRef?.current || containerRef.current!.parentElement;
     let currentScale = 1;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     function applyMobileScale() {
       const container = containerRef.current;
       if (!container || !scaleTarget) return;
 
       const parentW = (scaleTarget as HTMLElement).offsetWidth;
       const parentH = (scaleTarget as HTMLElement).offsetHeight;
-      if (parentH === 0) return;
+      if (parentH === 0) {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = setTimeout(applyMobileScale, 50);
+        return;
+      }
       const scale = Math.min(1, parentW / WIDE_WIDTH);
       currentScale = scale;
 
@@ -103,13 +108,24 @@ export function useTerminal(
       doFit();
     }
 
+    function fitWhenReady() {
+      if (isMobile) {
+        applyMobileScale();
+      } else {
+        const el = containerRef.current;
+        if (el && el.offsetHeight === 0) {
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = setTimeout(fitWhenReady, 50);
+          return;
+        }
+        doFit();
+      }
+    }
+
     // On mobile app, xterm's built-in touch scroll is broken by CSS scale transform.
     // Take full control of touch scrolling with scale compensation + momentum inertia.
     let touchCleanup: (() => void) | null = null;
     if (isMobile) {
-      requestAnimationFrame(applyMobileScale);
-      setTimeout(applyMobileScale, 100);
-
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
         const parentEl = scaleTarget || containerRef.current!;
@@ -219,7 +235,7 @@ export function useTerminal(
         };
       }
     } else {
-      doFit();
+      fitWhenReady();
     }
 
     // Attach to existing terminal session
@@ -259,11 +275,7 @@ export function useTerminal(
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       try {
-        if (isMobile) {
-          applyMobileScale();
-        } else {
-          fitAddon.fit();
-        }
+        fitWhenReady();
         if (!readOnly) {
           socket.emit('terminal:resize', {
             projectId,
@@ -279,9 +291,18 @@ export function useTerminal(
 
     resizeObserver.observe(scaleTarget || containerRef.current);
 
+    // Re-fit once web fonts are loaded — xterm measures cell dimensions on
+    // open() using whatever font is available; if JetBrains Mono hasn't
+    // loaded yet the metrics are wrong, producing a misfit layout.
+    fitWhenReady();
+    const lateTimer = setTimeout(fitWhenReady, 350);
+    document.fonts.ready.then(fitWhenReady);
+
     setStatus('connected');
 
     return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      if (lateTimer) clearTimeout(lateTimer);
       touchCleanup?.();
       socket.off('terminal:output', handleOutput);
       socket.off('terminal:status', handleStatus);

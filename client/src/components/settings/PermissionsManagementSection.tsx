@@ -96,6 +96,18 @@ export default function PermissionsManagementSection() {
     }
   }
 
+  async function handleSleepPrevention() {
+    setActionLoading('macos_sleep_prevention');
+    try {
+      await api.post('/api/tools/permissions/request-sleep-prevention');
+      await fetchPermissions();
+    } catch {
+      // ignore
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-bg-surface border border-border rounded-xl p-5">
@@ -190,6 +202,19 @@ export default function PermissionsManagementSection() {
                     {isExpanded && (
                       <div className="border-t border-border bg-bg px-3 py-3">
                         <p className="text-xs text-text-muted mb-2">{perm.instructions}</p>
+                        {/* Sleep prevention: dedicated Grant button */}
+                        {perm.id === 'macos_sleep_prevention' && !perm.granted && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSleepPrevention}
+                              disabled={actionLoading === perm.id}
+                            >
+                              {actionLoading === perm.id ? 'Waiting for admin...' : 'Grant'}
+                            </Button>
+                          </div>
+                        )}
                         {perm.actionValue && (
                           <div className="flex items-center gap-2">
                             {perm.actionType === 'open_settings' && (

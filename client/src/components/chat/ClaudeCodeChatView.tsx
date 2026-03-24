@@ -174,6 +174,8 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         projectId,
         chatId,
         conversationId: conversationId || undefined,
+        cols: terminal.current?.cols,
+        rows: terminal.current?.rows,
       });
     }, 200);
   }

@@ -208,13 +208,20 @@ export function useClaudeCode(
     // so parentElement gives us the correct available dimensions.
     const scaleTarget = containerRef.current!.parentElement;
     let currentScale = 1;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let lateTimer: ReturnType<typeof setTimeout> | null = null;
+
     function applyMobileScale() {
       const container = containerRef.current;
       if (!container || !scaleTarget) return;
 
       const parentW = (scaleTarget as HTMLElement).offsetWidth;
       const parentH = (scaleTarget as HTMLElement).offsetHeight;
-      if (parentH === 0) return;
+      if (parentH === 0) {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = setTimeout(applyMobileScale, 50);
+        return;
+      }
       const scale = Math.min(1, parentW / WIDE_WIDTH);
       currentScale = scale;
 
@@ -226,13 +233,32 @@ export function useClaudeCode(
       doFit();
     }
 
+    // Fit or scale that tolerates zero-height containers during route transitions.
+    // Also notifies the server so the PTY dimensions stay in sync.
+    function fitWhenReady() {
+      const prevCols = term.cols;
+      const prevRows = term.rows;
+      if (isMobile) {
+        applyMobileScale();
+      } else {
+        const el = containerRef.current;
+        if (el && el.offsetHeight === 0) {
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = setTimeout(fitWhenReady, 50);
+          return;
+        }
+        doFit();
+      }
+      // Notify server when dimensions actually changed
+      if (socket && (term.cols !== prevCols || term.rows !== prevRows)) {
+        socket.emit('cc:resize', { chatId, cols: term.cols, rows: term.rows });
+      }
+    }
+
     // On mobile app, xterm's built-in touch scroll is broken by CSS scale transform.
     // Take full control of touch scrolling with scale compensation + momentum inertia.
     let touchCleanup: (() => void) | null = null;
     if (isMobile) {
-      requestAnimationFrame(applyMobileScale);
-      setTimeout(applyMobileScale, 100);
-
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
         const parentEl = scaleTarget || containerRef.current!;
@@ -348,19 +374,22 @@ export function useClaudeCode(
         };
       }
     } else {
-      doFit();
+      fitWhenReady();
     }
 
-    // Check if there's an existing session to attach to, otherwise start new
+    // Check if there's an existing session to attach to, otherwise start new.
+    // Send current terminal dimensions so the PTY is created / resized to match.
     socket.emit('cc:check-session', { chatId }, (result: { exists: boolean; status?: string }) => {
       if (result.exists) {
-        socket.emit('cc:attach', { chatId });
+        socket.emit('cc:attach', { chatId, cols: term.cols, rows: term.rows });
         setStatus(result.status === 'running' ? 'running' : 'exited');
       } else {
         socket.emit('cc:start', {
           projectId,
           chatId,
           conversationId: conversationId || undefined,
+          cols: term.cols,
+          rows: term.rows,
         });
       }
     });
@@ -415,14 +444,10 @@ export function useClaudeCode(
       socket.emit('cc:input', { chatId, data });
     });
 
-    // Handle resize
+    // Handle resize — single source of truth for both mobile and desktop
     const resizeObserver = new ResizeObserver(() => {
       try {
-        if (isMobile) {
-          applyMobileScale();
-        } else {
-          fitAddon.fit();
-        }
+        fitWhenReady();
         socket.emit('cc:resize', {
           chatId,
           cols: term.cols,
@@ -433,11 +458,25 @@ export function useClaudeCode(
       }
     });
 
-    resizeObserver.observe(scaleTarget || containerRef.current);
+    const observeTarget = scaleTarget || containerRef.current;
+    resizeObserver.observe(observeTarget);
+
+    // Explicit initial fit after observer setup, plus a safety-net timeout
+    // to catch late layout changes (CSS transitions, route animations, etc.)
+    fitWhenReady();
+    lateTimer = setTimeout(fitWhenReady, 350);
+
+    // Re-fit once web fonts are loaded — xterm measures cell dimensions on
+    // open() using whatever font is available; if the custom font (JetBrains
+    // Mono) hasn't loaded yet the metrics are wrong, producing a layout that
+    // looks "slightly too big". This single line fixes both desktop & mobile.
+    document.fonts.ready.then(fitWhenReady);
 
     return () => {
       if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
       if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+      if (retryTimer) clearTimeout(retryTimer);
+      if (lateTimer) clearTimeout(lateTimer);
       outputNotifyRef.current = null;
       touchCleanup?.();
       socket.off('cc:output', handleOutput);

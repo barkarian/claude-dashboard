@@ -5,24 +5,21 @@ use std::sync::Mutex;
 static CAFFEINATE: Mutex<Option<Child>> = Mutex::new(None);
 static PMSET_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Prevent system sleep while the app is running, including lid-close sleep.
-///
-/// Strategy:
-/// 1. Prompt for admin password (standard macOS dialog) to run `pmset disablesleep 1`
-/// 2. Spawn a background root process that monitors our PID — when we exit (even crash),
-///    it automatically runs `pmset disablesleep 0`. No second password prompt.
-/// 3. If user denies admin prompt, fall back to `caffeinate -s` (idle sleep only, not lid close)
+/// Try to activate pmset disablesleep via admin prompt.
+/// Returns true if successful, false if denied/failed.
 #[cfg(target_os = "macos")]
-pub fn prevent_sleep() {
+fn try_activate_pmset() -> bool {
     let pid = std::process::id();
 
-    // AppleScript: run pmset with admin privileges, then spawn a background
-    // monitor that re-enables sleep when our process exits.
+    // IMPORTANT: /bin/sh on macOS is bash in POSIX mode, which does NOT support
+    // the &> redirect operator. Using &>/dev/null causes the background process
+    // to keep stdout open, which makes `do shell script` hang forever.
+    // Use the POSIX-compatible >/dev/null 2>&1 instead.
     let script = format!(
         concat!(
             r#"do shell script ""#,
             r#"pmset disablesleep 1; "#,
-            r#"(while kill -0 {} 2>/dev/null; do sleep 5; done; pmset disablesleep 0) &>/dev/null &#,
+            r#"(while kill -0 {} 2>/dev/null; do sleep 5; done; pmset disablesleep 0) >/dev/null 2>&1 &"#,
             r#"" with administrator privileges"#,
         ),
         pid
@@ -32,39 +29,76 @@ pub fn prevent_sleep() {
         .args(["-e", &script])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
     {
         Ok(output) if output.status.success() => {
             PMSET_ACTIVE.store(true, Ordering::SeqCst);
             log::info!(
-                "Sleep fully disabled via pmset (including lid close), monitor watching pid {}",
+                "pmset disablesleep 1 active (including lid close), monitor watching pid {}",
                 pid
             );
+            true
         }
-        _ => {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
             log::warn!(
-                "Admin auth denied or failed, falling back to caffeinate (idle sleep only)"
+                "Admin denied or pmset failed: {}. Caffeinate active (idle sleep only).",
+                stderr.trim()
             );
-            // Fallback: caffeinate -s prevents idle sleep (but not lid close)
-            match Command::new("caffeinate")
-                .args(["-s", "-w", &pid.to_string()])
-                .spawn()
-            {
-                Ok(child) => {
-                    log::info!("Caffeinate fallback active (pid: {})", child.id());
-                    *CAFFEINATE.lock().unwrap() = Some(child);
-                }
-                Err(e) => log::error!("Failed to start caffeinate: {}", e),
-            }
+            false
+        }
+        Err(e) => {
+            log::warn!(
+                "osascript failed: {}. Caffeinate active (idle sleep only).",
+                e
+            );
+            false
         }
     }
 }
 
+/// Prevent system sleep while the app is running, including lid-close sleep.
+///
+/// Strategy:
+/// 1. Start `caffeinate -s` immediately (idle sleep prevention, no admin needed)
+/// 2. In background thread: prompt for admin password to run `pmset disablesleep 1`
+///    - Also spawns a root monitor process that re-enables sleep when our app exits
+///    - Uses POSIX-compatible shell syntax (`>/dev/null 2>&1`, NOT `&>` which
+///      silently breaks in `/bin/sh` and causes `do shell script` to hang forever)
+/// 3. If user denies admin, caffeinate remains active as fallback (idle sleep only)
+#[cfg(target_os = "macos")]
+pub fn prevent_sleep() {
+    let pid = std::process::id();
+
+    // Immediate baseline: caffeinate prevents idle sleep (no admin required)
+    match Command::new("caffeinate")
+        .args(["-s", "-w", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => {
+            log::info!("Caffeinate started (pid: {}), idle sleep prevented", child.id());
+            *CAFFEINATE.lock().unwrap() = Some(child);
+        }
+        Err(e) => log::error!("Failed to start caffeinate: {}", e),
+    }
+
+    // Upgrade: pmset disablesleep prevents ALL sleep including lid-close.
+    // Runs in background thread so the admin dialog doesn't block app startup.
+    std::thread::spawn(move || {
+        try_activate_pmset();
+    });
+}
+
 /// Release sleep prevention (called on app exit).
-/// The background monitor also handles this within ~5s, so this is best-effort.
+/// The background monitor also re-enables sleep within ~5s of our PID dying,
+/// so this is best-effort for faster cleanup on graceful shutdown.
 #[cfg(target_os = "macos")]
 pub fn allow_sleep() {
+    // Stop caffeinate
     if let Some(mut child) = CAFFEINATE.lock().unwrap().take() {
         let _ = child.kill();
         let _ = child.wait();
@@ -72,7 +106,25 @@ pub fn allow_sleep() {
     }
 
     if PMSET_ACTIVE.load(Ordering::SeqCst) {
-        log::info!("Sleep will be re-enabled by background monitor within ~5s");
+        // Best-effort: try non-interactive sudo (works if credential timestamp is cached).
+        // This avoids waiting the full ~5s for the background monitor to notice we exited.
+        let result = Command::new("sudo")
+            .args(["-n", "pmset", "disablesleep", "0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+
+        match result {
+            Ok(output) if output.status.success() => {
+                log::info!("Sleep re-enabled via sudo -n pmset");
+            }
+            _ => {
+                log::info!(
+                    "Could not re-enable sleep directly; background monitor will handle it within ~5s"
+                );
+            }
+        }
     }
 }
 
