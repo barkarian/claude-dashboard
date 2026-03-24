@@ -108,14 +108,18 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
         io.to(room).emit('cc:status', { chatId, status: 'exited' });
+        // Notify project room so chat list shows updated status
+        io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'exited' });
       });
 
-      // Emit running status
+      // Emit running status to chat room and project room
       io.to(room).emit('cc:status', { chatId, status: 'running' });
+      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
     } catch (err: any) {
       console.error('cc:start error:', err);
       socket.emit('cc:status', { chatId, status: 'error' });
       socket.emit('cc:error', { chatId, error: err.message });
+      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'exited' });
     }
   });
 
@@ -207,4 +211,15 @@ export function killAllCCSessions(): void {
     killSession(chatId);
   }
   sessions.clear();
+}
+
+/** Return active CC session statuses for a project (for project:join initial payload) */
+export function getProjectCCSessions(projectId: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [chatId, session] of sessions) {
+    if (session.projectId === projectId && session.status === 'running') {
+      result[chatId] = 'idle';
+    }
+  }
+  return result;
 }

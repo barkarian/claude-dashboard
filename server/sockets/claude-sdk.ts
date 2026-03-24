@@ -3,6 +3,7 @@ import { migrateHistoryMessage } from '../services/sdkSessionManager.ts';
 import projectManager from '../services/projectManager.ts';
 import { emitSidecarEvent } from '../services/sidecarEmitter.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
+import { getProjectCCSessions } from './claude-code.ts';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type {
   SDKStartPayload,
@@ -162,7 +163,11 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
   socket.on('project:join', ({ projectId }: { projectId: string }, callback?: Function) => {
     socket.join(`project:${projectId}`);
-    const statuses = sdkSessionManager.getProjectSessions(projectId);
+    // Merge SDK and CC session statuses so the chat list shows all active sessions
+    const statuses = {
+      ...sdkSessionManager.getProjectSessions(projectId),
+      ...getProjectCCSessions(projectId),
+    };
     callback?.(statuses);
   });
 

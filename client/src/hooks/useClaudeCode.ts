@@ -12,6 +12,7 @@ interface UseClaudeCodeOptions {
   projectId: string;
   chatId: string;
   conversationId?: string | null;
+  onTerminalSubmit?: (text: string) => void;
 }
 
 interface UseClaudeCodeReturn {
@@ -26,13 +27,17 @@ interface UseClaudeCodeReturn {
 
 export function useClaudeCode(
   containerRef: RefObject<HTMLElement | null>,
-  { socket, projectId, chatId, conversationId }: UseClaudeCodeOptions
+  { socket, projectId, chatId, conversationId, onTerminalSubmit }: UseClaudeCodeOptions
 ): UseClaudeCodeReturn {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep callback ref fresh so the useEffect closure always calls the latest version
+  const onTerminalSubmitRef = useRef(onTerminalSubmit);
+  onTerminalSubmitRef.current = onTerminalSubmit;
 
   const write = useCallback((data: string) => {
     if (socket) {
@@ -439,8 +444,16 @@ export function useClaudeCode(
     socket.on('cc:exit', handleExit);
     socket.on('cc:error', handleError);
 
-    // Forward terminal keyboard input to the PTY
+    // Forward terminal keyboard input to the PTY.
+    // On desktop, also detect Enter keypresses to notify the parent (for auto-titling).
     term.onData((data: string) => {
+      // Read prompt text BEFORE sending Enter to PTY (buffer still has the text)
+      if (!isMobile && onTerminalSubmitRef.current && (data === '\r' || data === '\n')) {
+        const text = getPromptLine();
+        if (text) {
+          onTerminalSubmitRef.current(text);
+        }
+      }
       socket.emit('cc:input', { chatId, data });
     });
 

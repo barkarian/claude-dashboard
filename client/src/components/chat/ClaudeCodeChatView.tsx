@@ -39,11 +39,27 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
 
+  // Auto-title: on first real user message, rename the chat.
+  // Shared by both mobile (CCPromptInput handleSend) and desktop (direct xterm input).
+  const autoTitle = useCallback((text: string) => {
+    if (!firstMessageSentRef.current && chatId) {
+      firstMessageSentRef.current = true;
+      const trimmed = text.trim();
+      if (trimmed) {
+        const newLabel = trimmed.slice(0, 50) + (trimmed.length > 50 ? '...' : '');
+        api.patch(`/api/projects/${projectId}/chats/${chatId}`, { label: newLabel })
+          .then(() => refreshRef.current())
+          .catch(() => {});
+      }
+    }
+  }, [chatId, projectId]);
+
   const { terminal, status, isSelectionMode, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
     conversationId,
+    onTerminalSubmit: autoTitle,
   });
 
   // Prompt suggestion: syncs terminal history recall into the textarea
@@ -119,19 +135,9 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     terminal.current?.scrollToBottom();
     setPromptSuggestion(null);
 
-    // Auto-title: on first real user message, rename the chat
-    if (!firstMessageSentRef.current && chatId) {
-      firstMessageSentRef.current = true;
-
-      const text = userText.trim();
-      if (text && text.length > 0) {
-        const newLabel = text.slice(0, 50) + (text.length > 50 ? '...' : '');
-        api.patch(`/api/projects/${projectId}/chats/${chatId}`, { label: newLabel })
-          .then(() => refreshRef.current())
-          .catch(() => {});
-      }
-    }
-  }, [write, chatId, projectId]);
+    // Auto-title on first message (mobile path — desktop uses onTerminalSubmit)
+    autoTitle(userText);
+  }, [write, autoTitle]);
 
   // If chat already has a title, mark first message as already sent
   useEffect(() => {
