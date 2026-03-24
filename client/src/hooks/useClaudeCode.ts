@@ -208,13 +208,19 @@ export function useClaudeCode(
     // so parentElement gives us the correct available dimensions.
     const scaleTarget = containerRef.current!.parentElement;
     let currentScale = 1;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     function applyMobileScale() {
       const container = containerRef.current;
       if (!container || !scaleTarget) return;
 
       const parentW = (scaleTarget as HTMLElement).offsetWidth;
       const parentH = (scaleTarget as HTMLElement).offsetHeight;
-      if (parentH === 0) return;
+      if (parentH === 0) {
+        // Parent hasn't been laid out yet — retry until it is
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = setTimeout(applyMobileScale, 50);
+        return;
+      }
       const scale = Math.min(1, parentW / WIDE_WIDTH);
       currentScale = scale;
 
@@ -230,8 +236,9 @@ export function useClaudeCode(
     // Take full control of touch scrolling with scale compensation + momentum inertia.
     let touchCleanup: (() => void) | null = null;
     if (isMobile) {
-      requestAnimationFrame(applyMobileScale);
-      setTimeout(applyMobileScale, 100);
+      // Initial sizing is handled by the ResizeObserver (line ~436) which fires
+      // after layout is complete with correct dimensions. Avoid RAF/setTimeout
+      // here — they race with layout and can capture wrong dimensions.
 
       const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement;
       if (viewport) {
@@ -438,6 +445,7 @@ export function useClaudeCode(
     return () => {
       if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
       if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+      if (retryTimer) clearTimeout(retryTimer);
       outputNotifyRef.current = null;
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
