@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '../ui/sheet.tsx';
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from '../ui/drawer.tsx';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -108,12 +108,12 @@ export default function BranchSelector({ projectId, onBranchChange }: BranchSele
       )}
 
       {/* Branch picker sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="bottom" className="max-h-[60vh] flex flex-col">
-          <SheetHeader>
-            <SheetTitle>Switch Branch</SheetTitle>
-          </SheetHeader>
-          <div className="overflow-y-auto flex-1 -mx-6 px-6 py-2 space-y-1">
+      <Drawer open={sheetOpen} onOpenChange={setSheetOpen}>
+        <DrawerContent className="max-h-[80vh] flex flex-col">
+          <DrawerHeader>
+            <DrawerTitle>Switch Branch</DrawerTitle>
+          </DrawerHeader>
+          <div className="overflow-y-auto flex-1 px-4 py-2 space-y-1">
             {branches.local.length > 0 && (
               <>
                 <div className="text-xs font-semibold text-text-muted uppercase tracking-wider px-2 py-1">Local</div>
@@ -160,8 +160,8 @@ export default function BranchSelector({ projectId, onBranchChange }: BranchSele
               </>
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
 
       {/* Uncommitted changes warning */}
       <AlertDialog open={!!dirtyAlert} onOpenChange={(open) => !open && setDirtyAlert(null)}>

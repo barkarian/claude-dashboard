@@ -32,6 +32,8 @@
     "store:allow-set",
     "store:allow-delete",
     "store:allow-keys",
-    "store:allow-clear"
+    "store:allow-clear",
+    "dialog:default",
+    "dialog:allow-open"
   ]
 }

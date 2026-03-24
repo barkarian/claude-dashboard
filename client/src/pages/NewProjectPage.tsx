@@ -10,6 +10,8 @@ import { Alert } from '../components/ui/alert.tsx';
 import Header from '../components/layout/Header.tsx';
 import RepoSelector from '../components/projects/RepoSelector.tsx';
 import SetupTerminal from '../components/projects/SetupTerminal.tsx';
+import { isTauriDesktop } from '../utils/platform.ts';
+import { pickDirectory } from '../utils/nativeDialog.ts';
 import type { GitHubRepo, Project } from '../../../shared/types/models.ts';
 
 export default function NewProjectPage() {
@@ -27,6 +29,18 @@ export default function NewProjectPage() {
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'new' | 'existing'>('new');
+  const isDesktop = isTauriDesktop();
+
+  async function handleNativePickExisting() {
+    const path = await pickDirectory();
+    if (path) {
+      setProjectPath(path);
+      if (!projectName) {
+        const folderName = path.split('/').filter(Boolean).pop() || '';
+        setProjectName(folderName);
+      }
+    }
+  }
 
   function handleRepoSelect(repo: GitHubRepo) {
     setSelectedRepo(repo);
@@ -180,13 +194,27 @@ export default function NewProjectPage() {
                 </div>
                 <div>
                   <Label>Directory Path</Label>
-                  <Input
-                    type="text"
-                    value={projectPath}
-                    onChange={(e) => setProjectPath(e.target.value)}
-                    className="font-mono"
-                    placeholder="/Users/you/projects/my-project"
-                  />
+                  {isDesktop ? (
+                    <div className="space-y-2">
+                      <Button variant="outline" onClick={handleNativePickExisting} className="w-full">
+                        <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                        </svg>
+                        {projectPath ? 'Change Directory' : 'Select Directory'}
+                      </Button>
+                      {projectPath && (
+                        <p className="text-xs text-text-muted font-mono truncate">{projectPath}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <Input
+                      type="text"
+                      value={projectPath}
+                      onChange={(e) => setProjectPath(e.target.value)}
+                      className="font-mono"
+                      placeholder="/Users/you/projects/my-project"
+                    />
+                  )}
                 </div>
                 {error && (
                   <Alert variant="danger">{error}</Alert>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
 import { useAppSidebar } from '../../context/SidebarContext.tsx';
-import { Sheet, SheetContent, SheetTitle } from '../ui/sheet.tsx';
+import { Drawer, DrawerContent, DrawerTitle } from '../ui/drawer.tsx';
 import { Button } from '../ui/button.tsx';
 import { Input } from '../ui/input.tsx';
 import { Label } from '../ui/label.tsx';
@@ -11,6 +11,8 @@ import RepoSelector from './RepoSelector.tsx';
 import FolderBrowser from './FolderBrowser.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
 import api from '../../utils/api.ts';
+import { isTauriDesktop } from '../../utils/platform.ts';
+import { pickDirectory } from '../../utils/nativeDialog.ts';
 import type { GitHubRepo, Project, ChatAdapter } from '../../../../shared/types/models.ts';
 
 type Tab = 'existing' | 'clone' | 'empty';
@@ -91,12 +93,24 @@ export default function NewProjectDrawer() {
     setSuccess(false);
   }
 
+  const isDesktop = isTauriDesktop();
+
   // --- Existing tab ---
   function handleFolderSelect(path: string) {
     setSelectedPath(path);
     const folderName = path.split('/').filter(Boolean).pop() || '';
     setProjectName(folderName);
     setProjectPath(path);
+  }
+
+  async function handleNativePickFolder() {
+    const path = await pickDirectory();
+    if (path) handleFolderSelect(path);
+  }
+
+  async function handleNativePickEmptyDir() {
+    const path = await pickDirectory();
+    if (path) handleEmptyFolderSelect(path);
   }
 
   async function handleRegister() {
@@ -185,17 +199,12 @@ export default function NewProjectDrawer() {
   }
 
   return (
-    <Sheet open={isOpen} onOpenChange={handleOpenChange}>
-      <SheetContent side="bottom" className="h-[60vh] rounded-t-2xl flex flex-col">
-        {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-12 h-1.5 rounded-full bg-border" />
-        </div>
-
+    <Drawer open={isOpen} onOpenChange={handleOpenChange}>
+      <DrawerContent className="h-[80vh] flex flex-col">
         <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between mb-3 flex-shrink-0">
-            <SheetTitle className="text-lg font-semibold">New Project</SheetTitle>
+            <DrawerTitle className="text-lg font-semibold">New Project</DrawerTitle>
           </div>
 
           {/* Success state */}
@@ -264,10 +273,24 @@ export default function NewProjectDrawer() {
                 {/* --- Existing tab --- */}
                 {tab === 'existing' && (
                   <div className="space-y-4">
-                    <FolderBrowser
-                      onSelect={handleFolderSelect}
-                      selectedPath={selectedPath}
-                    />
+                    {isDesktop ? (
+                      <div className="space-y-3">
+                        <Button variant="outline" onClick={handleNativePickFolder} className="w-full">
+                          <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                          </svg>
+                          {selectedPath ? 'Change Directory' : 'Select Directory'}
+                        </Button>
+                        {selectedPath && (
+                          <TruncatedPath path={selectedPath} />
+                        )}
+                      </div>
+                    ) : (
+                      <FolderBrowser
+                        onSelect={handleFolderSelect}
+                        selectedPath={selectedPath}
+                      />
+                    )}
 
                     {selectedPath && (
                       <div className="space-y-3 pt-2 border-t border-border">
@@ -375,10 +398,24 @@ export default function NewProjectDrawer() {
                     </div>
                     <div>
                       <Label className="mb-2 block">Parent Directory</Label>
-                      <FolderBrowser
-                        onSelect={handleEmptyFolderSelect}
-                        selectedPath={emptySelectedBrowserPath}
-                      />
+                      {isDesktop ? (
+                        <div className="space-y-3">
+                          <Button variant="outline" onClick={handleNativePickEmptyDir} className="w-full">
+                            <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                            </svg>
+                            {emptyDirPath ? 'Change Directory' : 'Select Parent Directory'}
+                          </Button>
+                          {emptyDirPath && (
+                            <TruncatedPath path={emptyDirPath} />
+                          )}
+                        </div>
+                      ) : (
+                        <FolderBrowser
+                          onSelect={handleEmptyFolderSelect}
+                          selectedPath={emptySelectedBrowserPath}
+                        />
+                      )}
                     </div>
                   </div>
                 )}
@@ -452,7 +489,7 @@ export default function NewProjectDrawer() {
             </>
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   );
 }
