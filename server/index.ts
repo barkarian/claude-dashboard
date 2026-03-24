@@ -30,6 +30,7 @@ import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials, getOrCreateSessionSecret } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
+import permissionManagerService from './services/permissionManager.ts';
 
 // Override default session secret with auto-generated one
 config.sessionSecret = getOrCreateSessionSecret();
@@ -334,6 +335,11 @@ server.listen(config.port, async () => {
     console.log('[tunnel] TUNNEL_API_KEY not set. Tunnel activates after first user OAuth.');
   }
   autostartScripts();
+
+  // Auto-activate sleep prevention if user previously opted in (desktop only)
+  if (process.env.CLAW_DESKTOP === '1') {
+    permissionManagerService.autoActivateSleepPrevention();
+  }
 
   // Sync SSH keys and credentials on startup in VPS mode
   if (config.isVps) {

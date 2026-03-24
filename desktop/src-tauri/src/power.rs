@@ -73,7 +73,7 @@ pub fn prevent_sleep() {
 
     // Immediate baseline: caffeinate prevents idle sleep (no admin required)
     match Command::new("caffeinate")
-        .args(["-s", "-w", &pid.to_string()])
+        .args(["-s", "-i", "-w", &pid.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

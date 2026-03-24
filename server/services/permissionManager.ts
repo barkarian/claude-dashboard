@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getSetting, setSetting } from './database.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -102,7 +103,7 @@ async function getMacosPermissions(): Promise<PermissionCheck[]> {
   if (fda) {
     fdaInstructions = 'Full Disk Access is granted. To revoke, open System Settings > Privacy & Security > Full Disk Access and toggle off the app.';
   } else if (desktop_mode && production) {
-    fdaInstructions = 'Open System Settings > Privacy & Security > Full Disk Access, find "Claw Dev" and toggle it on. If not listed, click + and add /Applications/Claw Dev.app. Note: Terminal having FDA is not enough — macOS requires the app that runs the server (Claw Dev) to have FDA.';
+    fdaInstructions = 'Open System Settings > Privacy & Security > Full Disk Access and toggle on "claw-dev-desktop" (the executable icon, not the app icon). macOS grants FDA to the binary that spawns the server, not the .app wrapper. If not listed, click + and navigate to /Applications/Claw Dev.app/Contents/MacOS/claw-dev-desktop.';
   } else if (desktop_mode) {
     // Dev mode (tauri dev) — the binary is target/debug/claw-dev or similar
     fdaInstructions = 'You are running in development mode (tauri dev). The Tauri dev binary needs Full Disk Access, not Terminal. Open System Settings > Privacy & Security > Full Disk Access, click +, then press Cmd+Shift+G and navigate to the target/debug folder in your desktop/src-tauri directory to add the dev binary. Alternatively, run the server directly from Terminal (without Tauri) during development.';
@@ -457,10 +458,27 @@ async function requestSleepPrevention(): Promise<{ success: boolean; output: str
 
   try {
     await execFileAsync('osascript', ['-e', script], { timeout: 60000 });
+    setSetting('sleep_prevention_opted_in', 'true');
     return { success: true, output: 'Sleep prevention activated' };
   } catch (err: any) {
     const msg = err.stderr || err.message || 'Admin auth denied or failed';
     return { success: false, output: msg };
+  }
+}
+
+/**
+ * Auto-activate sleep prevention on startup if the user previously opted in.
+ * Called from server startup — shows admin prompt only if user explicitly granted before.
+ */
+async function autoActivateSleepPrevention(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  const optedIn = getSetting('sleep_prevention_opted_in');
+  if (optedIn !== 'true') return;
+
+  console.log('[startup] Auto-activating sleep prevention (user previously opted in)');
+  const result = await requestSleepPrevention();
+  if (!result.success) {
+    console.warn('[startup] Sleep prevention auto-activation failed:', result.output);
   }
 }
 
@@ -469,4 +487,5 @@ export default {
   openSettings,
   runCommand,
   requestSleepPrevention,
+  autoActivateSleepPrevention,
 };
