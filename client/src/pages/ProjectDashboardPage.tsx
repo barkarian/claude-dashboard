@@ -141,7 +141,7 @@ export default function ProjectDashboardPage() {
 
   async function handleNewChat() {
     try {
-      const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat' });
+      const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat', adapter: project?.defaultAdapter });
       navigate(`/project/${id}/chats/${data.chat.id}`, {
         state: { isNewChat: true, adapter: data.chat.adapter },
       });

@@ -89,7 +89,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
       handleSend();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !native) {
       e.preventDefault();
       handleSend();
       return;

@@ -78,7 +78,7 @@ export default function ProjectSettingsDialog({
     api.get<ShellPreference>('/api/shell-preference')
       .then(setShellPref)
       .catch(() => {});
-  }, [open, shellOverride]);
+  }, [open, shellOverride, defaultAdapter]);
 
   async function handleSaveShell() {
     const newValue = localShellOverride || null;
