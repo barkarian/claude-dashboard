@@ -162,9 +162,9 @@ router.post('/settings/update', async (req: Request, res: Response) => {
 // GET /api/shell-preference — get account-level shell preference
 router.get('/shell-preference', (req: Request, res: Response) => {
   const preferred = processManager.getPreferredShell();
-  const defaultShell = process.platform === 'win32' ? 'powershell' : 'bash';
+  const systemShell = processManager.getSystemShell();
   res.json({
-    accountShell: preferred || defaultShell,
+    accountShell: preferred || systemShell,
     isDefault: !preferred,
     availableShells: ['bash', 'zsh', 'fish', 'sh', ...(process.platform === 'win32' ? ['powershell', 'wsl'] : [])],
   });

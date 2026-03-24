@@ -22,6 +22,19 @@ const SHELL_BINARY_MAP: Record<string, string> = {
   wsl: 'wsl',
 };
 
+// Detect the system default shell from $SHELL (Unix) or fallback to bash/powershell
+function getSystemShell(): string {
+  if (process.platform === 'win32') return 'powershell.exe';
+  const envShell = process.env.SHELL;
+  if (envShell) {
+    // Extract shell name from path (e.g. /bin/zsh -> zsh)
+    const name = envShell.split('/').pop() || '';
+    if (SHELL_BINARY_MAP[name]) return SHELL_BINARY_MAP[name];
+    return envShell; // use full path if not in map
+  }
+  return 'bash';
+}
+
 function getShell(projectShellOverride?: string | null): string {
   const effective = projectShellOverride || preferredShell;
   if (process.platform === 'win32') {
@@ -32,7 +45,7 @@ function getShell(projectShellOverride?: string | null): string {
   if (effective && SHELL_BINARY_MAP[effective]) {
     return SHELL_BINARY_MAP[effective];
   }
-  return 'bash';
+  return getSystemShell();
 }
 
 function getShellArgs(mode: 'command' | 'interactive', command?: string, projectShellOverride?: string | null): string[] {
@@ -58,7 +71,7 @@ async function fetchPreferredShell(): Promise<void> {
     if (res.ok) {
       const data = await res.json() as { preferredShell?: string };
       preferredShell = data.preferredShell || null;
-      console.log(`[process] User preferred shell (${env}): ${preferredShell || 'default (bash)'}`);
+      console.log(`[process] User preferred shell (${env}): ${preferredShell || `default (${getSystemShell()})`}`);
     }
   } catch {
     console.log('[process] Failed to fetch shell preference, using default');
@@ -566,6 +579,7 @@ export default {
   fetchPreferredShell,
   setPreferredShell,
   getPreferredShell,
+  getSystemShell,
   registerExternalProcess,
   unregisterExternalProcess,
 };
