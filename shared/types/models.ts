@@ -20,6 +20,7 @@ export interface Chat {
   id: string;
   label: string;
   createdAt: string;
+  lastActivityAt: string;
   history: ChatHistoryEntry[];
   sdkSessionId: string | null;
   adapter: ChatAdapter;

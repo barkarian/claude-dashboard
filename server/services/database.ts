@@ -115,6 +115,15 @@ try {
   // Column already exists — ignore
 }
 
+// Add last_activity_at column to chats
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN last_activity_at TEXT`);
+  // Backfill: delete old chats without last_activity_at so stale data is cleaned up
+  db.exec(`DELETE FROM chats WHERE last_activity_at IS NULL`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

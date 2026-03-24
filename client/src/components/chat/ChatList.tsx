@@ -21,6 +21,19 @@ import type { Project, Chat } from '../../../../shared/types/models.ts';
 
 const PAGE_SIZE = 20;
 
+function formatChatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (sameYear) {
+    return `${month}/${day} ${time}`;
+  }
+  return `${month}/${day}/${String(d.getFullYear()).slice(-2)} ${time}`;
+}
+
 interface ChatListProps {
   projectId: string;
   project: Project;
@@ -261,9 +274,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                 )}
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
-                <span>{(chat.history || []).length} messages</span>
-                <span className="text-border">&middot;</span>
-                <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
+                <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
                 {sessionStatuses[chat.id] && (
                   <>
                     <span className="text-border">&middot;</span>
@@ -326,9 +337,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
-                    <span>{(chat.history || []).length} messages</span>
-                    <span className="text-border">&middot;</span>
-                    <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
+                    <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
                     {sessionStatuses[chat.id] && (
                       <>
                         <span className="text-border">&middot;</span>

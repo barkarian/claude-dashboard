@@ -274,11 +274,12 @@ function getScript(scriptId: string): Script | null {
 // === Chat Methods ===
 
 function listChats(projectId: string): Chat[] {
-  const rows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  const rows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC').all(projectId) as any[];
   return rows.map(r => ({
     id: r.id,
     label: r.label,
     createdAt: r.created_at,
+    lastActivityAt: r.last_activity_at || r.created_at,
     history: [],
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
@@ -296,13 +297,14 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
   ).get(projectId, search) as any;
 
   const rows = db.prepare(
-    'SELECT * FROM chats WHERE project_id = ? AND label LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    'SELECT * FROM chats WHERE project_id = ? AND label LIKE ? ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
   ).all(projectId, search, limit, offset) as any[];
 
   const chats = rows.map(r => ({
     id: r.id,
     label: r.label,
     createdAt: r.created_at,
+    lastActivityAt: r.last_activity_at || r.created_at,
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
@@ -313,11 +315,12 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
 }
 
 function listChatsWithHistory(projectId: string): Chat[] {
-  const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC').all(projectId) as any[];
   return chatRows.map(r => ({
     id: r.id,
     label: r.label,
     createdAt: r.created_at,
+    lastActivityAt: r.last_activity_at || r.created_at,
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
@@ -329,11 +332,12 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
   const id = uuidv4();
   const now = new Date().toISOString();
   const chatAdapter = adapter || 'claude-agent-sdk';
-  db.prepare('INSERT INTO chats (id, project_id, label, adapter, created_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, label || 'New Chat', chatAdapter, now);
+  db.prepare('INSERT INTO chats (id, project_id, label, adapter, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, projectId, label || 'New Chat', chatAdapter, now, now);
   return {
     id,
     label: label || 'New Chat',
     createdAt: now,
+    lastActivityAt: now,
     history: [],
     sdkSessionId: null,
     adapter: chatAdapter,
@@ -348,6 +352,7 @@ function getChat(chatId: string): Chat | null {
     id: row.id,
     label: row.label,
     createdAt: row.created_at,
+    lastActivityAt: row.last_activity_at || row.created_at,
     history: getChatMessages(chatId),
     sdkSessionId: row.sdk_session_id || null,
     adapter: (row.adapter as ChatAdapter) || 'claude-agent-sdk',
@@ -366,6 +371,10 @@ function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: st
   return getChat(chatId);
 }
 
+function touchChatActivity(chatId: string): void {
+  db.prepare("UPDATE chats SET last_activity_at = datetime('now') WHERE id = ?").run(chatId);
+}
+
 function deleteChat(chatId: string): void {
   db.prepare('DELETE FROM chats WHERE id = ?').run(chatId);
 }
@@ -380,6 +389,9 @@ function addMessage(chatId: string, message: { role: string; content: unknown; t
   const sortOrder = (maxOrder?.max_order ?? -1) + 1;
 
   db.prepare('INSERT INTO chat_messages (id, chat_id, role, content, timestamp, sort_order) VALUES (?, ?, ?, ?, ?, ?)').run(id, chatId, message.role, contentStr, timestamp, sortOrder);
+
+  // Update last_activity_at on the chat
+  db.prepare("UPDATE chats SET last_activity_at = datetime('now') WHERE id = ?").run(chatId);
 
   return {
     id,
@@ -431,6 +443,7 @@ export default {
   createChat,
   getChat,
   updateChat,
+  touchChatActivity,
   deleteChat,
   addMessage,
   getChatMessages,

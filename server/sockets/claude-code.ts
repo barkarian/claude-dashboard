@@ -38,6 +38,9 @@ interface CCSession {
 // Map<chatId, CCSession>
 const sessions = new Map<string, CCSession>();
 
+// Throttle map for touchChatActivity: chatId -> last touch timestamp
+const lastActivityTouch = new Map<string, number>();
+
 export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOServer): void {
 
   socket.on('cc:start', ({ projectId, chatId, conversationId, cols, rows }: CCStartPayload) => {
@@ -127,6 +130,16 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
     const session = sessions.get(chatId);
     if (session && session.status === 'running') {
       session.pty.write(data);
+
+      // Touch last_activity_at when user presses Enter (throttled to every 10s)
+      if (data.includes('\r') || data.includes('\n')) {
+        const now = Date.now();
+        const lastTouch = lastActivityTouch.get(chatId) || 0;
+        if (now - lastTouch > 10_000) {
+          lastActivityTouch.set(chatId, now);
+          projectManager.touchChatActivity(chatId);
+        }
+      }
     }
   });
 
