@@ -32,13 +32,18 @@ export default function NewProjectPage() {
   const isDesktop = isTauriDesktop();
 
   async function handleNativePickExisting() {
-    const path = await pickDirectory();
-    if (path) {
-      setProjectPath(path);
-      if (!projectName) {
-        const folderName = path.split('/').filter(Boolean).pop() || '';
-        setProjectName(folderName);
+    setError('');
+    try {
+      const path = await pickDirectory();
+      if (path) {
+        setProjectPath(path);
+        if (!projectName) {
+          const folderName = path.split('/').filter(Boolean).pop() || '';
+          setProjectName(folderName);
+        }
       }
+    } catch (e: any) {
+      setError(`Directory picker failed: ${e.message}`);
     }
   }
 

@@ -35,5 +35,8 @@
     "store:allow-clear",
     "dialog:default",
     "dialog:allow-open"
-  ]
+  ],
+  "remote": {
+    "urls": ["http://localhost:*"]
+  }
 }

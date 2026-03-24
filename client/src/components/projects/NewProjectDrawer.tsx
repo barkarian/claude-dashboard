@@ -104,13 +104,23 @@ export default function NewProjectDrawer() {
   }
 
   async function handleNativePickFolder() {
-    const path = await pickDirectory();
-    if (path) handleFolderSelect(path);
+    setError('');
+    try {
+      const path = await pickDirectory();
+      if (path) handleFolderSelect(path);
+    } catch (e: any) {
+      setError(`Directory picker failed: ${e.message}`);
+    }
   }
 
   async function handleNativePickEmptyDir() {
-    const path = await pickDirectory();
-    if (path) handleEmptyFolderSelect(path);
+    setError('');
+    try {
+      const path = await pickDirectory();
+      if (path) handleEmptyFolderSelect(path);
+    } catch (e: any) {
+      setError(`Directory picker failed: ${e.message}`);
+    }
   }
 
   async function handleRegister() {
