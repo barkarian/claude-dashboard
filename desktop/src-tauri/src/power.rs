@@ -1,72 +1,21 @@
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 static CAFFEINATE: Mutex<Option<Child>> = Mutex::new(None);
-static PMSET_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Try to activate pmset disablesleep via admin prompt.
-/// Returns true if successful, false if denied/failed.
-#[cfg(target_os = "macos")]
-fn try_activate_pmset() -> bool {
-    let pid = std::process::id();
+/// Path to the control file that signals the LaunchDaemon to activate pmset disablesleep.
+/// The daemon polls this file every 3 seconds.
+const CONTROL_FILE: &str = "/tmp/com.claw-dev.sleep-active";
 
-    // IMPORTANT: /bin/sh on macOS is bash in POSIX mode, which does NOT support
-    // the &> redirect operator. Using &>/dev/null causes the background process
-    // to keep stdout open, which makes `do shell script` hang forever.
-    // Use the POSIX-compatible >/dev/null 2>&1 instead.
-    let script = format!(
-        concat!(
-            r#"do shell script ""#,
-            r#"pmset disablesleep 1; "#,
-            r#"(while kill -0 {} 2>/dev/null; do sleep 5; done; pmset disablesleep 0) >/dev/null 2>&1 &"#,
-            r#"" with administrator privileges"#,
-        ),
-        pid
-    );
-
-    match Command::new("osascript")
-        .args(["-e", &script])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            PMSET_ACTIVE.store(true, Ordering::SeqCst);
-            log::info!(
-                "pmset disablesleep 1 active (including lid close), monitor watching pid {}",
-                pid
-            );
-            true
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log::warn!(
-                "Admin denied or pmset failed: {}. Caffeinate active (idle sleep only).",
-                stderr.trim()
-            );
-            false
-        }
-        Err(e) => {
-            log::warn!(
-                "osascript failed: {}. Caffeinate active (idle sleep only).",
-                e
-            );
-            false
-        }
-    }
-}
+/// Path to the LaunchDaemon plist — used to detect if the daemon is installed.
+const DAEMON_PLIST: &str = "/Library/LaunchDaemons/com.claw-dev.sleep-prevention.plist";
 
 /// Prevent system sleep while the app is running, including lid-close sleep.
 ///
 /// Strategy:
-/// 1. Start `caffeinate -s` immediately (idle sleep prevention, no admin needed)
-/// 2. In background thread: prompt for admin password to run `pmset disablesleep 1`
-///    - Also spawns a root monitor process that re-enables sleep when our app exits
-///    - Uses POSIX-compatible shell syntax (`>/dev/null 2>&1`, NOT `&>` which
-///      silently breaks in `/bin/sh` and causes `do shell script` to hang forever)
-/// 3. If user denies admin, caffeinate remains active as fallback (idle sleep only)
+/// 1. Start `caffeinate -si` immediately (idle sleep prevention, no admin needed)
+/// 2. If the LaunchDaemon is installed, write our PID to the control file.
+///    The daemon detects this and runs `pmset disablesleep 1` (no admin prompt needed).
 #[cfg(target_os = "macos")]
 pub fn prevent_sleep() {
     let pid = std::process::id();
@@ -86,15 +35,22 @@ pub fn prevent_sleep() {
         Err(e) => log::error!("Failed to start caffeinate: {}", e),
     }
 
-    // pmset disablesleep prevents ALL sleep including lid-close, but requires
-    // an admin password prompt every launch (macOS doesn't cache osascript creds).
-    // Skip it by default — caffeinate is sufficient for most users.
-    // TODO: Make lid-close sleep prevention opt-in via a settings toggle.
+    // If the LaunchDaemon is installed, write our PID to the control file
+    // so the daemon can activate pmset disablesleep 1 (no admin prompt needed).
+    if std::path::Path::new(DAEMON_PLIST).exists() {
+        match std::fs::write(CONTROL_FILE, pid.to_string()) {
+            Ok(_) => log::info!(
+                "Wrote PID {} to control file {}, daemon will activate pmset disablesleep",
+                pid, CONTROL_FILE
+            ),
+            Err(e) => log::warn!("Failed to write control file {}: {}", CONTROL_FILE, e),
+        }
+    }
 }
 
 /// Release sleep prevention (called on app exit).
-/// The background monitor also re-enables sleep within ~5s of our PID dying,
-/// so this is best-effort for faster cleanup on graceful shutdown.
+/// Removes caffeinate and deletes the control file so the daemon
+/// detects the change and runs `pmset disablesleep 0` within ~3s.
 #[cfg(target_os = "macos")]
 pub fn allow_sleep() {
     // Stop caffeinate
@@ -104,26 +60,13 @@ pub fn allow_sleep() {
         log::info!("Caffeinate stopped");
     }
 
-    if PMSET_ACTIVE.load(Ordering::SeqCst) {
-        // Best-effort: try non-interactive sudo (works if credential timestamp is cached).
-        // This avoids waiting the full ~5s for the background monitor to notice we exited.
-        let result = Command::new("sudo")
-            .args(["-n", "pmset", "disablesleep", "0"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
-
-        match result {
-            Ok(output) if output.status.success() => {
-                log::info!("Sleep re-enabled via sudo -n pmset");
-            }
-            _ => {
-                log::info!(
-                    "Could not re-enable sleep directly; background monitor will handle it within ~5s"
-                );
-            }
+    // Delete the control file — daemon will detect and disable pmset disablesleep
+    match std::fs::remove_file(CONTROL_FILE) {
+        Ok(_) => log::info!("Removed control file {}, daemon will deactivate pmset disablesleep", CONTROL_FILE),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // File didn't exist — nothing to clean up
         }
+        Err(e) => log::warn!("Failed to remove control file {}: {}", CONTROL_FILE, e),
     }
 }
 

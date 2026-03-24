@@ -92,6 +92,16 @@ router.post('/permissions/request-sleep-prevention', async (_req: Request, res: 
   }
 });
 
+// POST /api/tools/permissions/revoke-sleep-prevention — uninstall the sleep prevention daemon
+router.post('/permissions/revoke-sleep-prevention', async (_req: Request, res: Response) => {
+  try {
+    const result = await permissionManager.revokeSleepPrevention();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, output: err.message || 'Failed' });
+  }
+});
+
 // POST /api/tools/permissions/run-command — run a permission-granting command
 router.post('/permissions/run-command', async (req: Request, res: Response) => {
   const { command } = req.body;

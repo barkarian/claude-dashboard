@@ -97,9 +97,21 @@ export default function PermissionsManagementSection() {
   }
 
   async function handleSleepPrevention() {
-    setActionLoading('macos_sleep_prevention');
+    setActionLoading('macos_sleep_prevention_install');
     try {
       await api.post('/api/tools/permissions/request-sleep-prevention');
+      await fetchPermissions();
+    } catch {
+      // ignore
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRevokeSleepPrevention() {
+    setActionLoading('macos_sleep_prevention_revoke');
+    try {
+      await api.post('/api/tools/permissions/revoke-sleep-prevention');
       await fetchPermissions();
     } catch {
       // ignore
@@ -202,16 +214,29 @@ export default function PermissionsManagementSection() {
                     {isExpanded && (
                       <div className="border-t border-border bg-bg px-3 py-3">
                         <p className="text-xs text-text-muted mb-2">{perm.instructions}</p>
-                        {/* Sleep prevention: dedicated Grant button */}
+                        {/* Sleep prevention: Install / Remove Daemon buttons */}
                         {perm.id === 'macos_sleep_prevention' && !perm.granted && (
                           <div className="flex items-center gap-2">
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={handleSleepPrevention}
-                              disabled={actionLoading === perm.id}
+                              disabled={actionLoading === 'macos_sleep_prevention_install'}
                             >
-                              {actionLoading === perm.id ? 'Waiting for admin...' : 'Grant'}
+                              {actionLoading === 'macos_sleep_prevention_install' ? 'Installing daemon...' : 'Install'}
+                            </Button>
+                          </div>
+                        )}
+                        {perm.id === 'macos_sleep_prevention' && perm.granted && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-danger border-danger/30 hover:bg-danger/10"
+                              onClick={handleRevokeSleepPrevention}
+                              disabled={actionLoading === 'macos_sleep_prevention_revoke'}
+                            >
+                              {actionLoading === 'macos_sleep_prevention_revoke' ? 'Removing...' : 'Remove Daemon'}
                             </Button>
                           </div>
                         )}

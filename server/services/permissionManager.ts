@@ -7,6 +7,13 @@ import { getSetting, setSetting } from './database.ts';
 
 const execFileAsync = promisify(execFile);
 
+// ── Sleep Prevention Daemon Constants ──
+
+const DAEMON_LABEL = 'com.claw-dev.sleep-prevention';
+const DAEMON_PLIST_PATH = '/Library/LaunchDaemons/com.claw-dev.sleep-prevention.plist';
+const HELPER_PATH = '/Library/PrivilegedHelperTools/com.claw-dev.sleep-prevention';
+const CONTROL_FILE = '/tmp/com.claw-dev.sleep-active';
+
 // ── Types ──
 
 export interface PermissionCheck {
@@ -154,23 +161,20 @@ async function getMacosPermissions(): Promise<PermissionCheck[]> {
     },
   ];
 
-  // Check if full sleep prevention (pmset disablesleep) is active.
-  // This is distinct from caffeinate which only prevents idle sleep, not lid-close.
-  try {
-    const { stdout } = await execFileAsync('pmset', ['-g']);
-    const sleepDisabled = /SleepDisabled\s+1/.test(stdout);
-    permissions.push({
-      id: 'macos_sleep_prevention',
-      label: 'Sleep Prevention',
-      description: 'Prevents Mac from sleeping (including lid close), keeping tunnels and agents active. Requires admin.',
-      granted: sleepDisabled,
-      instructions: sleepDisabled
-        ? 'Sleep prevention is active (pmset disablesleep). The Mac will stay awake even with the lid closed while the app runs. Sleep is automatically re-enabled when the app exits.'
-        : 'Grant admin access to fully prevent sleep (including lid close). Without this, only idle sleep is prevented via caffeinate.',
-      actionType: 'manual',
-      category: 'execution',
-    });
-  } catch { /* skip */ }
+  // Check if the sleep prevention LaunchDaemon is installed.
+  // The daemon handles pmset disablesleep silently — no admin prompt on each launch.
+  const daemonInstalled = isDaemonInstalled();
+  permissions.push({
+    id: 'macos_sleep_prevention',
+    label: 'Sleep Prevention',
+    description: 'Prevents Mac from sleeping (including lid close), keeping tunnels and agents active. One-time admin setup.',
+    granted: daemonInstalled,
+    instructions: daemonInstalled
+      ? 'Sleep prevention daemon is installed. The Mac will stay awake even with the lid closed while the app runs. Sleep is automatically re-enabled when the app exits. No admin prompt needed on launch.'
+      : 'Install a LaunchDaemon to fully prevent sleep (including lid close). Requires a one-time admin password. Without this, only idle sleep is prevented via caffeinate.',
+    actionType: 'manual',
+    category: 'execution',
+  });
 
   return permissions;
 }
@@ -435,31 +439,193 @@ async function runCommand(command: string): Promise<{ success: boolean; output: 
   }
 }
 
+// ── Sleep Prevention Daemon Functions ──
+
+/** Check if the LaunchDaemon plist exists on disk */
+function isDaemonInstalled(): boolean {
+  return fs.existsSync(DAEMON_PLIST_PATH);
+}
+
+/** Generate the helper bash script that the LaunchDaemon runs */
+function generateHelperScript(): string {
+  return `#!/bin/bash
+# Sleep prevention helper for Claw Dev
+# Polls the control file and manages pmset disablesleep accordingly.
+
+CONTROL_FILE="${CONTROL_FILE}"
+ACTIVE=0
+
+cleanup() {
+  if [ "$ACTIVE" -eq 1 ]; then
+    /usr/bin/pmset disablesleep 0
+    echo "$(date): Cleanup — pmset disablesleep 0"
+  fi
+  # Remove stale control file if it exists
+  [ -f "$CONTROL_FILE" ] && rm -f "$CONTROL_FILE"
+  exit 0
+}
+
+trap cleanup SIGTERM SIGINT
+
+while true; do
+  if [ -f "$CONTROL_FILE" ]; then
+    PID=$(cat "$CONTROL_FILE" 2>/dev/null)
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      # Verify process name contains "claw-dev" to guard against PID reuse
+      PROC_NAME=$(ps -p "$PID" -o comm= 2>/dev/null)
+      if echo "$PROC_NAME" | grep -q "claw-dev"; then
+        if [ "$ACTIVE" -eq 0 ]; then
+          /usr/bin/pmset disablesleep 1
+          ACTIVE=1
+          echo "$(date): Activated pmset disablesleep 1 for PID $PID ($PROC_NAME)"
+        fi
+      else
+        # PID reused by another process — stale control file
+        echo "$(date): Stale PID $PID (process: $PROC_NAME), removing control file"
+        rm -f "$CONTROL_FILE"
+        if [ "$ACTIVE" -eq 1 ]; then
+          /usr/bin/pmset disablesleep 0
+          ACTIVE=0
+          echo "$(date): Deactivated pmset disablesleep 0"
+        fi
+      fi
+    else
+      # PID is dead — clean up
+      echo "$(date): PID $PID is dead, removing control file"
+      rm -f "$CONTROL_FILE"
+      if [ "$ACTIVE" -eq 1 ]; then
+        /usr/bin/pmset disablesleep 0
+        ACTIVE=0
+        echo "$(date): Deactivated pmset disablesleep 0"
+      fi
+    fi
+  else
+    # No control file — deactivate if active
+    if [ "$ACTIVE" -eq 1 ]; then
+      /usr/bin/pmset disablesleep 0
+      ACTIVE=0
+      echo "$(date): Control file removed, deactivated pmset disablesleep 0"
+    fi
+  fi
+  sleep 3
+done
+`;
+}
+
+/** Generate the LaunchDaemon plist XML */
+function generatePlist(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${DAEMON_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HELPER_PATH}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/com.claw-dev.sleep-prevention.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/com.claw-dev.sleep-prevention.log</string>
+</dict>
+</plist>
+`;
+}
+
 /**
- * Request admin privileges to enable pmset disablesleep 1 (macOS only).
- * Shows the standard macOS admin password dialog.
- * Spawns a background monitor that re-enables sleep when this process exits.
+ * Install the LaunchDaemon for sleep prevention (macOS only).
+ * Shows a single admin password dialog to create the helper script, plist, and bootstrap the daemon.
  */
 async function requestSleepPrevention(): Promise<{ success: boolean; output: string }> {
   if (process.platform !== 'darwin') {
     return { success: false, output: 'Only supported on macOS' };
   }
 
-  const pid = process.pid;
+  // If daemon is already installed, just save setting and write control file
+  if (isDaemonInstalled()) {
+    setSetting('sleep_prevention_opted_in', 'true');
+    try {
+      fs.writeFileSync(CONTROL_FILE, String(process.pid));
+    } catch { /* best effort */ }
+    return { success: true, output: 'Daemon already installed, sleep prevention activated' };
+  }
 
-  // Uses POSIX-compatible >/dev/null 2>&1 (NOT &> which breaks in /bin/sh).
-  // The background monitor watches this Node.js process PID — when it dies
-  // (app exit, crash, etc.), sleep is automatically re-enabled within ~5s.
-  const script = [
-    'do shell script',
-    `"pmset disablesleep 1; (while kill -0 ${pid} 2>/dev/null; do sleep 5; done; pmset disablesleep 0) >/dev/null 2>&1 &"`,
-    'with administrator privileges',
-  ].join(' ');
+  const helperScript = generateHelperScript();
+  const plistContent = generatePlist();
+
+  // Use base64 encoding to avoid shell escaping issues with $(), quotes, etc.
+  const helperB64 = Buffer.from(helperScript).toString('base64');
+  const plistB64 = Buffer.from(plistContent).toString('base64');
+
+  // Single admin prompt that installs everything
+  const shellCmd = [
+    // Create helper directory if needed
+    `mkdir -p /Library/PrivilegedHelperTools`,
+    // Write helper script (base64 decode avoids all escaping issues)
+    `echo '${helperB64}' | base64 -D > ${HELPER_PATH}`,
+    // Set permissions: root:wheel, executable
+    `chown root:wheel ${HELPER_PATH}`,
+    `chmod 755 ${HELPER_PATH}`,
+    // Write plist (base64 decode)
+    `echo '${plistB64}' | base64 -D > ${DAEMON_PLIST_PATH}`,
+    // Set permissions: root:wheel, read-only
+    `chown root:wheel ${DAEMON_PLIST_PATH}`,
+    `chmod 644 ${DAEMON_PLIST_PATH}`,
+    // Bootstrap the daemon
+    `launchctl bootstrap system ${DAEMON_PLIST_PATH}`,
+  ].join(' && ');
+
+  const script = `do shell script "${shellCmd}" with administrator privileges`;
 
   try {
     await execFileAsync('osascript', ['-e', script], { timeout: 60000 });
     setSetting('sleep_prevention_opted_in', 'true');
-    return { success: true, output: 'Sleep prevention activated' };
+    // Write control file so daemon activates immediately
+    try {
+      fs.writeFileSync(CONTROL_FILE, String(process.pid));
+    } catch { /* best effort */ }
+    return { success: true, output: 'Sleep prevention daemon installed and activated' };
+  } catch (err: any) {
+    const msg = err.stderr || err.message || 'Admin auth denied or failed';
+    return { success: false, output: msg };
+  }
+}
+
+/**
+ * Uninstall the LaunchDaemon and disable sleep prevention.
+ * Shows admin password dialog to remove the daemon.
+ */
+async function revokeSleepPrevention(): Promise<{ success: boolean; output: string }> {
+  if (process.platform !== 'darwin') {
+    return { success: false, output: 'Only supported on macOS' };
+  }
+
+  // Delete control file first (no admin needed)
+  try {
+    fs.unlinkSync(CONTROL_FILE);
+  } catch { /* may not exist */ }
+
+  const shellCmd = [
+    // Bootout the daemon
+    `launchctl bootout system/${DAEMON_LABEL} 2>/dev/null`,
+    // Ensure sleep is re-enabled
+    `pmset disablesleep 0`,
+    // Remove the plist and helper
+    `rm -f ${DAEMON_PLIST_PATH}`,
+    `rm -f ${HELPER_PATH}`,
+  ].join('; ');
+
+  const script = `do shell script "${shellCmd}" with administrator privileges`;
+
+  try {
+    await execFileAsync('osascript', ['-e', script], { timeout: 60000 });
+    setSetting('sleep_prevention_opted_in', 'false');
+    return { success: true, output: 'Sleep prevention daemon removed' };
   } catch (err: any) {
     const msg = err.stderr || err.message || 'Admin auth denied or failed';
     return { success: false, output: msg };
@@ -468,17 +634,27 @@ async function requestSleepPrevention(): Promise<{ success: boolean; output: str
 
 /**
  * Auto-activate sleep prevention on startup if the user previously opted in.
- * Called from server startup — shows admin prompt only if user explicitly granted before.
+ * If daemon is installed, just writes the control file (no admin prompt).
+ * If daemon was removed externally, clears the stale opt-in setting.
  */
 async function autoActivateSleepPrevention(): Promise<void> {
   if (process.platform !== 'darwin') return;
   const optedIn = getSetting('sleep_prevention_opted_in');
   if (optedIn !== 'true') return;
 
-  console.log('[startup] Auto-activating sleep prevention (user previously opted in)');
-  const result = await requestSleepPrevention();
-  if (!result.success) {
-    console.warn('[startup] Sleep prevention auto-activation failed:', result.output);
+  if (!isDaemonInstalled()) {
+    // Daemon was removed externally — clear stale opt-in
+    console.log('[startup] Sleep prevention daemon missing, clearing stale opt-in');
+    setSetting('sleep_prevention_opted_in', 'false');
+    return;
+  }
+
+  // Daemon is installed — just write the control file (no admin prompt!)
+  try {
+    fs.writeFileSync(CONTROL_FILE, String(process.pid));
+    console.log('[startup] Wrote PID to control file, daemon will activate pmset disablesleep');
+  } catch (err) {
+    console.warn('[startup] Failed to write control file:', err);
   }
 }
 
@@ -487,5 +663,6 @@ export default {
   openSettings,
   runCommand,
   requestSleepPrevention,
+  revokeSleepPrevention,
   autoActivateSleepPrevention,
 };
