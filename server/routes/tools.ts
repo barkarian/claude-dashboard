@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import toolManager from '../services/toolManager.ts';
+import permissionManager from '../services/permissionManager.ts';
 
 const router = Router();
 
@@ -56,6 +57,39 @@ router.post('/:toolId/install', async (req: Request<{ toolId: string }>, res: Re
     console.error('Error installing tool:', err);
     res.status(500).json({ error: err.message || 'Failed to install tool' });
   }
+});
+
+// ── Permissions ──
+
+// GET /api/tools/permissions — detect all system permissions
+router.get('/permissions', async (_req: Request, res: Response) => {
+  try {
+    const report = await permissionManager.detectPermissions();
+    res.json(report);
+  } catch (err: any) {
+    console.error('Error detecting permissions:', err);
+    res.status(500).json({ error: err.message || 'Failed to detect permissions' });
+  }
+});
+
+// POST /api/tools/permissions/open-settings — open system settings pane
+router.post('/permissions/open-settings', async (req: Request, res: Response) => {
+  const { url } = req.body;
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ error: 'url is required' });
+  }
+  const success = await permissionManager.openSettings(url);
+  res.json({ success });
+});
+
+// POST /api/tools/permissions/run-command — run a permission-granting command
+router.post('/permissions/run-command', async (req: Request, res: Response) => {
+  const { command } = req.body;
+  if (!command || typeof command !== 'string') {
+    return res.status(400).json({ error: 'command is required' });
+  }
+  const result = await permissionManager.runCommand(command);
+  res.json(result);
 });
 
 export default router;
