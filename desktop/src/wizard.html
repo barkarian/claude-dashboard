@@ -5,6 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Claw Dev — Setup</title>
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .tool-cards { display: flex; flex-direction: column; gap: 10px; margin: 20px 0; width: 100%; }
+    .tool-card {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg-surface);
+    }
+    .tool-card-info { display: flex; align-items: center; gap: 10px; }
+    .tool-card-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .tool-card-dot.installed { background: var(--success); }
+    .tool-card-dot.missing { background: var(--border); }
+    .tool-card-name { font-size: 14px; font-weight: 600; color: var(--text); }
+    .tool-card-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .tool-card .btn { padding: 6px 14px; font-size: 12px; }
+    .tool-badge { font-size: 11px; font-weight: 600; color: var(--success); padding: 4px 10px; border-radius: 6px; background: rgba(34,197,94,0.1); }
+    .tool-installing { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+    .tool-installing .spinner-sm { width: 12px; height: 12px; border-width: 2px; }
+    .tool-output { font-family: monospace; font-size: 10px; color: var(--text-dim); background: var(--bg); border-radius: 6px; padding: 6px 8px; max-height: 60px; overflow-y: auto; margin-top: 6px; white-space: pre-wrap; word-break: break-all; text-align: left; }
+    .wizard-step .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+  </style>
 </head>
 <body>
   <div class="wizard">
@@ -13,6 +33,7 @@
       <div class="step-dot active" data-step="1"></div>
       <div class="step-dot" data-step="2"></div>
       <div class="step-dot" data-step="3"></div>
+      <div class="step-dot" data-step="4"></div>
     </div>
 
     <!-- Step 1: Welcome / Sign in -->
@@ -23,8 +44,21 @@
       <button class="btn btn-primary" id="btn-signin">Sign In / Sign Up</button>
     </div>
 
-    <!-- Step 2: Connect your phone (Phase 5 placeholder) -->
+    <!-- Step 2: Install AI Tools -->
     <div class="wizard-step" id="step-2">
+      <h1>Set Up AI Tools</h1>
+      <p>Install AI development tools on this machine. You can always change this later in Settings.</p>
+      <div class="tool-cards" id="tool-cards">
+        <!-- Populated by JS -->
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-skip-tools">Skip</button>
+        <button class="btn btn-primary" id="btn-install-tools">Install Selected</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Connect your phone -->
+    <div class="wizard-step" id="step-3">
       <h1>Connect Your Phone</h1>
       <p>Control your dev environment from your phone. This feature is coming soon in a future update.</p>
       <div>
@@ -33,8 +67,8 @@
       </div>
     </div>
 
-    <!-- Step 3: All set -->
-    <div class="wizard-step" id="step-3">
+    <!-- Step 4: All set -->
+    <div class="wizard-step" id="step-4">
       <h1>You're All Set!</h1>
       <p>Your dashboard is connected and ready to go.</p>
       <div class="status-badge connected">
@@ -66,14 +100,14 @@
         dot.classList.toggle('done', s < n);
       });
       currentStep = n;
+
+      // Fetch tools when entering step 2
+      if (n === 2) fetchTools();
     }
 
-    // Step 1: Sign in
+    // ── Step 1: Sign in ──
     document.getElementById('btn-signin').addEventListener('click', async () => {
-      // Open the OAuth flow in this webview
       window.location.href = `http://localhost:${dashboardPort}/api/tunnel-auth/connect`;
-
-      // After OAuth redirect, poll for auth status
       const poll = setInterval(async () => {
         try {
           const res = await fetch(`http://localhost:${dashboardPort}/api/auth/status`);
@@ -82,17 +116,115 @@
             clearInterval(poll);
             goToStep(2);
           }
-        } catch {
-          // Server may not be ready yet, keep polling
-        }
+        } catch { /* keep polling */ }
       }, 2000);
     });
 
-    // Step 2: Connect phone (placeholder)
-    document.getElementById('btn-skip-phone').addEventListener('click', () => goToStep(3));
-    document.getElementById('btn-next-phone').addEventListener('click', () => goToStep(3));
+    // ── Step 2: AI Tools ──
+    const toolState = {};
 
-    // Step 3: Listen for tunnel connection
+    async function fetchTools() {
+      try {
+        const res = await fetch(`http://localhost:${dashboardPort}/api/tools/status`);
+        const data = await res.json();
+        lastTools = data.tools || [];
+        renderTools(lastTools);
+      } catch {
+        document.getElementById('tool-cards').innerHTML = '<p style="color:var(--text-dim);font-size:12px">Failed to detect tools. You can install them later from Settings.</p>';
+      }
+    }
+
+    function renderTools(tools) {
+      const container = document.getElementById('tool-cards');
+      container.innerHTML = '';
+      tools.forEach(tool => {
+        toolState[tool.id] = toolState[tool.id] || { selected: !tool.installed, installing: false, output: '' };
+        const state = toolState[tool.id];
+        const card = document.createElement('div');
+        card.className = 'tool-card';
+        card.id = `tool-${tool.id}`;
+
+        if (tool.installed) {
+          card.innerHTML = `
+            <div class="tool-card-info">
+              <div class="tool-card-dot installed"></div>
+              <div><div class="tool-card-name">${tool.name}</div><div class="tool-card-desc">${tool.description}</div></div>
+            </div>
+            <span class="tool-badge">Installed${tool.version ? ' v' + tool.version : ''}</span>`;
+        } else if (state.installing) {
+          card.innerHTML = `
+            <div class="tool-card-info">
+              <div class="tool-card-dot missing"></div>
+              <div>
+                <div class="tool-card-name">${tool.name}</div>
+                <div class="tool-installing"><div class="spinner spinner-sm"></div> Installing...</div>
+                ${state.output ? `<div class="tool-output">${escHtml(state.output.slice(-200))}</div>` : ''}
+              </div>
+            </div>`;
+        } else {
+          card.innerHTML = `
+            <div class="tool-card-info">
+              <div class="tool-card-dot missing"></div>
+              <div><div class="tool-card-name">${tool.name}</div><div class="tool-card-desc">${tool.description}</div></div>
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" ${state.selected ? 'checked' : ''} data-tool="${tool.id}" class="tool-check" />
+              <span style="font-size:12px;color:var(--text-dim)">Install</span>
+            </label>`;
+        }
+        container.appendChild(card);
+      });
+
+      // Bind checkboxes
+      container.querySelectorAll('.tool-check').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          toolState[e.target.dataset.tool].selected = e.target.checked;
+        });
+      });
+    }
+
+    function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    document.getElementById('btn-skip-tools').addEventListener('click', () => goToStep(3));
+
+    document.getElementById('btn-install-tools').addEventListener('click', async () => {
+      const toInstall = Object.entries(toolState).filter(([, s]) => s.selected && !s.installing);
+      if (toInstall.length === 0) { goToStep(3); return; }
+
+      // Install sequentially
+      for (const [toolId] of toInstall) {
+        await installTool(toolId);
+      }
+      // Re-fetch to update status
+      await fetchTools();
+      // Auto-advance after a brief pause
+      setTimeout(() => goToStep(3), 1000);
+    });
+
+    async function installTool(toolId) {
+      toolState[toolId].installing = true;
+      renderTools(lastTools.map(t => t.id === toolId ? { ...t, installed: false } : t));
+      try {
+        // POST blocks until install completes
+        const res = await fetch(`http://localhost:${dashboardPort}/api/tools/${toolId}/install`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (data.tool) {
+          lastTools = lastTools.map(t => t.id === toolId ? data.tool : t);
+        }
+      } catch { /* ignore */ }
+      toolState[toolId].installing = false;
+    }
+
+    let lastTools = [];
+
+    // ── Step 3: Connect phone ──
+    document.getElementById('btn-skip-phone').addEventListener('click', () => goToStep(4));
+    document.getElementById('btn-next-phone').addEventListener('click', () => goToStep(4));
+
+    // ── Step 4: Listen for tunnel connection ──
     listen('tunnel-status', (e) => {
       if (e.payload?.tunnel === 'connected' && e.payload?.subdomain) {
         const url = `https://${e.payload.subdomain}.claw-dev.com`;
@@ -100,7 +232,6 @@
       }
     });
 
-    // Step 3: Open Dashboard
     document.getElementById('btn-open-dashboard').addEventListener('click', () => {
       window.location.href = `http://localhost:${dashboardPort}`;
     });

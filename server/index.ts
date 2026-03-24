@@ -13,6 +13,7 @@ import scriptRoutes from './routes/scripts.ts';
 import githubRoutes from './routes/github.ts';
 import tunnelAuthRoutes from './routes/tunnelAuth.ts';
 import settingsRoutes from './routes/settings.ts';
+import toolsRoutes from './routes/tools.ts';
 import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
 import devicesRoutes from './routes/devices.ts';
@@ -151,6 +152,7 @@ apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/migrate', migrateRoutes);
 apiRouter.use('/devices', devicesRoutes);
 apiRouter.use('/filesystem', filesystemRoutes);
+apiRouter.use('/tools', toolsRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);
