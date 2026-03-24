@@ -1,11 +1,17 @@
 import crypto from 'crypto';
+import os from 'os';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '..', 'data');
+
+// In desktop mode the server runs inside a read-only .app bundle,
+// so the database must live in a user-writable location.
+const dataDir = process.env.CLAW_DESKTOP === '1'
+  ? path.join(os.homedir(), 'Library', 'Application Support', 'com.claw-dev.desktop', 'data')
+  : path.join(__dirname, '..', 'data');
 const dbPath = path.join(dataDir, 'dashboard.sqlite');
 
 // Ensure data directory exists
