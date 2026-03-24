@@ -86,11 +86,10 @@ pub fn prevent_sleep() {
         Err(e) => log::error!("Failed to start caffeinate: {}", e),
     }
 
-    // Upgrade: pmset disablesleep prevents ALL sleep including lid-close.
-    // Runs in background thread so the admin dialog doesn't block app startup.
-    std::thread::spawn(move || {
-        try_activate_pmset();
-    });
+    // pmset disablesleep prevents ALL sleep including lid-close, but requires
+    // an admin password prompt every launch (macOS doesn't cache osascript creds).
+    // Skip it by default — caffeinate is sufficient for most users.
+    // TODO: Make lid-close sleep prevention opt-in via a settings toggle.
 }
 
 /// Release sleep prevention (called on app exit).
