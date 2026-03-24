@@ -30,14 +30,43 @@ export interface PermissionsReport {
 
 // ── macOS checks ──
 
+/** Whether this process is running inside the Claw Dev desktop app */
+function isDesktopApp(): boolean {
+  return process.env.CLAW_DESKTOP === '1';
+}
+
+/** Whether the desktop app is running from a .app bundle (production) vs dev mode */
+function isProductionBundle(): boolean {
+  // In production, the sidecar runs from inside Claw Dev.app/Contents/Resources/...
+  // In dev mode, it runs from the project directory
+  return process.cwd().includes('.app/') || process.cwd().includes('.app\\');
+}
+
 async function checkMacosFullDiskAccess(): Promise<boolean> {
-  // TCC.db is only readable with Full Disk Access
-  try {
-    await fs.promises.access('/Library/Application Support/com.apple.TCC/TCC.db', fs.constants.R_OK);
-    return true;
-  } catch {
-    return false;
+  // Try multiple TCC-protected paths — any success means FDA is granted
+  // for the "responsible process" (the app that spawned this Node process).
+  const tccPaths = [
+    '/Library/Application Support/com.apple.TCC/TCC.db',
+    '/Library/Application Support/com.apple.TCC',
+  ];
+
+  for (const p of tccPaths) {
+    try {
+      // Use readFile/readdir (not just access) — access() can give false positives
+      const stat = await fs.promises.stat(p);
+      if (stat.isDirectory()) {
+        await fs.promises.readdir(p);
+      } else {
+        // Read first byte to confirm actual read access
+        const fd = await fs.promises.open(p, 'r');
+        await fd.close();
+      }
+      return true;
+    } catch {
+      // This path didn't work, try next
+    }
   }
+  return false;
 }
 
 async function checkFolderAccess(folder: string): Promise<boolean> {
@@ -50,40 +79,36 @@ async function checkFolderAccess(folder: string): Promise<boolean> {
   }
 }
 
-async function checkMacosClaudeCodePermissions(): Promise<boolean> {
-  // Check if Claude Code's settings allow skip-permissions
-  const configPath = path.join(os.homedir(), '.claude', 'settings.json');
-  try {
-    const content = await fs.promises.readFile(configPath, 'utf-8');
-    const settings = JSON.parse(content);
-    // Check for allowedTools or permissions config
-    return settings.permissions?.allow_all === true ||
-           settings.autoApprove === true ||
-           false;
-  } catch {
-    return false;
-  }
-}
-
-async function checkMacosTerminalFDA(): Promise<boolean> {
-  // Check if Terminal.app (or the current terminal emulator) has Full Disk Access
-  // by trying to read a TCC-protected path
-  try {
-    await fs.promises.readdir('/Library/Application Support/com.apple.TCC');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function getMacosPermissions(): Promise<PermissionCheck[]> {
-  const [fda, desktop, documents, downloads, terminalFda] = await Promise.all([
+  const [fda, desktop, documents, downloads] = await Promise.all([
     checkMacosFullDiskAccess(),
     checkFolderAccess('Desktop'),
     checkFolderAccess('Documents'),
     checkFolderAccess('Downloads'),
-    checkMacosTerminalFDA(),
   ]);
+
+  // Context-aware instructions based on how the server is running:
+  // 1. Production .app bundle → add "Claw Dev" to FDA
+  // 2. Desktop dev mode (tauri dev) → add the Tauri dev binary to FDA
+  // 3. Terminal mode (no desktop) → add the terminal app to FDA
+  //
+  // IMPORTANT: macOS TCC grants FDA to the "responsible process" — the app that
+  // spawned this Node.js server. Having Terminal with FDA does NOT help if the
+  // server was spawned by the Claw Dev / Tauri dev binary.
+  const desktop_mode = isDesktopApp();
+  const production = isProductionBundle();
+
+  let fdaInstructions: string;
+  if (fda) {
+    fdaInstructions = 'Full Disk Access is granted. To revoke, open System Settings > Privacy & Security > Full Disk Access and toggle off the app.';
+  } else if (desktop_mode && production) {
+    fdaInstructions = 'Open System Settings > Privacy & Security > Full Disk Access, find "Claw Dev" and toggle it on. If not listed, click + and add /Applications/Claw Dev.app. Note: Terminal having FDA is not enough — macOS requires the app that runs the server (Claw Dev) to have FDA.';
+  } else if (desktop_mode) {
+    // Dev mode (tauri dev) — the binary is target/debug/claw-dev or similar
+    fdaInstructions = 'You are running in development mode (tauri dev). The Tauri dev binary needs Full Disk Access, not Terminal. Open System Settings > Privacy & Security > Full Disk Access, click +, then press Cmd+Shift+G and navigate to the target/debug folder in your desktop/src-tauri directory to add the dev binary. Alternatively, run the server directly from Terminal (without Tauri) during development.';
+  } else {
+    fdaInstructions = 'Open System Settings > Privacy & Security > Full Disk Access, click the + button, and add your terminal app (Terminal, iTerm2, Warp, etc.).';
+  }
 
   const permissions: PermissionCheck[] = [
     {
@@ -91,9 +116,7 @@ async function getMacosPermissions(): Promise<PermissionCheck[]> {
       label: 'Full Disk Access',
       description: 'Allows agents to read/write any file on your Mac. Grants access to all directories without individual prompts.',
       granted: fda,
-      instructions: fda
-        ? 'Full Disk Access is granted. To revoke, open System Settings > Privacy & Security > Full Disk Access and toggle off this app.'
-        : 'Open System Settings > Privacy & Security > Full Disk Access, click the + button, and add this application (Claw Dev or Terminal).',
+      instructions: fdaInstructions,
       actionType: 'open_settings',
       actionValue: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles',
       category: 'filesystem',
@@ -127,18 +150,6 @@ async function getMacosPermissions(): Promise<PermissionCheck[]> {
       actionType: 'open_settings',
       actionValue: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders',
       category: 'filesystem',
-    },
-    {
-      id: 'macos_terminal_fda',
-      label: 'Terminal Full Disk Access',
-      description: 'The terminal running this server has Full Disk Access — agents can access all files when running commands.',
-      granted: terminalFda,
-      instructions: terminalFda
-        ? 'Your terminal has Full Disk Access.'
-        : 'Add your terminal app (Terminal, iTerm2, Warp, etc.) to System Settings > Privacy & Security > Full Disk Access.',
-      actionType: 'open_settings',
-      actionValue: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles',
-      category: 'execution',
     },
   ];
 
