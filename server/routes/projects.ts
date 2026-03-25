@@ -455,6 +455,16 @@ router.put('/:id/chats/:chatId/stashed-input', async (req: Request<{ id: string;
   }
 });
 
+router.put('/:id/chats/:chatId/read', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    projectManager.markChatRead(req.params.chatId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error marking chat read:', err);
+    res.status(500).json({ error: 'Failed to mark chat read' });
+  }
+});
+
 router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     projectManager.deleteChat(req.params.chatId);

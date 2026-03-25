@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
+import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import { Button } from '../ui/button.tsx';
 import {
   Sidebar,
@@ -30,6 +31,7 @@ const PAGE_SIZE = 20;
 
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
+  const { updateAvailable } = useDesktopUpdate();
   const { setOpenMobile } = useSidebar();
   const location = useLocation();
   const { openDrawer } = useNewProjectDrawer();
@@ -258,6 +260,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                     <span>Settings</span>
+                    {updateAvailable && (
+                      <span className="ml-auto flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                        <span className="text-[10px] font-medium text-primary">Update</span>
+                      </span>
+                    )}
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>

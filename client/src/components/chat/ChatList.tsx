@@ -18,6 +18,7 @@ import ContextMenu, { type ContextMenuItem } from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
+import api from '../../utils/api.ts';
 
 const PAGE_SIZE = 20;
 
@@ -53,6 +54,34 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; position: { x: number; y: number } } | null>(null);
+
+  // Track which chats have unread completions
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(() => {
+    const ids = new Set<string>();
+    for (const chat of project?.chats || []) {
+      if (chat.unread) ids.add(chat.id);
+    }
+    return ids;
+  });
+
+  // Listen for real-time unread events
+  useEffect(() => {
+    if (!socket) return;
+    function handleUnread({ chatId }: { chatId: string }) {
+      setUnreadIds(prev => new Set(prev).add(chatId));
+    }
+    socket.on('chat:unread', handleUnread);
+    return () => { socket.off('chat:unread', handleUnread); };
+  }, [socket]);
+
+  // Navigate to a chat and mark it as read
+  const goToChat = useCallback((chatId: string, state?: object) => {
+    if (unreadIds.has(chatId)) {
+      setUnreadIds(prev => { const next = new Set(prev); next.delete(chatId); return next; });
+      api.put(`/api/projects/${projectId}/chats/${chatId}/read`).catch(() => {});
+    }
+    navigate(`/project/${projectId}/chats/${chatId}`, state ? { state } : undefined);
+  }, [projectId, navigate, unreadIds]);
 
   // Paginated state
   const [chats, setChats] = useState<Chat[]>([]);
@@ -91,6 +120,17 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
         setChats(newChats);
       } else {
         setChats(prev => [...prev, ...newChats]);
+      }
+      // Sync unread state from freshly loaded chats
+      const freshUnread = newChats.filter(c => c.unread).map(c => c.id);
+      if (freshUnread.length > 0) {
+        setUnreadIds(prev => {
+          const next = reset ? new Set<string>() : new Set(prev);
+          for (const id of freshUnread) next.add(id);
+          return next;
+        });
+      } else if (reset) {
+        setUnreadIds(new Set());
       }
       const newOffset = currentOffset + newChats.length;
       setTotal(data.total || 0);
@@ -259,13 +299,18 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
             key={chat.id}
             onClick={() => {
               setSheetOpen(false);
-              navigate(`/project/${projectId}/chats/${chat.id}`);
+              goToChat(chat.id);
             }}
             className="w-full text-left px-3 py-2.5 rounded-lg active:bg-bg-hover transition-colors flex items-center gap-2"
           >
-            <svg className="w-4 h-4 text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-            </svg>
+            <div className="relative flex-shrink-0">
+              <svg className="w-4 h-4 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+              </svg>
+              {unreadIds.has(chat.id) && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm text-text truncate">{chat.label || 'Untitled Chat'}</span>
@@ -285,6 +330,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                         : sessionStatuses[chat.id] === 'starting' ? 'Starting...'
                         : 'Active'}
                     </span>
+                  </>
+                )}
+                {chat.draftMessage && (
+                  <>
+                    <span className="text-border">&middot;</span>
+                    <span className="text-warning italic">Draft</span>
                   </>
                 )}
               </div>
@@ -318,7 +369,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
             <SwipeableRow key={chat.id} onDelete={() => setDeleteTarget(chat)}>
             <Card
               className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
-              onClick={() => navigate(`/project/${projectId}/chats/${chat.id}`)}
+              onClick={() => goToChat(chat.id)}
               onTouchStart={(e) => { longPressChatRef.current = chat; longPressHandlers.onTouchStart(e); }}
               onTouchMove={longPressHandlers.onTouchMove}
               onTouchEnd={longPressHandlers.onTouchEnd}
@@ -327,7 +378,10 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <h4 className="font-medium text-text group-hover-hover:text-primary transition-colors truncate">
+                    {unreadIds.has(chat.id) && (
+                      <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
+                    )}
+                    <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
                       {chat.label}
                     </h4>
                     {chat.adapter === 'claude-code' && (
@@ -351,6 +405,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                                 ? 'Starting...'
                                 : 'Active'}
                         </span>
+                      </>
+                    )}
+                    {chat.draftMessage && (
+                      <>
+                        <span className="text-border">&middot;</span>
+                        <span className="text-warning italic">Draft</span>
                       </>
                     )}
                   </div>

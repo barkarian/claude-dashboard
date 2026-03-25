@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Badge } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import api from '../../utils/api.ts';
 import DiffViewer from './DiffViewer.tsx';
 import DiffActions from './DiffActions.tsx';
@@ -9,6 +10,37 @@ import type { DiffResult, DiffFile } from '../../../../shared/types/models.ts';
 
 interface DiffOverviewProps {
   projectId: string;
+}
+
+/** Build the download URL for a project file. */
+function downloadUrl(projectId: string, filePath: string) {
+  const envMatch = window.location.pathname.match(/^\/(local|vps)/);
+  const base = envMatch ? envMatch[0] : '';
+  return `${base}/api/projects/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
+}
+
+/** Hook that turns a long-press / hover into a popover trigger. */
+function useLongPress(delay = 500) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const start = useCallback(() => {
+    timerRef.current = setTimeout(() => setOpen(true), delay);
+  }, [delay]);
+
+  const cancel = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    cancel();
+    setOpen(false);
+  }, [cancel]);
+
+  return { open, setOpen, start, cancel, close };
 }
 
 export default function DiffOverview({ projectId }: DiffOverviewProps) {
@@ -121,49 +153,129 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
       </div>
 
       {files.map((file) => (
-        <Card key={file.path} className="hover-hover:border-border-light transition-all">
-          <div className="flex items-center justify-between">
+        <FileChangeCard
+          key={file.path}
+          file={file}
+          projectId={projectId}
+          onSelect={() => setSelectedFile(file.path)}
+          onRevert={() => handleRevert(file.path)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Individual file card with long-press / hover popover for mobile actions. */
+function FileChangeCard({
+  file,
+  projectId,
+  onSelect,
+  onRevert,
+}: {
+  file: DiffFile;
+  projectId: string;
+  onSelect: () => void;
+  onRevert: () => void;
+}) {
+  const { open, setOpen, start, cancel, close } = useLongPress(400);
+
+  return (
+    <Card className="hover-hover:border-border-light transition-all">
+      <div className="flex items-center justify-between">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
             <button
-              onClick={() => setSelectedFile(file.path)}
+              onClick={onSelect}
+              onTouchStart={start}
+              onTouchEnd={cancel}
+              onTouchCancel={cancel}
+              onMouseEnter={start}
+              onMouseLeave={cancel}
               className="flex-1 text-left min-w-0"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Badge variant={
                   file.status === 'added' ? 'success' :
                   file.status === 'deleted' ? 'danger' :
                   'warning'
-                } className="text-xs">
+                } className="text-xs flex-shrink-0">
                   {file.status}
                 </Badge>
-                <span className="font-mono text-sm text-text truncate">{file.path}</span>
+                {/* RTL truncation: ellipsis at start, filename stays visible */}
+                <span
+                  className="font-mono text-sm text-text block min-w-0 overflow-hidden whitespace-nowrap text-ellipsis"
+                  style={{ direction: 'rtl', textAlign: 'left' }}
+                >
+                  <bdi>{file.path}</bdi>
+                </span>
               </div>
               <div className="flex items-center gap-3 mt-1 text-xs">
                 {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
                 {file.deletions > 0 && <span className="text-danger">-{file.deletions}</span>}
               </div>
             </button>
+          </PopoverTrigger>
 
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <Button
-                onClick={() => setSelectedFile(file.path)}
-                variant="ghost"
-                size="sm"
-                className="text-xs py-1 px-2"
+          <PopoverContent side="top" align="start" className="p-2 min-w-[200px] max-w-[90vw]" onInteractOutside={close}>
+            {/* Full path */}
+            <p className="text-xs text-text-muted font-mono break-all px-2 py-1.5 mb-1 bg-bg rounded border border-border">
+              {file.path}
+            </p>
+            <div className="space-y-0.5">
+              <button
+                onClick={() => { close(); onSelect(); }}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
               >
+                <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
                 View
-              </Button>
-              <Button
-                onClick={() => handleRevert(file.path)}
-                variant="ghost"
-                size="sm"
-                className="text-xs py-1 px-2 text-danger"
+              </button>
+              <button
+                onClick={() => { close(); onRevert(); }}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2 text-danger"
               >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
                 Revert
-              </Button>
+              </button>
+              <a
+                href={downloadUrl(projectId, file.path)}
+                download
+                onClick={close}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                Download
+              </a>
             </div>
-          </div>
-        </Card>
-      ))}
-    </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Desktop quick-actions (hidden on touch via hover media query) */}
+        <div className="hidden md:flex items-center gap-1 flex-shrink-0">
+          <Button
+            onClick={onSelect}
+            variant="ghost"
+            size="sm"
+            className="text-xs py-1 px-2"
+          >
+            View
+          </Button>
+          <Button
+            onClick={onRevert}
+            variant="ghost"
+            size="sm"
+            className="text-xs py-1 px-2 text-danger"
+          >
+            Revert
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }

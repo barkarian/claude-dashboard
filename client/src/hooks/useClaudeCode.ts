@@ -4,8 +4,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
 
-// Width in px that fits ~58 cols at fontSize 14 (mobile-friendly, keeps Claude Code UI readable)
-const WIDE_WIDTH = 800;
+// Width in px that the container is stretched to before CSS-scaling back down.
+// Lower = larger apparent font on mobile. 400 → ~2× the previous 800 value.
+const WIDE_WIDTH = 400;
 
 interface UseClaudeCodeOptions {
   socket: Socket | null;

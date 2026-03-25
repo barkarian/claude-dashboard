@@ -144,6 +144,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add unread column to chats (set when agent finishes in background)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN unread INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

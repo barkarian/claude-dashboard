@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '../ui/button.tsx';
+import { useAuth } from '../../context/AuthContext.tsx';
+import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import api from '../../utils/api.ts';
+
+// ─── Git-based update types (non-desktop) ───
 
 interface CommitInfo {
   hash: string;
@@ -30,7 +34,155 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export default function UpdateSection() {
+// ─── Desktop (Tauri) update UI ───
+
+function DesktopUpdateUI() {
+  const {
+    updateAvailable,
+    updateVersion,
+    updateBody,
+    checking,
+    downloading,
+    downloadProgress,
+    error,
+    installed,
+    checkForUpdate,
+    downloadAndInstall,
+    relaunch,
+    dismissError,
+  } = useDesktopUpdate();
+
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const APP_MODULE = '@tauri-apps/' + 'api/app';
+        const { getVersion } = await import(/* @vite-ignore */ APP_MODULE);
+        setAppVersion(await getVersion());
+      } catch {
+        // Not in Tauri
+      }
+    })();
+  }, []);
+
+  return (
+    <div className="bg-bg-surface border border-border rounded-xl p-5">
+      <h3 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
+        <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+        </svg>
+        App Updates
+      </h3>
+
+      <div className="space-y-3">
+        {/* Current version */}
+        {appVersion && (
+          <div className="text-sm">
+            <div className="flex items-center gap-2 text-text">
+              <span className="font-medium">Current Version</span>
+              <span className="text-text-muted">·</span>
+              <span className="font-mono text-text-muted">v{appVersion}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Update installed — restart needed */}
+        {installed && (
+          <div className="mt-2 p-3 bg-success/10 border border-success/20 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span className="text-sm font-medium text-success">Update Installed</span>
+            </div>
+            <p className="text-sm text-text-muted mb-3">Restart the app to apply the update.</p>
+            <Button variant="default" size="sm" onClick={relaunch}>
+              Restart Now
+            </Button>
+          </div>
+        )}
+
+        {/* Downloading */}
+        {downloading && (
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-text">
+                {downloadProgress > 0 ? `Downloading... ${downloadProgress}%` : 'Downloading...'}
+              </span>
+            </div>
+            {downloadProgress > 0 && (
+              <div className="w-full bg-bg-hover rounded-full h-1.5">
+                <div
+                  className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${downloadProgress}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Update available */}
+        {!installed && !downloading && updateAvailable && (
+          <div className="mt-2 p-3 bg-success/10 border border-success/20 rounded-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 rounded-full bg-success" />
+              <span className="text-sm font-medium text-success">Update Available</span>
+            </div>
+            <div className="text-sm text-text-muted">
+              {updateVersion && <span className="font-mono">v{updateVersion}</span>}
+              {updateBody && <span> — {updateBody}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Up to date */}
+        {!installed && !downloading && !updateAvailable && !checking && !error && (
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <div className="w-2 h-2 rounded-full bg-success" />
+            Up to date
+          </div>
+        )}
+
+        {/* Error */}
+        {error && !downloading && (
+          <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg text-sm text-danger flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={dismissError} className="text-danger/60 hover:text-danger ml-2 flex-shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Actions */}
+        {!installed && !downloading && (
+          <div className="pt-2 flex gap-2">
+            {updateAvailable && (
+              <Button variant="default" size="sm" onClick={downloadAndInstall}>
+                Download &amp; Install
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={checkForUpdate}
+              disabled={checking}
+            >
+              {checking ? 'Checking...' : error ? 'Retry' : 'Check for Updates'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Git-based update UI (VPS / local dev) ───
+
+function GitUpdateUI() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -71,16 +223,13 @@ export default function UpdateSection() {
     pollRef.current = setInterval(async () => {
       try {
         const data = await fetchStatus();
-        // If server responded and is no longer updating, stop polling
         if (!data.updating) {
           clearPoll();
         }
       } catch {
-        // Server is down — it's restarting
         clearPoll();
         setRestarting(true);
 
-        // Poll for server to come back
         const restartPoll = setInterval(async () => {
           try {
             await fetchStatus();
@@ -88,7 +237,7 @@ export default function UpdateSection() {
             setRestarting(false);
             window.location.reload();
           } catch {
-            // Still restarting, keep polling
+            // Still restarting
           }
         }, 2000);
       }
@@ -123,7 +272,6 @@ export default function UpdateSection() {
     }
   };
 
-  // Loading skeleton
   if (loading) {
     return (
       <div className="bg-bg-surface border border-border rounded-xl p-5">
@@ -140,7 +288,6 @@ export default function UpdateSection() {
 
   return (
     <div className="bg-bg-surface border border-border rounded-xl p-5">
-      {/* Header */}
       <h3 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
         <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
@@ -149,7 +296,6 @@ export default function UpdateSection() {
       </h3>
 
       <div className="space-y-3">
-        {/* Current commit info */}
         {status && (
           <div className="text-sm">
             <div className="flex items-center gap-2 text-text">
@@ -163,7 +309,6 @@ export default function UpdateSection() {
           </div>
         )}
 
-        {/* Restarting state */}
         {restarting && (
           <div className="flex items-center gap-2 text-sm">
             <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -171,7 +316,6 @@ export default function UpdateSection() {
           </div>
         )}
 
-        {/* Updating state */}
         {isUpdating && !restarting && (
           <div className="flex items-center gap-2 text-sm">
             <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -179,7 +323,6 @@ export default function UpdateSection() {
           </div>
         )}
 
-        {/* Update available */}
         {!isUpdating && !restarting && status?.updateAvailable && (
           <div className="mt-2 p-3 bg-success/10 border border-success/20 rounded-lg">
             <div className="flex items-center gap-2 mb-1">
@@ -193,7 +336,6 @@ export default function UpdateSection() {
           </div>
         )}
 
-        {/* Up to date */}
         {!isUpdating && !restarting && status && !status.updateAvailable && !error && (
           <div className="flex items-center gap-2 text-sm text-text-muted">
             <div className="w-2 h-2 rounded-full bg-success" />
@@ -201,14 +343,12 @@ export default function UpdateSection() {
           </div>
         )}
 
-        {/* Error */}
         {error && !isUpdating && !restarting && (
           <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg text-sm text-danger">
             {error}
           </div>
         )}
 
-        {/* Actions */}
         {!isUpdating && !restarting && (
           <div className="pt-2 flex gap-2">
             {status?.updateAvailable ? (
@@ -229,4 +369,11 @@ export default function UpdateSection() {
       </div>
     </div>
   );
+}
+
+// ─── Main export ───
+
+export default function UpdateSection() {
+  const { isDesktop } = useAuth();
+  return isDesktop ? <DesktopUpdateUI /> : <GitUpdateUI />;
 }

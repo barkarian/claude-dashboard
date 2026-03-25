@@ -13,6 +13,7 @@ import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
+import { DesktopUpdateProvider } from './context/DesktopUpdateContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
 import { initStatusBar } from './utils/statusBar.ts';
@@ -229,6 +230,7 @@ export default function App() {
     <Routes>
       <Route path="/*" element={
         <ProtectedRoute>
+          <DesktopUpdateProvider>
           <ProjectProvider>
             <SidebarProvider>
               <AppSidebarContext.Provider value={{ refreshProjects }}>
@@ -253,6 +255,7 @@ export default function App() {
               </AppSidebarContext.Provider>
             </SidebarProvider>
           </ProjectProvider>
+          </DesktopUpdateProvider>
         </ProtectedRoute>
       } />
     </Routes>

@@ -80,6 +80,13 @@ export default function ProjectDashboardPage() {
   const activeChatId = chatMatch ? chatMatch[1] : null;
   const activeChat = activeChatId ? (project?.chats || []).find((c) => c.id === activeChatId) : null;
 
+  // Mark chat as read when the user navigates into it
+  useEffect(() => {
+    if (activeChatId && id) {
+      api.put(`/api/projects/${id}/chats/${activeChatId}/read`).catch(() => {});
+    }
+  }, [activeChatId, id]);
+
   // Compute status display from activeChatStatus context
   const statusLabel = (() => {
     if (!activeChatStatus) return undefined;

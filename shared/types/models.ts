@@ -27,6 +27,7 @@ export interface Chat {
   ccConversationId: string | null;
   draftMessage: string | null;
   stashedInput: string | null;
+  unread: boolean;
 }
 
 export interface Project {

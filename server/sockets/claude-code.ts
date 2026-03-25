@@ -140,6 +140,9 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
               session.isThinking = false;
               io.to(room).emit('cc:thinking', { chatId, isThinking: false });
               io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
+              // Mark chat as unread so the chat list shows a notification badge
+              projectManager.markChatUnread(chatId);
+              io.to(`project:${projectId}`).emit('chat:unread', { chatId });
             }
           }, THINKING_IDLE_MS);
         }

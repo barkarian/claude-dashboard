@@ -9,6 +9,7 @@ import type {
   ToolResultBlock,
   ThinkingBlock,
 } from '../../shared/types/sdk.ts';
+import projectManager from './projectManager.ts';
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -75,6 +76,12 @@ function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
     chatId: session.chatId,
     status: mapToLegacyStatus(status),
   });
+
+  // Mark chat as unread when agent finishes (thinking/tool-use → idle)
+  if (status === 'idle' && (prev === 'streaming' || prev === 'tool-use')) {
+    projectManager.markChatUnread(session.chatId);
+    session.io.to(`project:${session.projectId}`).emit('chat:unread', { chatId: session.chatId });
+  }
 }
 
 function touchActivity(session: SDKSession): void {

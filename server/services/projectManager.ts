@@ -302,25 +302,18 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
     'SELECT * FROM chats WHERE project_id = ? AND label LIKE ? ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
   ).all(projectId, search, limit, offset) as any[];
 
-  const chats = rows.map(r => ({
-    id: r.id,
-    label: r.label,
-    createdAt: r.created_at,
-    lastActivityAt: r.last_activity_at || r.created_at,
-    history: getChatMessages(r.id),
-    sdkSessionId: r.sdk_session_id || null,
-    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
-    ccConversationId: r.cc_conversation_id || null,
-    draftMessage: r.draft_message || null,
-    stashedInput: r.stashed_input || null,
-  }));
+  const chats = rows.map(r => mapRowToChat(r));
 
   return { chats, total };
 }
 
 function listChatsWithHistory(projectId: string): Chat[] {
   const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC').all(projectId) as any[];
-  return chatRows.map(r => ({
+  return chatRows.map(r => mapRowToChat(r));
+}
+
+function mapRowToChat(r: any): Chat {
+  return {
     id: r.id,
     label: r.label,
     createdAt: r.created_at,
@@ -331,7 +324,8 @@ function listChatsWithHistory(projectId: string): Chat[] {
     ccConversationId: r.cc_conversation_id || null,
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
-  }));
+    unread: !!r.unread,
+  };
 }
 
 function createChat(projectId: string, label?: string, adapter?: ChatAdapter): Chat {
@@ -350,24 +344,14 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     ccConversationId: null,
     draftMessage: null,
     stashedInput: null,
+    unread: false,
   };
 }
 
 function getChat(chatId: string): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
-  return {
-    id: row.id,
-    label: row.label,
-    createdAt: row.created_at,
-    lastActivityAt: row.last_activity_at || row.created_at,
-    history: getChatMessages(chatId),
-    sdkSessionId: row.sdk_session_id || null,
-    adapter: (row.adapter as ChatAdapter) || 'claude-agent-sdk',
-    ccConversationId: row.cc_conversation_id || null,
-    draftMessage: row.draft_message || null,
-    stashedInput: row.stashed_input || null,
-  };
+  return mapRowToChat(row);
 }
 
 function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null; draftMessage?: string | null }): Chat | null {
@@ -392,6 +376,14 @@ function updateDraft(chatId: string, text: string): void {
 
 function updateStashedInput(chatId: string, text: string): void {
   db.prepare('UPDATE chats SET stashed_input = ? WHERE id = ?').run(text || null, chatId);
+}
+
+function markChatUnread(chatId: string): void {
+  db.prepare('UPDATE chats SET unread = 1 WHERE id = ?').run(chatId);
+}
+
+function markChatRead(chatId: string): void {
+  db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(chatId);
 }
 
 function deleteChat(chatId: string): void {
@@ -464,6 +456,8 @@ export default {
   updateChat,
   updateDraft,
   updateStashedInput,
+  markChatUnread,
+  markChatRead,
   touchChatActivity,
   deleteChat,
   addMessage,
