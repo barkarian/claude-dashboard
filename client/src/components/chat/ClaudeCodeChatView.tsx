@@ -42,9 +42,22 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const hasTitle = chat && chat.label !== 'New Chat';
 
   // --- Stashed input: preserves prompt text during history navigation ---
-  const currentPromptRef = useRef('');
+  const currentPromptRef = useRef(chat?.draftMessage || '');
   const stashedInputRef = useRef(chat?.stashedInput || '');
   const isNavigatingRef = useRef(false);
+
+  // Sync refs when chat data loads asynchronously (e.g. after context refresh)
+  useEffect(() => {
+    if (!currentPromptRef.current && chat?.draftMessage) {
+      currentPromptRef.current = chat.draftMessage;
+    }
+  }, [chat?.draftMessage]);
+
+  useEffect(() => {
+    if (!stashedInputRef.current && chat?.stashedInput) {
+      stashedInputRef.current = chat.stashedInput;
+    }
+  }, [chat?.stashedInput]);
 
   // Wrap draft change to also track current prompt text
   const handleDraftChange = useCallback((text: string) => {
