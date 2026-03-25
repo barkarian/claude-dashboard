@@ -19,12 +19,12 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
-  const { project, refreshProject, setActiveChatStatus } = useProject();
+  const { project, setProject, refreshProject, setActiveChatStatus } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
 
   const chat = project?.chats?.find(c => c.id === chatId);
-  const { updateDraft } = useDraft(projectId, chatId);
+  const { updateDraft } = useDraft(projectId, chatId, setProject);
 
   const {
     messages,

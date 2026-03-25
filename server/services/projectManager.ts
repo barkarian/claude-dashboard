@@ -285,6 +285,7 @@ function listChats(projectId: string): Chat[] {
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
     draftMessage: r.draft_message || null,
+    stashedInput: r.stashed_input || null,
   }));
 }
 
@@ -311,6 +312,7 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
     draftMessage: r.draft_message || null,
+    stashedInput: r.stashed_input || null,
   }));
 
   return { chats, total };
@@ -328,6 +330,7 @@ function listChatsWithHistory(projectId: string): Chat[] {
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
     draftMessage: r.draft_message || null,
+    stashedInput: r.stashed_input || null,
   }));
 }
 
@@ -346,6 +349,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     adapter: chatAdapter,
     ccConversationId: null,
     draftMessage: null,
+    stashedInput: null,
   };
 }
 
@@ -362,6 +366,7 @@ function getChat(chatId: string): Chat | null {
     adapter: (row.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: row.cc_conversation_id || null,
     draftMessage: row.draft_message || null,
+    stashedInput: row.stashed_input || null,
   };
 }
 
@@ -383,6 +388,10 @@ function touchChatActivity(chatId: string): void {
 
 function updateDraft(chatId: string, text: string): void {
   db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(text || null, chatId);
+}
+
+function updateStashedInput(chatId: string, text: string): void {
+  db.prepare('UPDATE chats SET stashed_input = ? WHERE id = ?').run(text || null, chatId);
 }
 
 function deleteChat(chatId: string): void {
@@ -454,6 +463,7 @@ export default {
   getChat,
   updateChat,
   updateDraft,
+  updateStashedInput,
   touchChatActivity,
   deleteChat,
   addMessage,

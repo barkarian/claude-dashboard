@@ -24,7 +24,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
-  const { project, setActiveChatStatus, refreshProject } = useProject();
+  const { project, setProject, setActiveChatStatus, refreshProject } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const writeRef = useRef<(data: string) => void>(() => {});
   const firstMessageSentRef = useRef(false);
@@ -34,12 +34,40 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Find chat to get conversationId for resume
   const chat = project?.chats?.find(c => c.id === chatId);
   const conversationId = chat?.ccConversationId;
-  const { updateDraft } = useDraft(projectId, chatId);
+  const { updateDraft } = useDraft(projectId, chatId, setProject);
 
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
   // Track whether this chat already has a real title (not "New Chat")
   const hasTitle = chat && chat.label !== 'New Chat';
+
+  // --- Stashed input: preserves prompt text during history navigation ---
+  const currentPromptRef = useRef('');
+  const stashedInputRef = useRef(chat?.stashedInput || '');
+  const isNavigatingRef = useRef(false);
+
+  // Wrap draft change to also track current prompt text
+  const handleDraftChange = useCallback((text: string) => {
+    currentPromptRef.current = text;
+    // User is typing — exit navigation mode
+    isNavigatingRef.current = false;
+    updateDraft(text);
+  }, [updateDraft]);
+
+  const saveStashedInput = useCallback((text: string) => {
+    if (!chatId) return;
+    stashedInputRef.current = text;
+    api.put(`/api/projects/${projectId}/chats/${chatId}/stashed-input`, { text }).catch(() => {});
+    setProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        chats: prev.chats.map(c =>
+          c.id === chatId ? { ...c, stashedInput: text || null } : c
+        ),
+      };
+    });
+  }, [projectId, chatId, setProject]);
 
   // Auto-title: on first real user message, rename the chat.
   // Shared by both mobile (CCPromptInput handleSend) and desktop (direct xterm input).
@@ -83,6 +111,29 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const onNextOutputRef = useRef(onNextOutput);
   onNextOutputRef.current = onNextOutput;
 
+  // Shared logic: handle terminal output after history navigation
+  const handleHistoryOutput = useCallback((content: string) => {
+    if (!content && stashedInputRef.current) {
+      // Reached end of history — restore stashed input
+      const stashed = stashedInputRef.current;
+      saveStashedInput('');
+      isNavigatingRef.current = false;
+      suggestionIdRef.current++;
+      setPromptSuggestion({ text: stashed, id: suggestionIdRef.current });
+    } else {
+      suggestionIdRef.current++;
+      setPromptSuggestion({ text: content, id: suggestionIdRef.current });
+    }
+  }, [saveStashedInput]);
+
+  // Shared logic: stash current prompt on first navigation
+  const stashIfNeeded = useCallback(() => {
+    if (!isNavigatingRef.current && currentPromptRef.current) {
+      saveStashedInput(currentPromptRef.current);
+    }
+    isNavigatingRef.current = true;
+  }, [saveStashedInput]);
+
   // Register swipe override: map swipe gestures to arrow keys + scroll to bottom.
   // Also set containerEl so only swipes starting on the terminal trigger arrows.
   useEffect(() => {
@@ -91,12 +142,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
       writeRef.current(ARROW_MAP[direction]);
       if (direction === 'up' || direction === 'down') {
-        // Wait for actual terminal output, then extract prompt content
+        stashIfNeeded();
         onNextOutputRef.current(() => {
           terminal.current?.scrollToBottom();
           const content = getPromptLineRef.current();
-          suggestionIdRef.current++;
-          setPromptSuggestion({ text: content, id: suggestionIdRef.current });
+          handleHistoryOutput(content);
         });
       } else {
         setTimeout(() => terminal.current?.scrollToBottom(), 50);
@@ -106,7 +156,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       ccSwipeOverride.current = null;
       ccSwipeOverride.containerEl = null;
     };
-  }, [terminal]);
+  }, [terminal, stashIfNeeded, handleHistoryOutput]);
 
   // Publish status to ProjectContext for the header badge
   useEffect(() => {
@@ -142,9 +192,15 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     terminal.current?.scrollToBottom();
     setPromptSuggestion(null);
 
+    // Clear stashed input and navigation state on send
+    if (stashedInputRef.current) {
+      saveStashedInput('');
+    }
+    isNavigatingRef.current = false;
+
     // Auto-title on first message (mobile path — desktop uses onTerminalSubmit)
     autoTitle(userText);
-  }, [write, autoTitle]);
+  }, [write, autoTitle, saveStashedInput]);
 
   // If chat already has a title, mark first message as already sent
   useEffect(() => {
@@ -163,17 +219,17 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const handleArrow = useCallback((data: string) => {
     write(data);
     if (data === '\x1b[A' || data === '\x1b[B') {
+      stashIfNeeded();
       // Wait for actual terminal output, then extract prompt content
       onNextOutput(() => {
         terminal.current?.scrollToBottom();
         const content = getPromptLine();
-        suggestionIdRef.current++;
-        setPromptSuggestion({ text: content, id: suggestionIdRef.current });
+        handleHistoryOutput(content);
       });
     } else {
       setTimeout(() => terminal.current?.scrollToBottom(), 50);
     }
-  }, [write, terminal, getPromptLine, onNextOutput]);
+  }, [write, terminal, getPromptLine, onNextOutput, stashIfNeeded, handleHistoryOutput]);
 
   const handleInterrupt = useCallback(() => {
     write('\x03');
@@ -232,7 +288,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           autoFocus={isNewChat}
           promptSuggestion={promptSuggestion}
           initialDraft={chat?.draftMessage || ''}
-          onDraftChange={updateDraft}
+          onDraftChange={handleDraftChange}
         />
       </div>
     </div>

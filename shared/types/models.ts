@@ -26,6 +26,7 @@ export interface Chat {
   adapter: ChatAdapter;
   ccConversationId: string | null;
   draftMessage: string | null;
+  stashedInput: string | null;
 }
 
 export interface Project {

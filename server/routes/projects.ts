@@ -444,6 +444,17 @@ router.put('/:id/chats/:chatId/draft', async (req: Request<{ id: string; chatId:
   }
 });
 
+router.put('/:id/chats/:chatId/stashed-input', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const { text } = req.body;
+    projectManager.updateStashedInput(req.params.chatId, text || '');
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving stashed input:', err);
+    res.status(500).json({ error: 'Failed to save stashed input' });
+  }
+});
+
 router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     projectManager.deleteChat(req.params.chatId);

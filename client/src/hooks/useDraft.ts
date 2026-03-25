@@ -1,11 +1,17 @@
 import { useRef, useEffect, useCallback } from 'react';
 import api from '../utils/api.ts';
+import type { Project } from '../../../shared/types/models.ts';
 
 /**
  * Persists draft message text to the server with debouncing.
  * Saves immediately on visibility change (tab switch) and component unmount.
+ * Also updates the local project context so drafts survive navigation.
  */
-export function useDraft(projectId: string, chatId: string | undefined) {
+export function useDraft(
+  projectId: string,
+  chatId: string | undefined,
+  setProject?: React.Dispatch<React.SetStateAction<Project | null>>,
+) {
   const savedRef = useRef('');
   const currentRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -14,7 +20,17 @@ export function useDraft(projectId: string, chatId: string | undefined) {
     if (!chatId || text === savedRef.current) return;
     savedRef.current = text;
     api.put(`/api/projects/${projectId}/chats/${chatId}/draft`, { text }).catch(() => {});
-  }, [projectId, chatId]);
+    // Update local project context so the draft survives SPA navigation
+    setProject?.(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        chats: prev.chats.map(c =>
+          c.id === chatId ? { ...c, draftMessage: text || null } : c
+        ),
+      };
+    });
+  }, [projectId, chatId, setProject]);
 
   const updateDraft = useCallback((text: string) => {
     currentRef.current = text;

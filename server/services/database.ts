@@ -137,6 +137,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add stashed_input column to chats (pre-navigation prompt text)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN stashed_input TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();
