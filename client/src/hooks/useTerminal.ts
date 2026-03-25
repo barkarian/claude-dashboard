@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
 
@@ -20,6 +21,9 @@ interface UseTerminalReturn {
   terminal: RefObject<Terminal | null>;
   fitAddon: RefObject<FitAddon | null>;
   status: string;
+  searchFindNext: (query: string, incremental?: boolean) => boolean;
+  searchFindPrevious: (query: string) => boolean;
+  searchClear: () => void;
 }
 
 export function useTerminal(
@@ -28,6 +32,7 @@ export function useTerminal(
 ): UseTerminalReturn {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const [status, setStatus] = useState('disconnected');
 
   useEffect(() => {
@@ -69,11 +74,14 @@ export function useTerminal(
     });
 
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(searchAddon);
     term.open(containerRef.current);
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
 
     function doFit() {
       try {
@@ -313,8 +321,40 @@ export function useTerminal(
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
+      searchAddonRef.current = null;
     };
   }, [containerRef, socket, projectId, scriptId, readOnly, wrapperRef]);
 
-  return { terminal: termRef, fitAddon: fitAddonRef, status };
+  const searchFindNext = useCallback((query: string, incremental?: boolean): boolean => {
+    return searchAddonRef.current?.findNext(query, {
+      incremental,
+      decorations: {
+        matchBackground: '#5c4a0a',
+        activeMatchBackground: '#8a6f0f',
+        matchBorder: '#eab308',
+        activeMatchBorder: '#facc15',
+        matchOverviewRuler: '#eab308',
+        activeMatchColorOverviewRuler: '#facc15',
+      },
+    }) ?? false;
+  }, []);
+
+  const searchFindPrevious = useCallback((query: string): boolean => {
+    return searchAddonRef.current?.findPrevious(query, {
+      decorations: {
+        matchBackground: '#5c4a0a',
+        activeMatchBackground: '#8a6f0f',
+        matchBorder: '#eab308',
+        activeMatchBorder: '#facc15',
+        matchOverviewRuler: '#eab308',
+        activeMatchColorOverviewRuler: '#facc15',
+      },
+    }) ?? false;
+  }, []);
+
+  const searchClear = useCallback(() => {
+    searchAddonRef.current?.clearDecorations();
+  }, []);
+
+  return { terminal: termRef, fitAddon: fitAddonRef, status, searchFindNext, searchFindPrevious, searchClear };
 }

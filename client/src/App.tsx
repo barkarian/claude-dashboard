@@ -14,7 +14,9 @@ import MigrationPage from './pages/MigrationPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
 import { DesktopUpdateProvider } from './context/DesktopUpdateContext.tsx';
+import { SearchProvider } from './context/SearchContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
+import SearchOverlay from './components/ui/SearchOverlay.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
 import { initStatusBar } from './utils/statusBar.ts';
 import { haptics } from './utils/haptics.ts';
@@ -237,9 +239,11 @@ export default function App() {
                 <NewProjectDrawerProvider>
                   <SwipeHandler />
                   <BackButtonHandler />
+                  <SearchProvider>
                   <div className="app-layout flex w-full overflow-hidden">
                     <AppSidebar ref={sidebarRef} />
-                    <main className="flex-1 flex flex-col overflow-hidden">
+                    <main className="flex-1 flex flex-col overflow-hidden relative">
+                      <SearchOverlay />
                       <Routes>
                         <Route path="/" element={<ProjectListPage />} />
                         <Route path="/settings" element={<SettingsPage />} />
@@ -251,6 +255,7 @@ export default function App() {
                     </main>
                   </div>
                   <NewProjectDrawer />
+                  </SearchProvider>
                 </NewProjectDrawerProvider>
               </AppSidebarContext.Provider>
             </SidebarProvider>

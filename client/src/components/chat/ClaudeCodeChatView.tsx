@@ -1,7 +1,8 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
+import { useSearch, type SearchHandler } from '../../context/SearchContext.tsx';
 import { useClaudeCode } from '../../hooks/useClaudeCode.ts';
 import { useDraft } from '../../hooks/useDraft.ts';
 import { ccSwipeOverride } from '../../utils/ccSwipeOverride.ts';
@@ -25,6 +26,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const { socket } = useSocket();
   const location = useLocation();
   const { project, setProject, setActiveChatStatus, refreshProject } = useProject();
+  const { registerHandler, unregisterHandler } = useSearch();
   const containerRef = useRef<HTMLDivElement>(null);
   const writeRef = useRef<(data: string) => void>(() => {});
   const firstMessageSentRef = useRef(false);
@@ -97,7 +99,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     }
   }, [chatId, projectId]);
 
-  const { terminal, status, isThinking, isSelectionMode, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
+  const { terminal, status, isThinking, isSelectionMode, write, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -170,6 +172,18 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       ccSwipeOverride.containerEl = null;
     };
   }, [terminal, stashIfNeeded, handleHistoryOutput]);
+
+  // Register search handler for Ctrl+F
+  const searchHandler = useMemo<SearchHandler>(() => ({
+    findNext: (q, inc) => searchFindNext(q, inc),
+    findPrevious: (q) => searchFindPrevious(q),
+    clearSearch: () => searchClear(),
+  }), [searchFindNext, searchFindPrevious, searchClear]);
+
+  useEffect(() => {
+    registerHandler(searchHandler);
+    return () => unregisterHandler(searchHandler);
+  }, [searchHandler, registerHandler, unregisterHandler]);
 
   // Publish status to ProjectContext for the header badge
   useEffect(() => {

@@ -1,7 +1,8 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
+import { useSearch, type SearchHandler } from '../../context/SearchContext.tsx';
 import { useTerminal } from '../../hooks/useTerminal.ts';
 import { useProcessStatus } from '../../hooks/useProcessStatus.ts';
 import TerminalInputBar from './TerminalInputBar.tsx';
@@ -19,14 +20,27 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const { isDesktop } = useAuth();
+  const { registerHandler, unregisterHandler } = useSearch();
   const containerRef = useRef<HTMLDivElement>(null);
   const { processes } = useProcessStatus(projectId);
 
-  const { status } = useTerminal(containerRef, {
+  const { status, searchFindNext, searchFindPrevious, searchClear } = useTerminal(containerRef, {
     socket,
     projectId,
     scriptId: scriptId!,
   });
+
+  // Register search handler for Ctrl+F
+  const searchHandler = useMemo<SearchHandler>(() => ({
+    findNext: (q, inc) => searchFindNext(q, inc),
+    findPrevious: (q) => searchFindPrevious(q),
+    clearSearch: () => searchClear(),
+  }), [searchFindNext, searchFindPrevious, searchClear]);
+
+  useEffect(() => {
+    registerHandler(searchHandler);
+    return () => unregisterHandler(searchHandler);
+  }, [searchHandler, registerHandler, unregisterHandler]);
 
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [sendContent, setSendContent] = useState('');
