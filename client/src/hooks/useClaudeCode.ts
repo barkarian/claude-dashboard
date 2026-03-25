@@ -213,29 +213,63 @@ export function useClaudeCode(
       }
     }
 
+    // --- Scroll position guard ---
+    // xterm.js can erroneously reset viewport.scrollTop during buffer
+    // management (scrollback trimming, resize reflow) on very large buffers.
+    // We track the last known good position and correct sudden jumps.
+    const xviewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
+    let lastGoodScrollTop = 0;
+    let lastGoodWasAtBottom = true;
+    let scrollGuardRafId = 0;
+
+    function captureScrollState() {
+      if (!xviewport) return;
+      lastGoodScrollTop = xviewport.scrollTop;
+      lastGoodWasAtBottom = xviewport.scrollTop + xviewport.clientHeight >= xviewport.scrollHeight - 10;
+    }
+
+    // Schedule a post-frame check: if the viewport jumped to near-top
+    // when it shouldn't have, correct it. Uses double-rAF to run after
+    // xterm's own async rendering pipeline.
+    function scheduleScrollCorrection() {
+      if (scrollGuardRafId || !xviewport) return;
+      const savedTop = lastGoodScrollTop;
+      const wasBottom = lastGoodWasAtBottom;
+      scrollGuardRafId = requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollGuardRafId = 0;
+          if (!xviewport) return;
+          const { scrollTop, scrollHeight, clientHeight } = xviewport;
+          const maxScroll = scrollHeight - clientHeight;
+          if (maxScroll <= 0) return;
+          const ratio = scrollTop / maxScroll;
+          const savedRatio = savedTop / maxScroll;
+
+          if (wasBottom && ratio < 0.5) {
+            // Was at bottom but jumped away — snap back to bottom
+            xviewport.scrollTop = scrollHeight;
+          } else if (!wasBottom && savedRatio > 0.2 && ratio < 0.05) {
+            // Was deep in buffer but jumped to top — restore
+            xviewport.scrollTop = savedTop;
+          }
+        });
+      });
+    }
+
     function doFit() {
       try {
-        // Save scroll position before fit() — xterm's FitAddon can reset
-        // the viewport scrollTop when recalculating dimensions, causing the
-        // chat to jump to the top on desktop.
-        const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
-        let savedScrollTop = 0;
-        let wasAtBottom = true;
-        if (viewport) {
-          savedScrollTop = viewport.scrollTop;
-          wasAtBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 10;
-        }
-
+        captureScrollState();
         fitAddon.fit();
-
-        // Restore scroll position after fit()
-        if (viewport) {
-          if (wasAtBottom) {
-            viewport.scrollTop = viewport.scrollHeight;
+        // Sync restore (immediate, prevents flicker in common case)
+        if (xviewport) {
+          if (lastGoodWasAtBottom) {
+            xviewport.scrollTop = xviewport.scrollHeight;
           } else {
-            viewport.scrollTop = savedScrollTop;
+            xviewport.scrollTop = lastGoodScrollTop;
           }
         }
+        // Async restore (catches xterm's deferred rendering overrides)
+        scheduleScrollCorrection();
       } catch {}
     }
 
@@ -413,6 +447,54 @@ export function useClaudeCode(
       fitWhenReady();
     }
 
+    // --- Scroll jump watchdog (desktop only) ---
+    // Last line of defense: listens to viewport scroll events and corrects
+    // sudden jumps from deep in the buffer to near-top. This catches jumps
+    // from any source (term.write, resize, xterm internals) that wasn't
+    // caught by the targeted guards above.
+    let watchdogCleanup: (() => void) | null = null;
+    if (!isMobile && xviewport) {
+      let wdLastTop = 0;
+      let wdLastRatio = 1; // start at bottom
+      let wdCorrecting = false;
+
+      const onViewportScroll = () => {
+        if (wdCorrecting) return;
+        const { scrollTop, scrollHeight, clientHeight } = xviewport;
+        const maxScroll = scrollHeight - clientHeight;
+        if (maxScroll <= 0) {
+          wdLastTop = 0;
+          wdLastRatio = 1;
+          return;
+        }
+        const ratio = scrollTop / maxScroll;
+
+        // Erroneous jump: was deep in buffer (>20%), now near top (<2%),
+        // and buffer is large enough for this to be meaningful.
+        if (wdLastRatio > 0.2 && ratio < 0.02 && maxScroll > clientHeight * 2) {
+          wdCorrecting = true;
+          const target = wdLastRatio >= 0.95 ? scrollHeight : wdLastTop;
+          xviewport.scrollTop = target;
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              xviewport.scrollTop = target;
+              wdCorrecting = false;
+              const ms = xviewport.scrollHeight - xviewport.clientHeight;
+              wdLastTop = xviewport.scrollTop;
+              wdLastRatio = ms > 0 ? xviewport.scrollTop / ms : 1;
+            });
+          });
+          return;
+        }
+
+        wdLastTop = scrollTop;
+        wdLastRatio = ratio;
+      };
+
+      xviewport.addEventListener('scroll', onViewportScroll, { passive: true });
+      watchdogCleanup = () => xviewport.removeEventListener('scroll', onViewportScroll);
+    }
+
     // Check if there's an existing session to attach to, otherwise start new.
     // Send current terminal dimensions so the PTY is created / resized to match.
     socket.emit('cc:check-session', { chatId }, (result: { exists: boolean; status?: string }) => {
@@ -433,7 +515,9 @@ export function useClaudeCode(
     // Handle output
     const handleOutput = ({ chatId: cid, data }: { chatId: string; data: string }) => {
       if (cid === chatId) {
+        captureScrollState();
         term.write(data);
+        scheduleScrollCorrection();
         // If a caller is waiting for output, debounce 80ms to let chunks settle
         if (outputNotifyRef.current) {
           if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
@@ -546,7 +630,9 @@ export function useClaudeCode(
       if (retryTimer) clearTimeout(retryTimer);
       if (lateTimer) clearTimeout(lateTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
+      if (scrollGuardRafId) cancelAnimationFrame(scrollGuardRafId);
       outputNotifyRef.current = null;
+      watchdogCleanup?.();
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
       socket.off('cc:status', handleStatus);

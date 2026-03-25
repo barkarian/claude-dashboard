@@ -1,7 +1,10 @@
 {
   "name": "claude-dashboard",
   "private": true,
-  "workspaces": ["server", "client"],
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "cd server && NODE_ENV=development npx tsx watch index.ts",
@@ -14,6 +17,9 @@
     "desktop:run": "open desktop/src-tauri/target/release/bundle/macos/Claw\\ Dev.app"
   },
   "devDependencies": {
-    "concurrently": "^8.2.0"
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^8.2.0",
+    "vite": "^5.4.21",
+    "vite-plugin-pwa": "^0.20.5"
   }
 }

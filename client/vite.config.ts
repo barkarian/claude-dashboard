@@ -26,6 +26,7 @@ export default defineConfig({
         // Exclude HTML from precache — Express injects <base href> at runtime,
         // so the SW must not serve a cached copy without it.
         globPatterns: ['**/*.{js,css,ico,png,svg}'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
         // No navigateFallback — let Express handle navigation requests
         // (it injects the correct <base href="/${env}/"> tag).
         runtimeCaching: [
