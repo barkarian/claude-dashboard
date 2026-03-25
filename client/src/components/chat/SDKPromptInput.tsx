@@ -17,11 +17,13 @@ interface SDKPromptInputProps {
   onSend: (prompt: string) => void;
   onInterrupt: () => void;
   autoFocus?: boolean;
+  initialDraft?: string;
+  onDraftChange?: (text: string) => void;
 }
 
-export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus }: SDKPromptInputProps) {
+export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus, initialDraft, onDraftChange }: SDKPromptInputProps) {
   const location = useLocation();
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialDraft || '');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showScriptPicker, setShowScriptPicker] = useState(false);
@@ -123,6 +125,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
 
     onSend(text);
     setValue('');
+    onDraftChange?.('');
   }
 
   function handleFileSelect(filePath: string) {
@@ -193,7 +196,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); onDraftChange?.(e.target.value); }}
           onKeyDown={handleKeyDown}
           autoFocus={autoFocus}
           className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[42px] max-h-[200px] py-2.5 flex-1"

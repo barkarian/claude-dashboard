@@ -284,6 +284,7 @@ function listChats(projectId: string): Chat[] {
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
+    draftMessage: r.draft_message || null,
   }));
 }
 
@@ -309,6 +310,7 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
+    draftMessage: r.draft_message || null,
   }));
 
   return { chats, total };
@@ -325,6 +327,7 @@ function listChatsWithHistory(projectId: string): Chat[] {
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
+    draftMessage: r.draft_message || null,
   }));
 }
 
@@ -342,6 +345,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     sdkSessionId: null,
     adapter: chatAdapter,
     ccConversationId: null,
+    draftMessage: null,
   };
 }
 
@@ -357,22 +361,28 @@ function getChat(chatId: string): Chat | null {
     sdkSessionId: row.sdk_session_id || null,
     adapter: (row.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: row.cc_conversation_id || null,
+    draftMessage: row.draft_message || null,
   };
 }
 
-function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null }): Chat | null {
+function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null; draftMessage?: string | null }): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
   if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
   if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
   if (updates.ccConversationId !== undefined) db.prepare('UPDATE chats SET cc_conversation_id = ? WHERE id = ?').run(updates.ccConversationId, chatId);
+  if (updates.draftMessage !== undefined) db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(updates.draftMessage, chatId);
 
   return getChat(chatId);
 }
 
 function touchChatActivity(chatId: string): void {
   db.prepare("UPDATE chats SET last_activity_at = datetime('now') WHERE id = ?").run(chatId);
+}
+
+function updateDraft(chatId: string, text: string): void {
+  db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(text || null, chatId);
 }
 
 function deleteChat(chatId: string): void {
@@ -443,6 +453,7 @@ export default {
   createChat,
   getChat,
   updateChat,
+  updateDraft,
   touchChatActivity,
   deleteChat,
   addMessage,

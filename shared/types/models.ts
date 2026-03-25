@@ -25,6 +25,7 @@ export interface Chat {
   sdkSessionId: string | null;
   adapter: ChatAdapter;
   ccConversationId: string | null;
+  draftMessage: string | null;
 }
 
 export interface Project {

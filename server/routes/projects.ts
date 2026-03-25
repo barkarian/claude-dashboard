@@ -378,7 +378,7 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     // Clean up empty chats (only on first page / no search — avoid during paginated browsing)
     if (offset === 0 && !search) {
       const allChats = projectManager.listChats(req.params.id);
-      const emptyChats = allChats.filter(c => c.label === 'New Chat' && (!projectManager.getChatMessages(c.id) || projectManager.getChatMessages(c.id).length === 0));
+      const emptyChats = allChats.filter(c => c.label === 'New Chat' && !c.draftMessage && (!projectManager.getChatMessages(c.id) || projectManager.getChatMessages(c.id).length === 0));
       for (const chat of emptyChats) {
         sdkSessionManager.endSession(chat.id);
         projectManager.deleteChat(chat.id);
@@ -430,6 +430,17 @@ router.patch('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: str
   } catch (err) {
     console.error('Error updating chat:', err);
     res.status(500).json({ error: 'Failed to update chat' });
+  }
+});
+
+router.put('/:id/chats/:chatId/draft', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const { text } = req.body;
+    projectManager.updateDraft(req.params.chatId, text || '');
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving draft:', err);
+    res.status(500).json({ error: 'Failed to save draft' });
   }
 });
 

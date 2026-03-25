@@ -130,6 +130,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add draft_message column to chats
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN draft_message TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

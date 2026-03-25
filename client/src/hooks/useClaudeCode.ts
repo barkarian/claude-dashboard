@@ -18,6 +18,7 @@ interface UseClaudeCodeOptions {
 interface UseClaudeCodeReturn {
   terminal: RefObject<Terminal | null>;
   status: 'disconnected' | 'running' | 'exited' | 'error';
+  isThinking: boolean;
   isSelectionMode: boolean;
   write: (data: string) => void;
   stop: () => void;
@@ -32,6 +33,7 @@ export function useClaudeCode(
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
+  const [isThinking, setIsThinking] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -204,7 +206,27 @@ export function useClaudeCode(
 
     function doFit() {
       try {
+        // Save scroll position before fit() — xterm's FitAddon can reset
+        // the viewport scrollTop when recalculating dimensions, causing the
+        // chat to jump to the top on desktop.
+        const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
+        let savedScrollTop = 0;
+        let wasAtBottom = true;
+        if (viewport) {
+          savedScrollTop = viewport.scrollTop;
+          wasAtBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 10;
+        }
+
         fitAddon.fit();
+
+        // Restore scroll position after fit()
+        if (viewport) {
+          if (wasAtBottom) {
+            viewport.scrollTop = viewport.scrollHeight;
+          } else {
+            viewport.scrollTop = savedScrollTop;
+          }
+        }
       } catch {}
     }
 
@@ -425,6 +447,12 @@ export function useClaudeCode(
       }
     };
 
+    const handleThinking = ({ chatId: cid, isThinking: thinking }: { chatId: string; isThinking: boolean }) => {
+      if (cid === chatId) {
+        setIsThinking(thinking);
+      }
+    };
+
     const handleExit = ({ chatId: cid, exitCode }: { chatId: string; exitCode: number }) => {
       if (cid === chatId) {
         setStatus('exited');
@@ -441,6 +469,7 @@ export function useClaudeCode(
 
     socket.on('cc:output', handleOutput);
     socket.on('cc:status', handleStatus);
+    socket.on('cc:thinking', handleThinking);
     socket.on('cc:exit', handleExit);
     socket.on('cc:error', handleError);
 
@@ -472,18 +501,20 @@ export function useClaudeCode(
       socket.emit('cc:input', { chatId, data });
     });
 
-    // Handle resize — single source of truth for both mobile and desktop
+    // Handle resize — single source of truth for both mobile and desktop.
+    // Debounced to avoid rapid-fire fit() calls from subtle layout shifts
+    // (e.g. scrollbar appearing/disappearing, CSS transitions) which cause
+    // the viewport scroll position to jump.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      try {
-        fitWhenReady();
-        socket.emit('cc:resize', {
-          chatId,
-          cols: term.cols,
-          rows: term.rows,
-        });
-      } catch {
-        // ignore resize errors
-      }
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        try {
+          fitWhenReady();
+        } catch {
+          // ignore resize errors
+        }
+      }, 100);
     });
 
     const observeTarget = scaleTarget || containerRef.current;
@@ -505,10 +536,12 @@ export function useClaudeCode(
       if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
       if (retryTimer) clearTimeout(retryTimer);
       if (lateTimer) clearTimeout(lateTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
       outputNotifyRef.current = null;
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
       socket.off('cc:status', handleStatus);
+      socket.off('cc:thinking', handleThinking);
       socket.off('cc:exit', handleExit);
       socket.off('cc:error', handleError);
       socket.io.off('reconnect', handleReconnect);
@@ -520,5 +553,5 @@ export function useClaudeCode(
     };
   }, [containerRef, socket, projectId, chatId]);
 
-  return { terminal: termRef, status, isSelectionMode, write, stop, getPromptLine, onNextOutput };
+  return { terminal: termRef, status, isThinking, isSelectionMode, write, stop, getPromptLine, onNextOutput };
 }

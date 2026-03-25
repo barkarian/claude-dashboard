@@ -200,10 +200,8 @@ export default function ProjectDashboardPage() {
         statusDot={statusDotClass}
         statusLabel={statusLabel}
         onProjectSettings={() => setShowProjectSettings(true)}
-        chatActions={activeChatId && activeChat?.adapter === 'claude-code' ? (
-          <div className="hidden md:flex items-center">
-            <DesktopRecordingControls projectId={id!} />
-          </div>
+        projectActions={project ? (
+          <DesktopRecordingControls projectId={id!} />
         ) : undefined}
       />
 

@@ -3,6 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
+import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
@@ -18,9 +19,12 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
-  const { refreshProject, setActiveChatStatus } = useProject();
+  const { project, refreshProject, setActiveChatStatus } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
+
+  const chat = project?.chats?.find(c => c.id === chatId);
+  const { updateDraft } = useDraft(projectId, chatId);
 
   const {
     messages,
@@ -143,11 +147,14 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
 
           {/* Input */}
           <SDKPromptInput
+            key={chatId}
             projectId={projectId}
             status={status}
             onSend={sendPrompt}
             onInterrupt={interrupt}
             autoFocus={isNewChat}
+            initialDraft={chat?.draftMessage || ''}
+            onDraftChange={updateDraft}
           />
         </>
       )}

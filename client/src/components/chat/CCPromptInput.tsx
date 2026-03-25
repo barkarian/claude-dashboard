@@ -19,6 +19,8 @@ interface CCPromptInputProps {
   onInterrupt: () => void;
   autoFocus?: boolean;
   promptSuggestion?: { text: string; id: number } | null;
+  initialDraft?: string;
+  onDraftChange?: (text: string) => void;
 }
 
 // ANSI escape sequences
@@ -30,8 +32,8 @@ const ESC = '\x1b';
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';
 
-export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion }: CCPromptInputProps) {
-  const [value, setValue] = useState('');
+export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion, initialDraft, onDraftChange }: CCPromptInputProps) {
+  const [value, setValue] = useState(initialDraft || '');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -131,6 +133,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
 
     onSend(text + '\r');
     setValue('');
+    onDraftChange?.('');
     userInteractedRef.current = false;
   }
 
@@ -340,6 +343,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
               userInteractedRef.current = true;
               isSuggestionFillRef.current = false;
               setValue(e.target.value);
+              onDraftChange?.(e.target.value);
             }}
             onFocus={() => {
               userInteractedRef.current = true;

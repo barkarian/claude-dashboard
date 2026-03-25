@@ -26,6 +26,7 @@ interface HeaderProps {
   onNewChat?: () => void;
   onProjectSettings?: () => void;
   chatActions?: ReactNode;
+  projectActions?: ReactNode;
 }
 
 export default function Header({
@@ -44,6 +45,7 @@ export default function Header({
   onNewChat,
   onProjectSettings,
   chatActions,
+  projectActions,
 }: HeaderProps) {
   const navigate = useNavigate();
   const { toggleSidebar: _toggleSidebar } = useSidebar();
@@ -136,19 +138,22 @@ export default function Header({
           </button>
         </div>
 
-        {onNewChat ? (
-          <button
-            onClick={onNewChat}
-            className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
-            aria-label="New chat"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </button>
-        ) : (
-          <div className="w-8" />
-        )}
+        <div className="flex items-center gap-1">
+          {projectActions}
+          {onNewChat ? (
+            <button
+              onClick={onNewChat}
+              className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
+              aria-label="New chat"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+          ) : (
+            <div className="w-8" />
+          )}
+        </div>
       </div>
 
       {/* Row 2: Chat name + edit | power-off | status (only when in a chat) */}

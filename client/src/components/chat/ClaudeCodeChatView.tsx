@@ -3,6 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useClaudeCode } from '../../hooks/useClaudeCode.ts';
+import { useDraft } from '../../hooks/useDraft.ts';
 import { ccSwipeOverride } from '../../utils/ccSwipeOverride.ts';
 import api from '../../utils/api.ts';
 import CCPromptInput from './CCPromptInput.tsx';
@@ -33,6 +34,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Find chat to get conversationId for resume
   const chat = project?.chats?.find(c => c.id === chatId);
   const conversationId = chat?.ccConversationId;
+  const { updateDraft } = useDraft(projectId, chatId);
 
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
@@ -54,7 +56,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     }
   }, [chatId, projectId]);
 
-  const { terminal, status, isSelectionMode, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
+  const { terminal, status, isThinking, isSelectionMode, write, getPromptLine, onNextOutput } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -109,7 +111,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Publish status to ProjectContext for the header badge
   useEffect(() => {
     if (status === 'running') {
-      setActiveChatStatus('idle');
+      setActiveChatStatus(isThinking ? 'streaming' : 'idle');
     } else if (status === 'exited') {
       setActiveChatStatus('exited');
     } else {
@@ -118,7 +120,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     return () => {
       setActiveChatStatus(null);
     };
-  }, [status, setActiveChatStatus]);
+  }, [status, isThinking, setActiveChatStatus]);
 
   const handleSend = useCallback((data: string) => {
     const userText = data.replace(/\r$/, '');
@@ -220,6 +222,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       {/* Prompt input with navigation controls — mobile only, hidden on desktop via CSS */}
       <div className="flex-shrink-0 md:hidden">
         <CCPromptInput
+          key={chatId}
           projectId={projectId}
           status={status}
           isSelectionMode={isSelectionMode}
@@ -228,6 +231,8 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           onInterrupt={handleInterrupt}
           autoFocus={isNewChat}
           promptSuggestion={promptSuggestion}
+          initialDraft={chat?.draftMessage || ''}
+          onDraftChange={updateDraft}
         />
       </div>
     </div>

@@ -10,7 +10,7 @@ interface DesktopRecordingControlsProps {
 }
 
 export default function DesktopRecordingControls({ projectId }: DesktopRecordingControlsProps) {
-  const { activeRecording, recordings, stopRecording } = useTerminalRecording();
+  const { activeRecording, recordings, stopRecording, getRecordingContent } = useTerminalRecording();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
   const [tab, setTab] = useState<'terminal' | 'browser'>('terminal');
@@ -19,6 +19,7 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
   const [stoppedIds, setStoppedIds] = useState<string[]>([]);
   const [viewRecordingId, setViewRecordingId] = useState<string | null>(null);
   const [showScriptPicker, setShowScriptPicker] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null); // 'all' for copy all, or a recording id
 
   // Elapsed timer
   useEffect(() => {
@@ -62,6 +63,29 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
 
   function dismissRecording(id: string) {
     setStoppedIds(prev => prev.filter(i => i !== id));
+  }
+
+  async function copyRecording(id: string) {
+    const content = getRecordingContent(id);
+    if (!content) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch { /* silent */ }
+  }
+
+  async function copyAllRecordings() {
+    const allContent = validStoppedIds
+      .map(id => getRecordingContent(id))
+      .filter(Boolean)
+      .join('\n\n');
+    if (!allContent) return;
+    try {
+      await navigator.clipboard.writeText(allContent);
+      setCopiedId('all');
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch { /* silent */ }
   }
 
   const hasBrowser = activeRecording ? activeRecording.browserPorts.length > 0 : false;
@@ -152,14 +176,39 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
           {/* ── Stopped recordings list ── */}
           {validStoppedIds.length > 0 && (
             <div className={activeRecording ? 'border-t border-border' : ''}>
-              <div className="px-3 pt-3 pb-1.5 text-[11px] font-medium text-text-muted uppercase tracking-wider">
-                Recorded Logs
+              <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
+                <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">
+                  Recorded Logs
+                </span>
+                {validStoppedIds.length > 1 && (
+                  <button
+                    onClick={copyAllRecordings}
+                    className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
+                  >
+                    {copiedId === 'all' ? (
+                      <>
+                        <svg className="w-3 h-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                        </svg>
+                        Copy All
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               {validStoppedIds.map(id => {
                 const rec = recordings.get(id);
                 if (!rec) return null;
                 const names = rec.scripts.map(s => s.label || s.command).join(', ');
                 const count = rec.lines.length;
+                const isCopied = copiedId === id;
                 return (
                   <div
                     key={id}
@@ -174,6 +223,22 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
                       </svg>
                       <span className="text-sm truncate">{names}</span>
                       <span className="text-xs text-text-muted flex-shrink-0">{count} lines</span>
+                    </button>
+                    <button
+                      onClick={() => copyRecording(id)}
+                      className={`w-5 h-5 flex items-center justify-center rounded transition-all flex-shrink-0 ${isCopied ? 'text-success opacity-100' : 'text-text-dim opacity-0 group-hover:opacity-100 hover:text-text-muted hover:bg-bg-hover'}`}
+                      aria-label="Copy recording"
+                      title="Copy to clipboard"
+                    >
+                      {isCopied ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                        </svg>
+                      )}
                     </button>
                     <button
                       onClick={() => dismissRecording(id)}

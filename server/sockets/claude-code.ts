@@ -17,6 +17,15 @@ const MAX_BUFFER_LINES = 5000;
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
 
+// Claude Code CLI spinner characters (from Gc_ in the CLI source).
+// The CLI animates through these when thinking/processing:
+//   · → ✢ → ✳ → ✶ → ✻ → ✽ → (reverse)
+// We match any of the non-trivial spinner chars (skip ·, it's too common).
+const CC_SPINNER_CHARS = new Set(['\u2722', '\u2733', '\u2736', '\u273B', '\u273D']); // ✢✳✶✻✽
+
+// Idle timeout: if no spinner char seen for this long, assume idle
+const THINKING_IDLE_MS = 600;
+
 function getChildEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   for (const key of DASHBOARD_ENV_KEYS) {
@@ -33,6 +42,8 @@ interface CCSession {
   chatId: string;
   projectId: string;
   exitCode: number | null;
+  isThinking: boolean;
+  thinkingTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // Map<chatId, CCSession>
@@ -78,6 +89,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         chatId,
         projectId,
         exitCode: null,
+        isThinking: false,
+        thinkingTimer: null,
       };
 
       sessions.set(chatId, session);
@@ -96,17 +109,46 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
       const room = `cc:${chatId}`;
       socket.join(room);
 
-      // Stream output to clients
+      // Stream output to clients + detect thinking state from spinner chars
       ptyProcess.onData((data: string) => {
         buffer.push(data);
         if (buffer.length > MAX_BUFFER_LINES) {
           buffer.splice(0, buffer.length - MAX_BUFFER_LINES);
         }
         io.to(room).emit('cc:output', { chatId, data });
+
+        // Check if data contains any Claude Code spinner characters
+        let hasSpinner = false;
+        for (const ch of data) {
+          if (CC_SPINNER_CHARS.has(ch)) {
+            hasSpinner = true;
+            break;
+          }
+        }
+
+        if (hasSpinner) {
+          // Spinner detected → thinking
+          if (!session.isThinking) {
+            session.isThinking = true;
+            io.to(room).emit('cc:thinking', { chatId, isThinking: true });
+            io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'thinking' });
+          }
+          // Reset idle timer
+          if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+          session.thinkingTimer = setTimeout(() => {
+            if (session.isThinking) {
+              session.isThinking = false;
+              io.to(room).emit('cc:thinking', { chatId, isThinking: false });
+              io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
+            }
+          }, THINKING_IDLE_MS);
+        }
       });
 
       // Handle process exit
       ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+        if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+        session.isThinking = false;
         session.status = 'exited';
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
@@ -175,6 +217,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
       }
       // Send current status
       socket.emit('cc:status', { chatId, status: session.status });
+      // Send current thinking state
+      socket.emit('cc:thinking', { chatId, isThinking: session.isThinking });
     }
   });
 
@@ -197,6 +241,9 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 function killSession(chatId: string): void {
   const session = sessions.get(chatId);
   if (!session || session.status !== 'running') return;
+
+  if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+  session.isThinking = false;
 
   // Unregister from processManager before killing
   processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
@@ -231,7 +278,7 @@ export function getProjectCCSessions(projectId: string): Record<string, string> 
   const result: Record<string, string> = {};
   for (const [chatId, session] of sessions) {
     if (session.projectId === projectId && session.status === 'running') {
-      result[chatId] = 'idle';
+      result[chatId] = session.isThinking ? 'thinking' : 'idle';
     }
   }
   return result;
