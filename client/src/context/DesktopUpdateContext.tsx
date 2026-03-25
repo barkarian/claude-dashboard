@@ -73,7 +73,13 @@ export function DesktopUpdateProvider({ children }: { children: ReactNode }) {
         setUpdateBody(null);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to check for updates');
+      // In dev mode, Tauri plugins can't be resolved — don't surface as a user-facing error
+      const msg = err.message || '';
+      if (msg.includes('does not resolve to a valid URL') || msg.includes('Failed to fetch')) {
+        console.warn('[DesktopUpdate] Updater unavailable (expected in dev mode):', msg);
+      } else {
+        setError(msg || 'Failed to check for updates');
+      }
     } finally {
       setChecking(false);
     }
@@ -116,7 +122,12 @@ export function DesktopUpdateProvider({ children }: { children: ReactNode }) {
       setInstalled(true);
       setUpdateAvailable(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to download and install update');
+      const msg = err.message || '';
+      if (msg.includes('does not resolve to a valid URL') || msg.includes('Failed to fetch')) {
+        console.warn('[DesktopUpdate] Updater unavailable (expected in dev mode):', msg);
+      } else {
+        setError(msg || 'Failed to download and install update');
+      }
     } finally {
       setDownloading(false);
     }
