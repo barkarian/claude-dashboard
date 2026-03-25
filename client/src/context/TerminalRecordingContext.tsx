@@ -128,6 +128,25 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
     };
   }, [socket, flushBuffer]);
 
+  // Re-attach to terminal rooms when socket reconnects (room membership lost on disconnect)
+  useEffect(() => {
+    if (!socket) return;
+    const handleReconnect = () => {
+      if (!activeRef.current) return;
+      const { projectId, scripts, browserPorts } = activeRef.current;
+      for (const s of scripts) {
+        socket.emit('terminal:attach', { projectId, scriptId: s.scriptId });
+        // Skip the buffer replay to avoid capturing duplicate output
+        activeRef.current.skipNext.set(s.scriptId, true);
+      }
+      for (const port of browserPorts) {
+        socket.emit('browser-monitor:enable', { port });
+      }
+    };
+    socket.io.on('reconnect', handleReconnect);
+    return () => { socket.io.off('reconnect', handleReconnect); };
+  }, [socket]);
+
   // Socket listener for browser console logs
   useEffect(() => {
     if (!socket) return;

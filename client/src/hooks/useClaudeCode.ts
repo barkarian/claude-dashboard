@@ -444,6 +444,21 @@ export function useClaudeCode(
     socket.on('cc:exit', handleExit);
     socket.on('cc:error', handleError);
 
+    // Re-attach when socket reconnects — server loses room membership on disconnect,
+    // so without this the terminal freezes (no cc:output received) and status goes stale.
+    const handleReconnect = () => {
+      socket.emit('cc:check-session', { chatId }, (result: { exists: boolean; status?: string }) => {
+        if (result.exists) {
+          socket.emit('cc:attach', { chatId, cols: term.cols, rows: term.rows });
+          setStatus(result.status === 'running' ? 'running' : 'exited');
+        } else {
+          setStatus('exited');
+        }
+      });
+      fitWhenReady();
+    };
+    socket.io.on('reconnect', handleReconnect);
+
     // Forward terminal keyboard input to the PTY.
     // On desktop, also detect Enter keypresses to notify the parent (for auto-titling).
     term.onData((data: string) => {
@@ -496,6 +511,7 @@ export function useClaudeCode(
       socket.off('cc:status', handleStatus);
       socket.off('cc:exit', handleExit);
       socket.off('cc:error', handleError);
+      socket.io.off('reconnect', handleReconnect);
       socket.emit('cc:detach', { chatId });
       resizeObserver.disconnect();
       term.dispose();

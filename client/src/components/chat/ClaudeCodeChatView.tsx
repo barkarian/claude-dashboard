@@ -69,6 +69,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const promptSuggestionRef = useRef(promptSuggestion);
   promptSuggestionRef.current = promptSuggestion;
 
+  // Clear stale suggestion when navigating between chats (component is reused by React Router)
+  useEffect(() => {
+    setPromptSuggestion(null);
+  }, [chatId]);
+
   // Keep refs up to date for the swipe handler
   writeRef.current = write;
   const getPromptLineRef = useRef(getPromptLine);
@@ -119,16 +124,16 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     const userText = data.replace(/\r$/, '');
     const suggestion = promptSuggestionRef.current?.text ?? '';
 
-    if (promptSuggestionRef.current && userText === suggestion) {
-      // Text unchanged from history recall — it's already in the terminal,
-      // just press Enter instead of re-typing it
-      write('\r');
-    } else if (promptSuggestionRef.current && suggestion) {
-      // User edited the recalled text — delete the original with backspaces,
-      // then type the new text
-      write('\x7f'.repeat(suggestion.length) + data);
+    if (promptSuggestionRef.current && suggestion) {
+      // Double-Escape clears Claude Code's prompt input.
+      // Send Escapes separately so the second ESC doesn't combine with
+      // the first char of data into an escape sequence (e.g. ESC H).
+      write('\x1b\x1b');
+      setTimeout(() => {
+        write(data);
+        terminal.current?.scrollToBottom();
+      }, 50);
     } else {
-      // No active suggestion — fresh input, write normally
       write(data);
     }
 
