@@ -2,6 +2,8 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { useTheme } from '../../../context/ThemeContext.tsx';
 
 interface MarkdownRendererProps {
   text: string;
@@ -43,8 +45,14 @@ function CopyButton({ code }: { code: string }) {
 }
 
 export default function MarkdownRenderer({ text }: MarkdownRendererProps) {
+  const { resolved } = useTheme();
+  const syntaxTheme = resolved === 'light' ? oneLight : oneDark;
+  const proseClass = resolved === 'light'
+    ? 'prose prose-sm'
+    : 'prose prose-invert prose-sm';
+
   return (
-    <div className="text-sm prose prose-invert prose-sm max-w-none overflow-hidden [&_pre]:overflow-x-auto [&_code]:break-all">
+    <div className={`text-sm ${proseClass} max-w-none overflow-hidden [&_pre]:overflow-x-auto [&_code]:break-all`}>
       <ReactMarkdown
         components={{
           code({ node, inline, className, children, ...props }: any) {
@@ -52,12 +60,12 @@ export default function MarkdownRenderer({ text }: MarkdownRendererProps) {
             const codeString = String(children).replace(/\n$/, '');
             return !inline && match ? (
               <div className="relative">
-                <div className="flex items-center justify-between px-3 py-1.5 bg-[#282c34] rounded-t-lg border-b border-white/10">
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-t-lg border-b border-white/10" style={{ background: `rgb(var(--color-code-header))` }}>
                   <span className="text-[11px] text-text-dim font-mono">{match[1]}</span>
                   <CopyButton code={codeString} />
                 </div>
                 <SyntaxHighlighter
-                  style={oneDark}
+                  style={syntaxTheme}
                   language={match[1]}
                   PreTag="div"
                   customStyle={{

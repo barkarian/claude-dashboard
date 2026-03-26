@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
+import { useTheme } from '../context/ThemeContext.tsx';
 
 // Width in px that the container is stretched to before CSS-scaling back down.
 // Lower = larger apparent font on mobile. 400 → ~2× the previous 800 value.
@@ -34,6 +35,7 @@ export function useTerminal(
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const [status, setStatus] = useState('disconnected');
+  const { terminalTheme } = useTheme();
 
   useEffect(() => {
     if (!containerRef.current || !socket) return;
@@ -45,29 +47,7 @@ export function useTerminal(
       cursorStyle: 'block',
       fontSize: 14,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      theme: {
-        background: '#0f1117',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: '#0f1117',
-        selectionBackground: 'rgba(255, 255, 255, 0.25)',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#ffffff',
-      },
+      theme: terminalTheme,
       disableStdin: readOnly,
       scrollback: 5000,
       scrollSensitivity: isMobile ? 5 : 1,
@@ -323,7 +303,7 @@ export function useTerminal(
       fitAddonRef.current = null;
       searchAddonRef.current = null;
     };
-  }, [containerRef, socket, projectId, scriptId, readOnly, wrapperRef]);
+  }, [containerRef, socket, projectId, scriptId, readOnly, wrapperRef, terminalTheme]);
 
   const searchFindNext = useCallback((query: string, incremental?: boolean): boolean => {
     return searchAddonRef.current?.findNext(query, {

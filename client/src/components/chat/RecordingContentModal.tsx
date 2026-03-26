@@ -99,8 +99,8 @@ export default function RecordingContentModal({ recordingId, onClose }: Recordin
           </div>
         )}
 
-        <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 p-4 bg-[#0f1117]">
-          <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
+        <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 p-4 bg-bg">
+          <pre className="text-xs font-mono text-text whitespace-pre-wrap break-all">
             {displayLines.join('\n') || (tab === 'browser' ? 'No browser logs captured.' : '')}
           </pre>
         </div>

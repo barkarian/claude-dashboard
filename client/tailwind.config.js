@@ -5,34 +5,34 @@ export default {
     extend: {
       colors: {
         bg: {
-          DEFAULT: '#0f1117',
-          surface: '#1a1d27',
-          hover: '#22253a',
+          DEFAULT: 'rgb(var(--color-bg) / <alpha-value>)',
+          surface: 'rgb(var(--color-bg-surface) / <alpha-value>)',
+          hover: 'rgb(var(--color-bg-hover) / <alpha-value>)',
         },
         border: {
-          DEFAULT: '#2a2d3a',
-          light: '#363a4d',
+          DEFAULT: 'rgb(var(--color-border) / <alpha-value>)',
+          light: 'rgb(var(--color-border-light) / <alpha-value>)',
         },
         primary: {
-          DEFAULT: '#6366f1',
-          hover: '#818cf8',
-          dark: '#4f46e5',
+          DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
+          hover: 'rgb(var(--color-primary-hover) / <alpha-value>)',
+          dark: 'rgb(var(--color-primary-dark) / <alpha-value>)',
         },
         text: {
-          DEFAULT: '#e2e8f0',
-          muted: '#94a3b8',
-          dim: '#64748b',
+          DEFAULT: 'rgb(var(--color-text) / <alpha-value>)',
+          muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
+          dim: 'rgb(var(--color-text-dim) / <alpha-value>)',
         },
         success: {
-          DEFAULT: '#22c55e',
-          dark: '#16a34a',
+          DEFAULT: 'rgb(var(--color-success) / <alpha-value>)',
+          dark: 'rgb(var(--color-success-dark) / <alpha-value>)',
         },
         danger: {
-          DEFAULT: '#ef4444',
-          dark: '#dc2626',
+          DEFAULT: 'rgb(var(--color-danger) / <alpha-value>)',
+          dark: 'rgb(var(--color-danger-dark) / <alpha-value>)',
         },
         warning: {
-          DEFAULT: '#f59e0b',
+          DEFAULT: 'rgb(var(--color-warning) / <alpha-value>)',
         },
         sidebar: {
           DEFAULT: 'var(--sidebar-background)',

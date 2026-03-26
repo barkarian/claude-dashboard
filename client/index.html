@@ -15,6 +15,13 @@
     <title>Claude Dashboard</title>
   </head>
   <body class="bg-bg text-text">
+    <script>
+      (function() {
+        var p = localStorage.getItem('theme-preference') || 'system';
+        var dark = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (!dark) document.documentElement.classList.add('light');
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

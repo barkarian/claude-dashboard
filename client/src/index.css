@@ -30,6 +30,36 @@
     @apply bg-border-light;
   }
   :root {
+    /* Background */
+    --color-bg: 15 17 23;              /* #0f1117 */
+    --color-bg-surface: 26 29 39;      /* #1a1d27 */
+    --color-bg-hover: 34 37 58;        /* #22253a */
+
+    /* Text */
+    --color-text: 226 232 240;         /* #e2e8f0 */
+    --color-text-muted: 148 163 184;   /* #94a3b8 */
+    --color-text-dim: 100 116 139;     /* #64748b */
+
+    /* Border */
+    --color-border: 42 45 58;          /* #2a2d3a */
+    --color-border-light: 54 58 77;    /* #363a4d */
+
+    /* Primary */
+    --color-primary: 99 102 241;       /* #6366f1 */
+    --color-primary-hover: 129 140 248; /* #818cf8 */
+    --color-primary-dark: 79 70 229;   /* #4f46e5 */
+
+    /* Status */
+    --color-success: 34 197 94;        /* #22c55e */
+    --color-success-dark: 22 163 106;  /* #16a34a */
+    --color-danger: 239 68 68;         /* #ef4444 */
+    --color-danger-dark: 220 38 38;    /* #dc2626 */
+    --color-warning: 245 158 11;       /* #f59e0b */
+
+    /* Code block header */
+    --color-code-header: 40 44 52;     /* #282c34 */
+
+    /* Sidebar */
     --sidebar-background: #1a1d27;
     --sidebar-foreground: #e2e8f0;
     --sidebar-primary: #6366f1;
@@ -40,6 +70,40 @@
     --sidebar-ring: #6366f1;
     --sidebar-width: 16rem;
     --sidebar-width-mobile: 18rem;
+  }
+
+  :root.light {
+    --color-bg: 255 255 255;             /* #ffffff */
+    --color-bg-surface: 248 250 252;     /* #f8fafc */
+    --color-bg-hover: 241 245 249;       /* #f1f5f9 */
+
+    --color-text: 30 41 59;              /* #1e293b */
+    --color-text-muted: 100 116 139;     /* #64748b */
+    --color-text-dim: 148 163 184;       /* #94a3b8 */
+
+    --color-border: 226 232 240;         /* #e2e8f0 */
+    --color-border-light: 203 213 225;   /* #cbd5e1 */
+
+    --color-primary: 99 102 241;         /* unchanged */
+    --color-primary-hover: 79 70 229;    /* #4f46e5 */
+    --color-primary-dark: 67 56 202;     /* #4338ca */
+
+    --color-success: 22 163 106;         /* #16a34a */
+    --color-success-dark: 21 128 61;     /* #15803d */
+    --color-danger: 220 38 38;           /* #dc2626 */
+    --color-danger-dark: 185 28 28;      /* #b91c1c */
+    --color-warning: 217 119 6;          /* #d97706 */
+
+    --color-code-header: 241 245 249;    /* #f1f5f9 */
+
+    --sidebar-background: #f8fafc;
+    --sidebar-foreground: #1e293b;
+    --sidebar-primary: #6366f1;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f1f5f9;
+    --sidebar-accent-foreground: #1e293b;
+    --sidebar-border: #e2e8f0;
+    --sidebar-ring: #6366f1;
   }
 }
 
@@ -52,7 +116,7 @@ body::before {
   left: 0;
   right: 0;
   height: env(safe-area-inset-top, 0px);
-  background: #0f1117;
+  background: rgb(var(--color-bg));
   z-index: 9999;
   pointer-events: none;
 }
@@ -83,7 +147,7 @@ body::before {
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #2a2d3a;
+  background: rgb(var(--color-border));
   border-radius: 3px;
 }
 

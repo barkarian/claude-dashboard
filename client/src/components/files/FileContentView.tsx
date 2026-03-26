@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useSocket } from '../../context/SocketContext.tsx';
+import { useTheme } from '../../context/ThemeContext.tsx';
 
 const SIZE_WARN_BYTES = 2 * 1024 * 1024; // 2 MB
 
@@ -97,6 +99,9 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   }, [socket, projectId, filePath]);
 
   const language = getLanguage(filePath);
+  const { resolved } = useTheme();
+  const syntaxTheme = resolved === 'light' ? oneLight : oneDark;
+  const lineNumColor = resolved === 'light' ? '#94a3b8' : '#4a5568';
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -149,7 +154,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
         ) : (
           <SyntaxHighlighter
             language={language}
-            style={oneDark}
+            style={syntaxTheme}
             showLineNumbers
             customStyle={{
               margin: 0,
@@ -157,7 +162,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
               fontSize: '0.75rem',
               background: 'transparent',
             }}
-            lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1em', color: '#4a5568' }}
+            lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1em', color: lineNumColor }}
           >
             {content || ''}
           </SyntaxHighlighter>

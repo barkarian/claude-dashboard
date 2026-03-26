@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
+import { useTheme } from '../context/ThemeContext.tsx';
 
 // Width in px that the container is stretched to before CSS-scaling back down.
 // Lower = larger apparent font on mobile. 400 → ~2× the previous 800 value.
@@ -42,6 +43,8 @@ export function useClaudeCode(
   const [isThinking, setIsThinking] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { terminalTheme } = useTheme();
 
   // Keep callback ref fresh so the useEffect closure always calls the latest version
   const onTerminalSubmitRef = useRef(onTerminalSubmit);
@@ -166,29 +169,7 @@ export function useClaudeCode(
       cursorStyle: 'block',
       fontSize: 14,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      theme: {
-        background: '#0f1117',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: '#0f1117',
-        selectionBackground: 'rgba(255, 255, 255, 0.25)',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#ffffff',
-      },
+      theme: terminalTheme,
       scrollback: 10000,
       scrollSensitivity: isMobile ? 5 : 1,
     });
@@ -647,7 +628,7 @@ export function useClaudeCode(
       fitAddonRef.current = null;
       searchAddonRef.current = null;
     };
-  }, [containerRef, socket, projectId, chatId]);
+  }, [containerRef, socket, projectId, chatId, terminalTheme]);
 
   const searchFindNext = useCallback((query: string, incremental?: boolean): boolean => {
     return searchAddonRef.current?.findNext(query, {

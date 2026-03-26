@@ -6,9 +6,9 @@ export function Toaster() {
       position="top-right"
       toastOptions={{
         style: {
-          background: "#1a1d27",
-          border: "1px solid #2a2d3a",
-          color: "#e2e8f0",
+          background: "rgb(var(--color-bg-surface))",
+          border: "1px solid rgb(var(--color-border))",
+          color: "rgb(var(--color-text))",
         },
       }}
     />

@@ -18,7 +18,6 @@ import { SearchProvider } from './context/SearchContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import SearchOverlay from './components/ui/SearchOverlay.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
-import { initStatusBar } from './utils/statusBar.ts';
 import { haptics } from './utils/haptics.ts';
 import { useBackButton } from './hooks/useBackButton.ts';
 import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
@@ -225,8 +224,6 @@ function BackButtonHandler() {
 export default function App() {
   const sidebarRef = useRef<SidebarHandle>(null);
   const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
-
-  useEffect(() => { initStatusBar(); }, []);
 
   return (
     <Routes>

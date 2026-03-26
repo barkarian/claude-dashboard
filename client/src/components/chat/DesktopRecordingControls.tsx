@@ -159,8 +159,8 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
                 </div>
               )}
 
-              <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 p-3 bg-[#0f1117]" style={{ minHeight: '120px' }}>
-                <pre className="text-xs font-mono text-[#e2e8f0] whitespace-pre-wrap break-all">
+              <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 p-3 bg-bg" style={{ minHeight: '120px' }}>
+                <pre className="text-xs font-mono text-text whitespace-pre-wrap break-all">
                   {displayLines.join('\n') || (tab === 'browser' ? 'Waiting for browser logs... Refresh your app tab to start capture.' : '')}
                 </pre>
               </div>
