@@ -224,14 +224,18 @@ export function useClaudeCode(
           const maxScroll = scrollHeight - clientHeight;
           if (maxScroll <= 0) return;
           const ratio = scrollTop / maxScroll;
-          const savedRatio = savedTop / maxScroll;
 
           if (wasBottom && ratio < 0.5) {
             // Was at bottom but jumped away — snap back to bottom
             xviewport.scrollTop = scrollHeight;
-          } else if (!wasBottom && savedRatio > 0.2 && ratio < 0.05) {
-            // Was deep in buffer but jumped to top — restore
-            xviewport.scrollTop = savedTop;
+          } else if (!wasBottom) {
+            // User was reading earlier content (not at bottom).
+            // Restore if the viewport drifted significantly — catches jumps
+            // to BOTH top (desktop) and bottom (mobile/xterm cursor-follow).
+            const drift = Math.abs(scrollTop - savedTop);
+            if (drift > clientHeight * 0.25) {
+              xviewport.scrollTop = Math.min(savedTop, maxScroll);
+            }
           }
         });
       });
@@ -450,11 +454,14 @@ export function useClaudeCode(
         }
         const ratio = scrollTop / maxScroll;
 
-        // Erroneous jump: was deep in buffer (>20%), now near top (<2%),
+        // Erroneous jump: was deep in buffer (>20%), now near top (<10%),
         // and buffer is large enough for this to be meaningful.
-        if (wdLastRatio > 0.2 && ratio < 0.02 && maxScroll > clientHeight * 2) {
+        const jumpedToTop = wdLastRatio > 0.2 && ratio < 0.10 && maxScroll > clientHeight * 2;
+        // Erroneous jump: was NOT near bottom (<85%), now snapped to bottom (>98%).
+        const jumpedToBottom = wdLastRatio < 0.85 && ratio > 0.98 && maxScroll > clientHeight * 2;
+        if (jumpedToTop || jumpedToBottom) {
           wdCorrecting = true;
-          const target = wdLastRatio >= 0.95 ? scrollHeight : wdLastTop;
+          const target = (jumpedToTop && wdLastRatio >= 0.95) ? scrollHeight : wdLastTop;
           xviewport.scrollTop = target;
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
