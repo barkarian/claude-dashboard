@@ -23,8 +23,16 @@ const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', '
 // We match any of the non-trivial spinner chars (skip ·, it's too common).
 const CC_SPINNER_CHARS = new Set(['\u2722', '\u2733', '\u2736', '\u273B', '\u273D']); // ✢✳✶✻✽
 
-// Idle timeout: if no spinner char seen for this long, assume idle
-const THINKING_IDLE_MS = 600;
+// Confirmation window: spinner must appear in multiple data chunks within
+// this window before we declare "thinking". Prevents false positives from
+// a single spinner char appearing transiently.
+const THINKING_CONFIRM_MS = 800;
+const THINKING_CONFIRM_HITS = 2; // minimum spinner-containing chunks
+
+// Idle timeout: no spinner char seen for this long → declare idle.
+// Increased from 600ms to reduce flickering when spinner briefly disappears
+// between tool calls or message boundaries.
+const THINKING_IDLE_MS = 2500;
 
 function getChildEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
@@ -44,6 +52,8 @@ interface CCSession {
   exitCode: number | null;
   isThinking: boolean;
   thinkingTimer: ReturnType<typeof setTimeout> | null;
+  thinkingStartTimer: ReturnType<typeof setTimeout> | null;
+  spinnerHits: number;
 }
 
 // Map<chatId, CCSession>
@@ -91,6 +101,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         exitCode: null,
         isThinking: false,
         thinkingTimer: null,
+        thinkingStartTimer: null,
+        spinnerHits: 0,
       };
 
       sessions.set(chatId, session);
@@ -127,31 +139,54 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         }
 
         if (hasSpinner) {
-          // Spinner detected → thinking
-          if (!session.isThinking) {
-            session.isThinking = true;
-            io.to(room).emit('cc:thinking', { chatId, isThinking: true });
-            io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'thinking' });
-          }
-          // Reset idle timer
-          if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
-          session.thinkingTimer = setTimeout(() => {
-            if (session.isThinking) {
-              session.isThinking = false;
-              io.to(room).emit('cc:thinking', { chatId, isThinking: false });
-              io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
-              // Mark chat as unread so the chat list shows a notification badge
-              projectManager.markChatUnread(chatId);
-              io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+          if (session.isThinking) {
+            // Already thinking — just reset the idle countdown
+            if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+            session.thinkingTimer = setTimeout(() => {
+              if (session.isThinking) {
+                session.isThinking = false;
+                io.to(room).emit('cc:thinking', { chatId, isThinking: false });
+                io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
+                projectManager.markChatUnread(chatId);
+                io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+              }
+            }, THINKING_IDLE_MS);
+          } else {
+            // Not yet thinking — accumulate spinner evidence before declaring.
+            // This prevents false positives from transient spinner chars.
+            session.spinnerHits++;
+            if (!session.thinkingStartTimer) {
+              session.thinkingStartTimer = setTimeout(() => {
+                session.thinkingStartTimer = null;
+                if (session.spinnerHits >= THINKING_CONFIRM_HITS) {
+                  session.isThinking = true;
+                  io.to(room).emit('cc:thinking', { chatId, isThinking: true });
+                  io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'thinking' });
+                  // Start the idle countdown
+                  if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+                  session.thinkingTimer = setTimeout(() => {
+                    if (session.isThinking) {
+                      session.isThinking = false;
+                      io.to(room).emit('cc:thinking', { chatId, isThinking: false });
+                      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
+                      projectManager.markChatUnread(chatId);
+                      io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+                    }
+                  }, THINKING_IDLE_MS);
+                }
+                session.spinnerHits = 0;
+              }, THINKING_CONFIRM_MS);
             }
-          }, THINKING_IDLE_MS);
+          }
         }
       });
 
       // Handle process exit
       ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
         if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+        if (session.thinkingStartTimer) clearTimeout(session.thinkingStartTimer);
         session.isThinking = false;
+        session.spinnerHits = 0;
         session.status = 'exited';
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
@@ -246,7 +281,9 @@ function killSession(chatId: string): void {
   if (!session || session.status !== 'running') return;
 
   if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
+  if (session.thinkingStartTimer) clearTimeout(session.thinkingStartTimer);
   session.isThinking = false;
+  session.spinnerHits = 0;
 
   // Unregister from processManager before killing
   processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
