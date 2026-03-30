@@ -21,7 +21,6 @@ interface UseClaudeCodeOptions {
 interface UseClaudeCodeReturn {
   terminal: RefObject<Terminal | null>;
   status: 'disconnected' | 'running' | 'exited' | 'error';
-  isThinking: boolean;
   isSelectionMode: boolean;
   write: (data: string) => void;
   stop: () => void;
@@ -40,7 +39,6 @@ export function useClaudeCode(
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
-  const [isThinking, setIsThinking] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -528,12 +526,6 @@ export function useClaudeCode(
       }
     };
 
-    const handleThinking = ({ chatId: cid, isThinking: thinking }: { chatId: string; isThinking: boolean }) => {
-      if (cid === chatId) {
-        setIsThinking(thinking);
-      }
-    };
-
     const handleExit = ({ chatId: cid, exitCode }: { chatId: string; exitCode: number }) => {
       if (cid === chatId) {
         setStatus('exited');
@@ -550,7 +542,6 @@ export function useClaudeCode(
 
     socket.on('cc:output', handleOutput);
     socket.on('cc:status', handleStatus);
-    socket.on('cc:thinking', handleThinking);
     socket.on('cc:exit', handleExit);
     socket.on('cc:error', handleError);
 
@@ -624,7 +615,6 @@ export function useClaudeCode(
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
       socket.off('cc:status', handleStatus);
-      socket.off('cc:thinking', handleThinking);
       socket.off('cc:exit', handleExit);
       socket.off('cc:error', handleError);
       socket.io.off('reconnect', handleReconnect);
@@ -668,5 +658,5 @@ export function useClaudeCode(
     searchAddonRef.current?.clearDecorations();
   }, []);
 
-  return { terminal: termRef, status, isThinking, isSelectionMode, write, stop, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear };
+  return { terminal: termRef, status, isSelectionMode, write, stop, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear };
 }

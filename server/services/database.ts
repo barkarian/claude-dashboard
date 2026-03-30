@@ -151,6 +151,15 @@ try {
   // Column already exists — ignore
 }
 
+// Add unified session_id column to chats (replaces cc_conversation_id + sdk_session_id)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN session_id TEXT`);
+  // Backfill from existing columns
+  db.exec(`UPDATE chats SET session_id = COALESCE(cc_conversation_id, sdk_session_id) WHERE session_id IS NULL`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import readline from 'readline';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
@@ -472,6 +474,64 @@ router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: st
   } catch (err) {
     console.error('Error deleting chat:', err);
     res.status(500).json({ error: 'Failed to delete chat' });
+  }
+});
+
+// --- Prompt history (previous message picker) ---
+
+router.get('/:id/prompt-history', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const project = projectManager.getProject(req.params.id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const historyPath = path.join(os.homedir(), '.claude', 'history.jsonl');
+
+    if (!fs.existsSync(historyPath)) {
+      return res.json({ entries: [] });
+    }
+
+    // Read the full history and filter by project path
+    const entries: Array<{ display: string; timestamp: number; sessionId: string }> = [];
+    const seen = new Set<string>();
+
+    const fileStream = fs.createReadStream(historyPath);
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    const allEntries: Array<{ display: string; timestamp: number; sessionId: string }> = [];
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.project === project.path && entry.display) {
+          allEntries.push({
+            display: entry.display.trim(),
+            timestamp: entry.timestamp || 0,
+            sessionId: entry.sessionId || '',
+          });
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    // Sort newest-first, deduplicate by display text
+    allEntries.sort((a, b) => b.timestamp - a.timestamp);
+    for (const entry of allEntries) {
+      if (seen.has(entry.display)) continue;
+      seen.add(entry.display);
+      entries.push(entry);
+    }
+
+    // Paginate
+    const page = entries.slice(offset, offset + limit);
+    res.json({ entries: page, total: entries.length });
+  } catch (err) {
+    console.error('Error reading prompt history:', err);
+    res.status(500).json({ error: 'Failed to read prompt history' });
   }
 });
 

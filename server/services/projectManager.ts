@@ -284,8 +284,10 @@ function listChats(projectId: string): Chat[] {
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
+    sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
+    unread: !!r.unread,
   }));
 }
 
@@ -322,6 +324,7 @@ function mapRowToChat(r: any): Chat {
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
     ccConversationId: r.cc_conversation_id || null,
+    sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
     unread: !!r.unread,
@@ -342,6 +345,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     sdkSessionId: null,
     adapter: chatAdapter,
     ccConversationId: null,
+    sessionId: null,
     draftMessage: null,
     stashedInput: null,
     unread: false,
@@ -354,13 +358,14 @@ function getChat(chatId: string): Chat | null {
   return mapRowToChat(row);
 }
 
-function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null; draftMessage?: string | null }): Chat | null {
+function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null; sessionId?: string | null; draftMessage?: string | null }): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
   if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
   if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
   if (updates.ccConversationId !== undefined) db.prepare('UPDATE chats SET cc_conversation_id = ? WHERE id = ?').run(updates.ccConversationId, chatId);
+  if (updates.sessionId !== undefined) db.prepare('UPDATE chats SET session_id = ? WHERE id = ?').run(updates.sessionId, chatId);
   if (updates.draftMessage !== undefined) db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(updates.draftMessage, chatId);
 
   return getChat(chatId);

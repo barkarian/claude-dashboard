@@ -8,6 +8,7 @@ import ScriptPickerPanel from './ScriptPickerPanel.tsx';
 import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
+import PreviousMessagePicker from './PreviousMessagePicker.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 
 interface CCPromptInputProps {
@@ -41,6 +42,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
   const [showScriptPicker, setShowScriptPicker] = useState(false);
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
 
   // Track whether the current value came from a suggestion (not user typing)
@@ -310,6 +312,18 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
             </PopoverContent>
           </Popover>
 
+          <button
+            type="button"
+            onClick={() => setShowHistory(true)}
+            disabled={disabled}
+            className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
+            title="Previous messages"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+
           {native && (
             <button
               type="button"
@@ -446,6 +460,18 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
           onClose={() => setPreviewRecordingId(null)}
         />
       )}
+
+      {/* Previous message picker */}
+      <PreviousMessagePicker
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        projectId={projectId}
+        onSelect={(text) => {
+          setValue(text);
+          onDraftChange?.(text);
+          userInteractedRef.current = true;
+        }}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import ScriptPickerPanel from './ScriptPickerPanel.tsx';
 import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
+import PreviousMessagePicker from './PreviousMessagePicker.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { haptics } from '../../utils/haptics.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
@@ -29,6 +30,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const [showScriptPicker, setShowScriptPicker] = useState(false);
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingAutoSendRef = useRef<string | null>(null);
 
@@ -187,6 +189,18 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
       />
 
       <div className="flex items-end gap-2">
+        <button
+          onClick={() => setShowHistory(true)}
+          disabled={disabled}
+          className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-50"
+          aria-label="Previous messages"
+          title="Previous messages"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </button>
+
         <TerminalRecordButton
           onOpenScriptPicker={() => setShowScriptPicker(true)}
           onOpenLivePreview={() => setShowLivePreview(true)}
@@ -239,6 +253,14 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
           onClose={() => setPreviewRecordingId(null)}
         />
       )}
+
+      {/* Previous message picker */}
+      <PreviousMessagePicker
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        projectId={projectId}
+        onSelect={(text) => { setValue(text); onDraftChange?.(text); }}
+      />
     </div>
   );
 }

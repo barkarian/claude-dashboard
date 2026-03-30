@@ -3,7 +3,7 @@ import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 're
 import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
 import { useSocket } from '../context/SocketContext.tsx';
-import { useSessionStatuses } from '../hooks/useSessionStatuses.ts';
+import { useSessionStatuses, useSessionStates } from '../hooks/useSessionStatuses.ts';
 import { useProcessStatus } from '../hooks/useProcessStatus.ts';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible.ts';
 import { Toaster } from '../components/ui/sonner.tsx';
@@ -23,16 +23,13 @@ import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
-  const { chatId } = useParams();
-  const location = useLocation();
   const { project } = useProject();
-  const chat = project?.chats?.find(c => c.id === chatId);
 
-  // Use nav state adapter as fallback when project data is stale (just-created chat)
-  const navAdapter = (location.state as { adapter?: string } | null)?.adapter;
-  const adapter = chat?.adapter || navAdapter;
+  // Route by current project AI mode, not by which mode created the chat.
+  // This allows any chat to be opened in either CC or SDK mode.
+  const aiMode = project?.defaultAdapter || 'claude-agent-sdk';
 
-  if (adapter === 'claude-code') {
+  if (aiMode === 'claude-code') {
     return <ClaudeCodeChatView projectId={projectId} />;
   }
   return <SDKChatView projectId={projectId} />;
@@ -45,6 +42,7 @@ export default function ProjectDashboardPage() {
   const { project, loading, loadProject, refreshProject, activeChatStatus } = useProject();
   const { socket } = useSocket();
   const sessionStatuses = useSessionStatuses(id);
+  const sessionStates = useSessionStates(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
   const [diffCount, setDiffCount] = useState(0);
   const { runningCount, processesWithPorts } = useProcessStatus(id);
@@ -87,8 +85,21 @@ export default function ProjectDashboardPage() {
     }
   }, [activeChatId, id]);
 
-  // Compute status display from activeChatStatus context
+  // Compute status display — prefer unified JSONL state, fall back to SDK activeChatStatus
+  const activeSessionState = activeChatId ? sessionStates[activeChatId] : undefined;
+
   const statusLabel = (() => {
+    if (activeSessionState) {
+      switch (activeSessionState.status) {
+        case 'working': return 'thinking';
+        case 'question-awaiting': return 'question';
+        case 'questions-awaiting': return 'questions';
+        case 'plan-awaiting': return 'plan ready';
+        case 'permission-awaiting': return activeSessionState.pendingTool?.toolName || 'permission';
+        case 'interrupted': return 'interrupted';
+        default: return activeSessionState.status;
+      }
+    }
     if (!activeChatStatus) return undefined;
     switch (activeChatStatus) {
       case 'streaming': return 'thinking';
@@ -99,6 +110,19 @@ export default function ProjectDashboardPage() {
   })();
 
   const statusDotClass = (() => {
+    if (activeSessionState) {
+      switch (activeSessionState.status) {
+        case 'idle': return 'bg-success';
+        case 'working': return 'bg-warning animate-pulse';
+        case 'question-awaiting':
+        case 'questions-awaiting': return 'bg-primary animate-pulse';
+        case 'plan-awaiting': return 'bg-[#a855f7] animate-pulse';
+        case 'permission-awaiting': return 'bg-warning animate-pulse';
+        case 'starting': return 'bg-primary animate-pulse';
+        case 'interrupted': return 'bg-warning';
+        default: return 'bg-text-dim';
+      }
+    }
     if (!activeChatStatus) return undefined;
     switch (activeChatStatus) {
       case 'idle': return 'bg-success';
@@ -256,7 +280,7 @@ export default function ProjectDashboardPage() {
           <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id!} />} />
           <Route path="chats" element={
             <div className="flex-1 overflow-y-auto">
-              <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} />
+              <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} sessionStates={sessionStates} />
             </div>
           } />
           <Route path="chats/:chatId" element={<ChatViewRouter projectId={id!} />} />

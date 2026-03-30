@@ -18,7 +18,7 @@ import ContextMenu, { type ContextMenuItem } from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
-import api from '../../utils/api.ts';
+import type { SessionStateContext } from '../../../../shared/types/session.ts';
 
 const PAGE_SIZE = 20;
 
@@ -35,13 +35,86 @@ function formatChatTime(dateStr: string): string {
   return `${month}/${day}/${String(d.getFullYear()).slice(-2)} ${time}`;
 }
 
+/** Render a rich status badge from SessionStateContext */
+function StatusBadge({ state }: { state: SessionStateContext }) {
+  let text: string;
+  let dotClass: string;
+
+  switch (state.status) {
+    case 'working':
+      text = 'Thinking...';
+      dotClass = 'bg-success animate-pulse';
+      break;
+    case 'question-awaiting':
+      text = state.questions?.[0]?.question?.slice(0, 30) || 'Question';
+      dotClass = 'bg-primary';
+      break;
+    case 'questions-awaiting':
+      text = `${state.questions?.length || 0} questions`;
+      dotClass = 'bg-primary';
+      break;
+    case 'plan-awaiting':
+      text = 'Plan ready';
+      dotClass = 'bg-[#a855f7]';
+      break;
+    case 'permission-awaiting':
+      text = `Needs: ${state.pendingTool?.toolName || 'Approval'}`;
+      dotClass = 'bg-warning';
+      break;
+    case 'starting':
+      text = 'Starting...';
+      dotClass = 'bg-text-dim';
+      break;
+    case 'idle':
+      text = 'Active';
+      dotClass = 'bg-success';
+      break;
+    case 'interrupted':
+      text = 'Interrupted';
+      dotClass = 'bg-warning';
+      break;
+    default:
+      return null;
+  }
+
+  return (
+    <>
+      <span className="text-border">&middot;</span>
+      <span className="flex items-center gap-1">
+        <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
+        {text}
+      </span>
+    </>
+  );
+}
+
+/** Fallback status badge from legacy sessionStatuses */
+function LegacyStatusBadge({ status }: { status: string }) {
+  return (
+    <>
+      <span className="text-border">&middot;</span>
+      <span className="flex items-center gap-1">
+        <span className="w-1.5 h-1.5 rounded-full bg-success" />
+        {status === 'thinking'
+          ? 'Thinking...'
+          : status === 'waiting-input'
+            ? 'Waiting input'
+            : status === 'starting'
+              ? 'Starting...'
+              : 'Active'}
+      </span>
+    </>
+  );
+}
+
 interface ChatListProps {
   projectId: string;
   project: Project;
   sessionStatuses?: Record<string, string>;
+  sessionStates?: Record<string, SessionStateContext>;
 }
 
-export default function ChatList({ projectId, project, sessionStatuses = {} }: ChatListProps) {
+export default function ChatList({ projectId, project, sessionStatuses = {}, sessionStates = {} }: ChatListProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const { refreshProject } = useProject();
@@ -320,18 +393,11 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
                 <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
-                {sessionStatuses[chat.id] && (
-                  <>
-                    <span className="text-border">&middot;</span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-success" />
-                      {sessionStatuses[chat.id] === 'thinking' ? 'Thinking...'
-                        : sessionStatuses[chat.id] === 'waiting-input' ? 'Waiting input'
-                        : sessionStatuses[chat.id] === 'starting' ? 'Starting...'
-                        : 'Active'}
-                    </span>
-                  </>
-                )}
+                {sessionStates[chat.id]
+                  ? <StatusBadge state={sessionStates[chat.id]} />
+                  : sessionStatuses[chat.id]
+                    ? <LegacyStatusBadge status={sessionStatuses[chat.id]} />
+                    : null}
                 {chat.draftMessage && (
                   <>
                     <span className="text-border">&middot;</span>
@@ -392,21 +458,11 @@ export default function ChatList({ projectId, project, sessionStatuses = {} }: C
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
                     <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
-                    {sessionStatuses[chat.id] && (
-                      <>
-                        <span className="text-border">&middot;</span>
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-success" />
-                          {sessionStatuses[chat.id] === 'thinking'
-                            ? 'Thinking...'
-                            : sessionStatuses[chat.id] === 'waiting-input'
-                              ? 'Waiting input'
-                              : sessionStatuses[chat.id] === 'starting'
-                                ? 'Starting...'
-                                : 'Active'}
-                        </span>
-                      </>
-                    )}
+                    {sessionStates[chat.id]
+                      ? <StatusBadge state={sessionStates[chat.id]} />
+                      : sessionStatuses[chat.id]
+                        ? <LegacyStatusBadge status={sessionStatuses[chat.id]} />
+                        : null}
                     {chat.draftMessage && (
                       <>
                         <span className="text-border">&middot;</span>

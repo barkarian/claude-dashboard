@@ -3,6 +3,10 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
+import jsonlWatcher from '../services/jsonlWatcher.ts';
+import { sendPushEvent } from '../services/tunnelClient.ts';
+import type { SessionStateContext } from '../../shared/types/session.ts';
+import { mapToLegacyStatus } from '../../shared/types/session.ts';
 import type {
   CCStartPayload,
   CCInputPayload,
@@ -16,23 +20,6 @@ const MAX_BUFFER_LINES = 5000;
 
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
-
-// Claude Code CLI spinner characters (from Gc_ in the CLI source).
-// The CLI animates through these when thinking/processing:
-//   · → ✢ → ✳ → ✶ → ✻ → ✽ → (reverse)
-// We match any of the non-trivial spinner chars (skip ·, it's too common).
-const CC_SPINNER_CHARS = new Set(['\u2722', '\u2733', '\u2736', '\u273B', '\u273D']); // ✢✳✶✻✽
-
-// Confirmation window: spinner must appear in multiple data chunks within
-// this window before we declare "thinking". Prevents false positives from
-// a single spinner char appearing transiently.
-const THINKING_CONFIRM_MS = 800;
-const THINKING_CONFIRM_HITS = 2; // minimum spinner-containing chunks
-
-// Idle timeout: no spinner char seen for this long → declare idle.
-// Increased from 600ms to reduce flickering when spinner briefly disappears
-// between tool calls or message boundaries.
-const THINKING_IDLE_MS = 2500;
 
 function getChildEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
@@ -50,10 +37,8 @@ interface CCSession {
   chatId: string;
   projectId: string;
   exitCode: number | null;
-  isThinking: boolean;
-  thinkingTimer: ReturnType<typeof setTimeout> | null;
-  thinkingStartTimer: ReturnType<typeof setTimeout> | null;
-  spinnerHits: number;
+  jsonlSessionId: string | null;
+  jsonlStateHandler: ((...args: any[]) => void) | null;
 }
 
 // Map<chatId, CCSession>
@@ -80,7 +65,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         // Generate a new session ID so we can resume later
         sessionId = randomUUID();
         args.push('--session-id', sessionId);
-        projectManager.updateChat(chatId, { ccConversationId: sessionId });
+        projectManager.updateChat(chatId, { ccConversationId: sessionId, sessionId });
       }
 
       const ptyProcess = pty.spawn('claude', args, {
@@ -99,10 +84,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         chatId,
         projectId,
         exitCode: null,
-        isThinking: false,
-        thinkingTimer: null,
-        thinkingStartTimer: null,
-        spinnerHits: 0,
+        jsonlSessionId: null,
+        jsonlStateHandler: null,
       };
 
       sessions.set(chatId, session);
@@ -121,78 +104,62 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
       const room = `cc:${chatId}`;
       socket.join(room);
 
-      // Stream output to clients + detect thinking state from spinner chars
+      // Start JSONL watcher for this session — sole source of status detection
+      if (sessionId) {
+        jsonlWatcher.watchSession(sessionId, projectPath);
+        session.jsonlSessionId = sessionId;
+
+        // Subscribe to state changes from JSONL watcher
+        const stateHandler = (sid: string, newState: SessionStateContext, prevState: SessionStateContext) => {
+          if (sid !== sessionId) return;
+          // Emit the unified state event
+          io.to(`project:${projectId}`).emit('claude:session-state', { chatId, state: newState });
+          // Also emit legacy status for backward compat
+          io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: mapToLegacyStatus(newState.status) });
+
+          // Push notifications for CC chats
+          if (newState.status === 'question-awaiting' && newState.questions?.[0]) {
+            const preview = `Claude asks: ${newState.questions[0].question.slice(0, 80)}`;
+            sendPushEvent('chat-question', { preview, chatId });
+          } else if (newState.status === 'questions-awaiting' && newState.questions) {
+            sendPushEvent('chat-question', { preview: `Claude has ${newState.questions.length} questions`, chatId });
+          } else if (newState.status === 'plan-awaiting') {
+            sendPushEvent('chat-plan', { preview: 'Plan ready for review', chatId });
+          } else if (newState.status === 'permission-awaiting' && newState.pendingTool) {
+            sendPushEvent('chat-permission', { preview: `Approve: ${newState.pendingTool.toolName}`, chatId });
+          } else if (newState.status === 'idle' && (prevState.status === 'working' || prevState.status === 'starting')) {
+            const preview = newState.lastTextPreview || 'Response ready';
+            sendPushEvent('chat-reply', { preview, chatId });
+            // Mark unread when agent transitions to idle
+            projectManager.markChatUnread(chatId);
+            io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+          }
+        };
+
+        jsonlWatcher.on('state-change', stateHandler);
+        session.jsonlStateHandler = stateHandler;
+      }
+
+      // Stream PTY output to clients (no spinner analysis — JSONL watcher handles status)
       ptyProcess.onData((data: string) => {
         buffer.push(data);
         if (buffer.length > MAX_BUFFER_LINES) {
           buffer.splice(0, buffer.length - MAX_BUFFER_LINES);
         }
         io.to(room).emit('cc:output', { chatId, data });
-
-        // Check if data contains any Claude Code spinner characters
-        let hasSpinner = false;
-        for (const ch of data) {
-          if (CC_SPINNER_CHARS.has(ch)) {
-            hasSpinner = true;
-            break;
-          }
-        }
-
-        if (hasSpinner) {
-          if (session.isThinking) {
-            // Already thinking — just reset the idle countdown
-            if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
-            session.thinkingTimer = setTimeout(() => {
-              if (session.isThinking) {
-                session.isThinking = false;
-                io.to(room).emit('cc:thinking', { chatId, isThinking: false });
-                io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
-                projectManager.markChatUnread(chatId);
-                io.to(`project:${projectId}`).emit('chat:unread', { chatId });
-              }
-            }, THINKING_IDLE_MS);
-          } else {
-            // Not yet thinking — accumulate spinner evidence before declaring.
-            // This prevents false positives from transient spinner chars.
-            session.spinnerHits++;
-            if (!session.thinkingStartTimer) {
-              session.thinkingStartTimer = setTimeout(() => {
-                session.thinkingStartTimer = null;
-                if (session.spinnerHits >= THINKING_CONFIRM_HITS) {
-                  session.isThinking = true;
-                  io.to(room).emit('cc:thinking', { chatId, isThinking: true });
-                  io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'thinking' });
-                  // Start the idle countdown
-                  if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
-                  session.thinkingTimer = setTimeout(() => {
-                    if (session.isThinking) {
-                      session.isThinking = false;
-                      io.to(room).emit('cc:thinking', { chatId, isThinking: false });
-                      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
-                      projectManager.markChatUnread(chatId);
-                      io.to(`project:${projectId}`).emit('chat:unread', { chatId });
-                    }
-                  }, THINKING_IDLE_MS);
-                }
-                session.spinnerHits = 0;
-              }, THINKING_CONFIRM_MS);
-            }
-          }
-        }
       });
 
       // Handle process exit
       ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
-        if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
-        if (session.thinkingStartTimer) clearTimeout(session.thinkingStartTimer);
-        session.isThinking = false;
-        session.spinnerHits = 0;
         session.status = 'exited';
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
         io.to(room).emit('cc:status', { chatId, status: 'exited' });
-        // Notify project room so chat list shows updated status
         io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'exited' });
+        io.to(`project:${projectId}`).emit('claude:session-state', {
+          chatId,
+          state: { status: 'exited' } as SessionStateContext,
+        });
       });
 
       // Emit running status to chat room and project room
@@ -255,8 +222,6 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
       }
       // Send current status
       socket.emit('cc:status', { chatId, status: session.status });
-      // Send current thinking state
-      socket.emit('cc:thinking', { chatId, isThinking: session.isThinking });
     }
   });
 
@@ -280,10 +245,13 @@ function killSession(chatId: string): void {
   const session = sessions.get(chatId);
   if (!session || session.status !== 'running') return;
 
-  if (session.thinkingTimer) clearTimeout(session.thinkingTimer);
-  if (session.thinkingStartTimer) clearTimeout(session.thinkingStartTimer);
-  session.isThinking = false;
-  session.spinnerHits = 0;
+  // Clean up JSONL watcher
+  if (session.jsonlSessionId) {
+    jsonlWatcher.unwatchSession(session.jsonlSessionId);
+  }
+  if (session.jsonlStateHandler) {
+    jsonlWatcher.off('state-change', session.jsonlStateHandler);
+  }
 
   // Unregister from processManager before killing
   processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
@@ -318,7 +286,22 @@ export function getProjectCCSessions(projectId: string): Record<string, string> 
   const result: Record<string, string> = {};
   for (const [chatId, session] of sessions) {
     if (session.projectId === projectId && session.status === 'running') {
-      result[chatId] = session.isThinking ? 'thinking' : 'idle';
+      const jsonlState = session.jsonlSessionId ? jsonlWatcher.getState(session.jsonlSessionId) : null;
+      result[chatId] = jsonlState ? mapToLegacyStatus(jsonlState.status) : 'idle';
+    }
+  }
+  return result;
+}
+
+/** Return active CC session JSONL states for a project (unified states) */
+export function getProjectCCSessionStates(projectId: string): Record<string, SessionStateContext> {
+  const result: Record<string, SessionStateContext> = {};
+  for (const [chatId, session] of sessions) {
+    if (session.projectId === projectId && session.status === 'running') {
+      const state = session.jsonlSessionId ? jsonlWatcher.getState(session.jsonlSessionId) : null;
+      if (state) {
+        result[chatId] = state;
+      }
     }
   }
   return result;

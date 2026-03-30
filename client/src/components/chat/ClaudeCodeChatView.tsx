@@ -33,9 +33,9 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
 
-  // Find chat to get conversationId for resume
+  // Find chat to get sessionId for resume (unified, falls back to legacy ccConversationId)
   const chat = project?.chats?.find(c => c.id === chatId);
-  const conversationId = chat?.ccConversationId;
+  const conversationId = chat?.sessionId || chat?.ccConversationId;
   const { updateDraft } = useDraft(projectId, chatId, setProject);
 
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
@@ -99,7 +99,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     }
   }, [chatId, projectId]);
 
-  const { terminal, status, isThinking, isSelectionMode, write, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
+  const { terminal, status, isSelectionMode, write, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -186,9 +186,10 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   }, [searchHandler, registerHandler, unregisterHandler]);
 
   // Publish status to ProjectContext for the header badge
+  // JSONL watcher now handles detailed status; CC just reports running/exited
   useEffect(() => {
     if (status === 'running') {
-      setActiveChatStatus(isThinking ? 'streaming' : 'idle');
+      setActiveChatStatus('idle');
     } else if (status === 'exited') {
       setActiveChatStatus('exited');
     } else {
@@ -197,7 +198,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     return () => {
       setActiveChatStatus(null);
     };
-  }, [status, isThinking, setActiveChatStatus]);
+  }, [status, setActiveChatStatus]);
 
   const handleSend = useCallback((data: string) => {
     const userText = data.replace(/\r$/, '');
