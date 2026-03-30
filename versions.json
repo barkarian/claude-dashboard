@@ -1,0 +1,31 @@
+{
+  "desktop": {
+    "version": "0.1.0",
+    "releaseNotes": "Initial release",
+    "releasedAt": "2026-03-26T00:00:00Z",
+    "downloads": {
+      "macos_arm64": "https://github.com/claw-dev/desktop/releases/latest/download/Claw-Dev_aarch64.dmg",
+      "macos_x64": "https://github.com/claw-dev/desktop/releases/latest/download/Claw-Dev_x64.dmg",
+      "windows_x64": "https://github.com/claw-dev/desktop/releases/latest/download/Claw-Dev_x64_en-US.msi"
+    }
+  },
+  "ios": {
+    "version": "1.0.0",
+    "minimumVersion": "1.0.0",
+    "releaseNotes": "Initial release",
+    "releasedAt": "2026-03-26T00:00:00Z",
+    "storeUrl": ""
+  },
+  "android": {
+    "version": "1.0.0",
+    "minimumVersion": "1.0.0",
+    "releaseNotes": "Initial release",
+    "releasedAt": "2026-03-26T00:00:00Z",
+    "storeUrl": ""
+  },
+  "ota": {
+    "version": "1.0.0",
+    "bundleUrl": "",
+    "hash": ""
+  }
+}

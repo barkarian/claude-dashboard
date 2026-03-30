@@ -18,6 +18,7 @@ import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
 import devicesRoutes from './routes/devices.ts';
 import filesystemRoutes from './routes/filesystem.ts';
+import updatesRoutes from './routes/updates.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import { killAllCCSessions } from './sockets/claude-code.ts';
 import processManager from './services/processManager.ts';
@@ -138,6 +139,11 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(sessionMiddleware);
+
+// Public routes — no auth/CSRF required (called by apps before login)
+app.use(`/${env}/api`, updatesRoutes);
+app.use('/api', updatesRoutes);
+
 app.use(csrfProtection);
 app.use(authMiddleware);
 

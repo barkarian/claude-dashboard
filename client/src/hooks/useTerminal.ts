@@ -74,6 +74,8 @@ export function useTerminal(
     // so parentElement gives us the correct available dimensions.
     const scaleTarget = wrapperRef?.current || containerRef.current!.parentElement;
     let currentScale = 1;
+    let lastAppliedW = 0;
+    let lastAppliedH = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     function applyMobileScale() {
       const container = containerRef.current;
@@ -86,6 +88,12 @@ export function useTerminal(
         retryTimer = setTimeout(applyMobileScale, 50);
         return;
       }
+
+      // Skip if dimensions haven't actually changed — prevents layout thrash
+      if (parentW === lastAppliedW && parentH === lastAppliedH) return;
+      lastAppliedW = parentW;
+      lastAppliedH = parentH;
+
       const scale = Math.min(1, parentW / WIDE_WIDTH);
       currentScale = scale;
 
@@ -208,7 +216,17 @@ export function useTerminal(
         document.addEventListener('touchcancel', onDragEnd, { passive: true });
 
         viewport.addEventListener('scroll', updateScrollbar, { passive: true });
-        const contentObserver = new MutationObserver(updateScrollbar);
+        // Throttle mutation-driven scrollbar updates via rAF to avoid per-write layout thrash
+        // (Claude Code rewrites the status line many times/sec during thinking transitions)
+        let scrollbarRafId = 0;
+        function throttledUpdateScrollbar() {
+          if (scrollbarRafId) return;
+          scrollbarRafId = requestAnimationFrame(() => {
+            scrollbarRafId = 0;
+            updateScrollbar();
+          });
+        }
+        const contentObserver = new MutationObserver(throttledUpdateScrollbar);
         contentObserver.observe(viewport, { childList: true, subtree: true, characterData: true });
 
         touchCleanup = () => {
@@ -261,21 +279,25 @@ export function useTerminal(
       });
     }
 
-    // Handle resize
+    // Handle resize — debounce to prevent fit → layout → resize → fit loops
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      try {
-        fitWhenReady();
-        if (!readOnly) {
-          socket.emit('terminal:resize', {
-            projectId,
-            scriptId,
-            cols: term.cols,
-            rows: term.rows,
-          });
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        try {
+          fitWhenReady();
+          if (!readOnly) {
+            socket.emit('terminal:resize', {
+              projectId,
+              scriptId,
+              cols: term.cols,
+              rows: term.rows,
+            });
+          }
+        } catch {
+          // ignore resize errors
         }
-      } catch {
-        // ignore resize errors
-      }
+      }, 100);
     });
 
     resizeObserver.observe(scaleTarget || containerRef.current);
@@ -292,6 +314,7 @@ export function useTerminal(
     return () => {
       if (retryTimer) clearTimeout(retryTimer);
       if (lateTimer) clearTimeout(lateTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
       touchCleanup?.();
       socket.off('terminal:output', handleOutput);
       socket.off('terminal:status', handleStatus);
