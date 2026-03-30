@@ -535,6 +535,38 @@ export function readSessionHistory(sessionId: string, projectPath: string): SDKC
   return messages;
 }
 
+/**
+ * Read the first user prompt from a session's JSONL file.
+ * Used for auto-titling CC chats.
+ */
+export function readFirstUserPrompt(sessionId: string, projectPath: string): string | null {
+  const filePath = getJsonlPath(sessionId, projectPath);
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    const entry = parseLine(line);
+    if (!entry || entry.type !== 'user' || !entry.message) continue;
+
+    const content = entry.message.content;
+    if (typeof content === 'string') {
+      if (content.includes('[Request interrupted by user]')) continue;
+      return content.trim();
+    }
+    if (Array.isArray(content)) {
+      const textBlock = content.find((b: any) => b.type === 'text' && b.text && !b.text.includes('[Request interrupted'));
+      if (textBlock) return textBlock.text.trim();
+    }
+  }
+  return null;
+}
+
 // Singleton instance
 const jsonlWatcher = new JsonlWatcher();
 export default jsonlWatcher;

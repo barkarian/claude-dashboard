@@ -3,7 +3,7 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
-import jsonlWatcher from '../services/jsonlWatcher.ts';
+import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 import { mapToLegacyStatus } from '../../shared/types/session.ts';
@@ -133,6 +133,17 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
             // Mark unread when agent transitions to idle
             projectManager.markChatUnread(chatId);
             io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+
+            // Auto-title: rename "New Chat" on first completion
+            const chat = projectManager.getChat(chatId);
+            if (chat && chat.label === 'New Chat' && sessionId) {
+              const firstPrompt = readFirstUserPrompt(sessionId, projectPath);
+              if (firstPrompt) {
+                const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
+                projectManager.updateChat(chatId, { label: newLabel });
+                io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+              }
+            }
           }
         };
 

@@ -19,7 +19,6 @@ interface CCPromptInputProps {
   onArrow: (data: string) => void;
   onInterrupt: () => void;
   autoFocus?: boolean;
-  promptSuggestion?: { text: string; id: number } | null;
   initialDraft?: string;
   onDraftChange?: (text: string) => void;
 }
@@ -33,7 +32,7 @@ const ESC = '\x1b';
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';
 
-export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, promptSuggestion, initialDraft, onDraftChange }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
   const [value, setValue] = useState(initialDraft || '');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -45,31 +44,10 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
   const [showHistory, setShowHistory] = useState(false);
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
 
-  // Track whether the current value came from a suggestion (not user typing)
-  const isSuggestionFillRef = useRef(false);
-  const userInteractedRef = useRef(false);
-
-  // Sync prompt suggestion from terminal history (arrow up/down) into textarea
-  const lastSuggestionIdRef = useRef(-1);
-  useEffect(() => {
-    if (promptSuggestion && promptSuggestion.id !== lastSuggestionIdRef.current) {
-      lastSuggestionIdRef.current = promptSuggestion.id;
-      isSuggestionFillRef.current = true;
-      userInteractedRef.current = false;
-      setValue(promptSuggestion.text);
-    }
-  }, [promptSuggestion]);
-
   useEffect(() => {
     if (textareaRef.current) {
-      if (isSuggestionFillRef.current && !userInteractedRef.current) {
-        // Suggestion fill: keep min height, don't auto-expand
-        textareaRef.current.style.height = '42px';
-        isSuggestionFillRef.current = false;
-      } else {
-        textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
-      }
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [value]);
 
@@ -136,7 +114,6 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
     onSend(text + '\r');
     setValue('');
     onDraftChange?.('');
-    userInteractedRef.current = false;
   }
 
   function btn(seq: string) {
@@ -299,7 +276,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
                   haptics.impactLight();
                   setValue('/btw ');
                   onDraftChange?.('/btw ');
-                  userInteractedRef.current = true;
+
                   // Focus textarea so user can type after /btw
                   setTimeout(() => textareaRef.current?.focus(), 50);
                 }}
@@ -398,13 +375,10 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
             ref={textareaRef}
             value={value}
             onChange={(e) => {
-              userInteractedRef.current = true;
-              isSuggestionFillRef.current = false;
               setValue(e.target.value);
               onDraftChange?.(e.target.value);
             }}
             onFocus={() => {
-              userInteractedRef.current = true;
               // Expand to fit content now that user is interacting
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
@@ -469,7 +443,6 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
         onSelect={(text) => {
           setValue(text);
           onDraftChange?.(text);
-          userInteractedRef.current = true;
         }}
       />
     </div>

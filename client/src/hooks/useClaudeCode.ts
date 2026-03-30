@@ -15,7 +15,6 @@ interface UseClaudeCodeOptions {
   projectId: string;
   chatId: string;
   conversationId?: string | null;
-  onTerminalSubmit?: (text: string) => void;
 }
 
 interface UseClaudeCodeReturn {
@@ -24,8 +23,6 @@ interface UseClaudeCodeReturn {
   isSelectionMode: boolean;
   write: (data: string) => void;
   stop: () => void;
-  getPromptLine: () => string;
-  onNextOutput: (cb: () => void) => void;
   searchFindNext: (query: string, incremental?: boolean) => boolean;
   searchFindPrevious: (query: string) => boolean;
   searchClear: () => void;
@@ -33,7 +30,7 @@ interface UseClaudeCodeReturn {
 
 export function useClaudeCode(
   containerRef: RefObject<HTMLElement | null>,
-  { socket, projectId, chatId, conversationId, onTerminalSubmit }: UseClaudeCodeOptions
+  { socket, projectId, chatId, conversationId }: UseClaudeCodeOptions
 ): UseClaudeCodeReturn {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -43,10 +40,6 @@ export function useClaudeCode(
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { terminalTheme } = useTheme();
-
-  // Keep callback ref fresh so the useEffect closure always calls the latest version
-  const onTerminalSubmitRef = useRef(onTerminalSubmit);
-  onTerminalSubmitRef.current = onTerminalSubmit;
 
   const write = useCallback((data: string) => {
     if (socket) {
@@ -59,80 +52,6 @@ export function useClaudeCode(
       socket.emit('cc:stop', { chatId });
     }
   }, [socket, chatId]);
-
-  // Callback mechanism: wait for actual terminal output before reading the buffer.
-  // Avoids stale reads caused by fixed timeouts that fire before PTY responds.
-  const outputNotifyRef = useRef<(() => void) | null>(null);
-  const outputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const onNextOutput = useCallback((cb: () => void) => {
-    outputNotifyRef.current = cb;
-    // Clear any existing timer and set a 500ms fallback in case no output arrives
-    if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
-    outputTimerRef.current = setTimeout(() => {
-      if (outputNotifyRef.current) {
-        outputNotifyRef.current();
-        outputNotifyRef.current = null;
-      }
-    }, 500);
-  }, []);
-
-  // Read the Claude Code prompt content from the terminal buffer.
-  // Only extract when the prompt is the simple input form:
-  //   ──────────  (separator)
-  //   ❯ text      (single line starting with ❯)
-  //   ──────────  (separator)
-  // Menus, questions, multi-option screens are ignored — they have multiple
-  // lines between separators or don't start with ❯.
-  const getPromptLine = useCallback((): string => {
-    const term = termRef.current;
-    if (!term) return '';
-    const buffer = term.buffer.active;
-
-    const getLineText = (row: number): string => {
-      const line = buffer.getLine(row);
-      return line ? line.translateToString(true) : '';
-    };
-
-    const isSeparator = (text: string): boolean => {
-      const t = text.trim();
-      return t.length > 10 && /^[─━]+$/.test(t);
-    };
-
-    // Scan from around the cursor position (not buffer end, which may have many
-    // empty rows below on mobile where the terminal is CSS-scaled to be very tall).
-    const cursorRow = buffer.baseY + buffer.cursorY;
-    const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
-    let bottomSep = -1;
-    let topSep = -1;
-    for (let row = scanStart; row >= Math.max(0, scanStart - 30); row--) {
-      if (isSeparator(getLineText(row))) {
-        if (bottomSep < 0) {
-          bottomSep = row;
-        } else {
-          topSep = row;
-          break;
-        }
-      }
-    }
-    if (topSep < 0 || bottomSep < 0 || bottomSep <= topSep + 1) return '';
-
-    // Only extract when the first line after the top separator starts with ❯
-    // (the simple input prompt). Menus/questions have other content first.
-    const firstLine = getLineText(topSep + 1);
-    if (!/^\s*❯/.test(firstLine)) return '';
-
-    // Collect all lines between separators (message may be multi-line)
-    const lines: string[] = [];
-    for (let row = topSep + 1; row < bottomSep; row++) {
-      let text = getLineText(row);
-      if (row === topSep + 1) {
-        text = text.replace(/^\s*❯\s*/, '');
-      }
-      lines.push(text);
-    }
-    return lines.join('\n').trim();
-  }, []);
 
   // Detect whether the terminal is showing a numbered option menu (plan interview).
   // Returns true when ❯ is on a numbered option that isn't "Type something".
@@ -504,14 +423,6 @@ export function useClaudeCode(
         captureScrollState();
         term.write(data);
         scheduleScrollCorrection();
-        // If a caller is waiting for output, debounce 80ms to let chunks settle
-        if (outputNotifyRef.current) {
-          if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
-          outputTimerRef.current = setTimeout(() => {
-            outputNotifyRef.current?.();
-            outputNotifyRef.current = null;
-          }, 80);
-        }
         // Debounce selection mode detection
         if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
         selectionTimerRef.current = setTimeout(() => {
@@ -561,15 +472,7 @@ export function useClaudeCode(
     socket.io.on('reconnect', handleReconnect);
 
     // Forward terminal keyboard input to the PTY.
-    // On desktop, also detect Enter keypresses to notify the parent (for auto-titling).
     term.onData((data: string) => {
-      // Read prompt text BEFORE sending Enter to PTY (buffer still has the text)
-      if (!isMobile && onTerminalSubmitRef.current && (data === '\r' || data === '\n')) {
-        const text = getPromptLine();
-        if (text) {
-          onTerminalSubmitRef.current(text);
-        }
-      }
       socket.emit('cc:input', { chatId, data });
     });
 
@@ -604,13 +507,11 @@ export function useClaudeCode(
     document.fonts.ready.then(fitWhenReady);
 
     return () => {
-      if (outputTimerRef.current) clearTimeout(outputTimerRef.current);
       if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
       if (retryTimer) clearTimeout(retryTimer);
       if (lateTimer) clearTimeout(lateTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (scrollGuardRafId) cancelAnimationFrame(scrollGuardRafId);
-      outputNotifyRef.current = null;
       watchdogCleanup?.();
       touchCleanup?.();
       socket.off('cc:output', handleOutput);
@@ -658,5 +559,5 @@ export function useClaudeCode(
     searchAddonRef.current?.clearDecorations();
   }, []);
 
-  return { terminal: termRef, status, isSelectionMode, write, stop, getPromptLine, onNextOutput, searchFindNext, searchFindPrevious, searchClear };
+  return { terminal: termRef, status, isSelectionMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
 }
