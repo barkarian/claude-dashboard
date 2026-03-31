@@ -8,6 +8,8 @@ import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
+import { generateChatTitle } from '../services/aiTitleGenerator.ts';
+import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import config from '../config.ts';
 
 const execFileAsync = promisify(execFile);
@@ -470,6 +472,48 @@ router.put('/:id/chats/:chatId/read', async (req: Request<{ id: string; chatId: 
   } catch (err) {
     console.error('Error marking chat read:', err);
     res.status(500).json({ error: 'Failed to mark chat read' });
+  }
+});
+
+router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    // Get first user message — try chat_messages (SDK) then JSONL (CC)
+    let firstPrompt: string | null = null;
+
+    const messages = projectManager.getChatMessages(req.params.chatId);
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    if (firstUserMsg) {
+      firstPrompt = typeof firstUserMsg.content === 'string'
+        ? firstUserMsg.content
+        : Array.isArray(firstUserMsg.content)
+          ? (firstUserMsg.content.find((b: any) => b.type === 'text') as any)?.text
+          : null;
+    }
+
+    if (!firstPrompt && chat.sessionId) {
+      const projectPath = projectManager.getProjectPath(req.params.id);
+      firstPrompt = readFirstUserPrompt(chat.sessionId, projectPath);
+    }
+
+    if (!firstPrompt) {
+      return res.status(400).json({ error: 'No user message found to generate title from' });
+    }
+
+    const title = await generateChatTitle(firstPrompt);
+    if (!title) {
+      return res.status(500).json({ error: 'Failed to generate title' });
+    }
+
+    projectManager.updateChat(req.params.chatId, { label: title });
+    res.json({ title });
+  } catch (err) {
+    console.error('Error generating chat title:', err);
+    res.status(500).json({ error: 'Failed to generate title' });
   }
 });
 

@@ -49,6 +49,7 @@ export default function ProjectDashboardPage() {
   const keyboard = useKeyboardVisible();
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [dirExists, setDirExists] = useState<boolean | null>(null);
+  const [generatingTitle, setGeneratingTitle] = useState(false);
 
   useEffect(() => {
     loadProject(id!);
@@ -210,6 +211,21 @@ export default function ProjectDashboardPage() {
     }
   }
 
+  async function handleGenerateTitle() {
+    if (!activeChatId) return;
+    setGeneratingTitle(true);
+    try {
+      await api.post<{ title: string }>(
+        `/api/projects/${id}/chats/${activeChatId}/generate-title`
+      );
+      await refreshProject();
+    } catch (err) {
+      console.error('Failed to generate title:', err);
+    } finally {
+      setGeneratingTitle(false);
+    }
+  }
+
   // Use running process count for badge
   const scriptCount = runningCount;
 
@@ -227,6 +243,8 @@ export default function ProjectDashboardPage() {
         chatId={activeChatId || undefined}
         onNewChat={project ? handleNewChat : undefined}
         onEditChatName={activeChatId ? handleEditChatName : undefined}
+        onGenerateTitle={activeChatId ? handleGenerateTitle : undefined}
+        generatingTitle={generatingTitle}
         onDeleteChat={activeChatId ? handleDeleteChat : undefined}
         statusDot={statusDotClass}
         statusLabel={statusLabel}
@@ -245,8 +263,10 @@ export default function ProjectDashboardPage() {
           projectPath={project.path}
           shellOverride={project.shellOverride}
           defaultAdapter={project.defaultAdapter || 'claude-agent-sdk'}
+          aiNamingEnabled={project.aiNamingEnabled || 'none'}
           onShellChanged={refreshProject}
           onAdapterChanged={refreshProject}
+          onAiNamingChanged={refreshProject}
         />
       )}
 

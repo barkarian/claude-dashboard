@@ -178,6 +178,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add ai_naming_enabled column to projects
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN ai_naming_enabled TEXT DEFAULT 'none'`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

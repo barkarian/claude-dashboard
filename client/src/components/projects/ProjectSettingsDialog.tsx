@@ -31,8 +31,10 @@ interface ProjectSettingsDialogProps {
   projectPath: string;
   shellOverride: string | null;
   defaultAdapter: string;
+  aiNamingEnabled: 'none' | 'on';
   onShellChanged?: () => void;
   onAdapterChanged?: () => void;
+  onAiNamingChanged?: () => void;
 }
 
 interface ShellPreference {
@@ -49,8 +51,10 @@ export default function ProjectSettingsDialog({
   projectPath,
   shellOverride,
   defaultAdapter,
+  aiNamingEnabled,
   onShellChanged,
   onAdapterChanged,
+  onAiNamingChanged,
 }: ProjectSettingsDialogProps) {
   const navigate = useNavigate();
   const { refreshProjects } = useAppSidebar();
@@ -64,6 +68,10 @@ export default function ProjectSettingsDialog({
   const [localAdapter, setLocalAdapter] = useState<string>(defaultAdapter || 'claude-agent-sdk');
   const [savingAdapter, setSavingAdapter] = useState(false);
 
+  // AI Naming state
+  const [localAiNaming, setLocalAiNaming] = useState<string>(aiNamingEnabled || 'none');
+  const [savingAiNaming, setSavingAiNaming] = useState(false);
+
   // Delete state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteFolder, setDeleteFolder] = useState(false);
@@ -74,6 +82,7 @@ export default function ProjectSettingsDialog({
     if (!open) return;
     setLocalShellOverride(shellOverride || '');
     setLocalAdapter(defaultAdapter || 'claude-agent-sdk');
+    setLocalAiNaming(aiNamingEnabled || 'none');
     // Fetch account shell preference
     api.get<ShellPreference>('/api/shell-preference')
       .then(setShellPref)
@@ -110,6 +119,21 @@ export default function ProjectSettingsDialog({
   }
 
   const adapterChanged = localAdapter !== (defaultAdapter || 'claude-agent-sdk');
+  const aiNamingChanged = localAiNaming !== (aiNamingEnabled || 'none');
+
+  async function handleSaveAiNaming() {
+    if (!aiNamingChanged) return;
+    setSavingAiNaming(true);
+    try {
+      await api.patch(`/api/projects/${projectId}`, { aiNamingEnabled: localAiNaming });
+      toast.success(localAiNaming === 'on' ? 'AI chat naming enabled' : 'AI chat naming disabled');
+      onAiNamingChanged?.();
+    } catch {
+      toast.error('Failed to update AI naming setting');
+    } finally {
+      setSavingAiNaming(false);
+    }
+  }
 
   async function openDeleteConfirm() {
     setShowDeleteConfirm(true);
@@ -231,6 +255,49 @@ export default function ProjectSettingsDialog({
                   disabled={savingAdapter}
                 >
                   {savingAdapter ? 'Saving...' : 'Save'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* AI Chat Naming */}
+          <div className="border-t border-border pt-4 mt-1">
+            <label className="text-xs font-medium text-text-dim uppercase tracking-wider">AI Chat Naming</label>
+            <p className="text-xs text-text-muted mt-0.5 mb-2">
+              Auto-generate descriptive chat titles using AI on first message.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setLocalAiNaming('none')}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                    localAiNaming === 'none'
+                      ? 'bg-primary text-white'
+                      : 'text-text-muted hover:text-text'
+                  }`}
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocalAiNaming('on')}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                    localAiNaming === 'on'
+                      ? 'bg-primary text-white'
+                      : 'text-text-muted hover:text-text'
+                  }`}
+                >
+                  On
+                </button>
+              </div>
+              {aiNamingChanged && (
+                <Button
+                  size="sm"
+                  onClick={handleSaveAiNaming}
+                  disabled={savingAiNaming}
+                >
+                  {savingAiNaming ? 'Saving...' : 'Save'}
                 </Button>
               )}
             </div>

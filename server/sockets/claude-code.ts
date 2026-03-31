@@ -4,6 +4,7 @@ import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
+import { generateChatTitle } from '../services/aiTitleGenerator.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 import { mapToLegacyStatus } from '../../shared/types/session.ts';
@@ -17,6 +18,23 @@ import type {
 } from '../../shared/types/socket-events.ts';
 
 const MAX_BUFFER_LINES = 5000;
+
+// Guard: prevent duplicate AI title API calls across the 3 rename paths
+const aiTitledChats = new Set<string>();
+
+/** Fire-and-forget AI title generation for a CC chat (deduped per chatId) */
+function tryAiTitle(chatId: string, projectId: string, promptText: string, io: SocketIOServer) {
+  if (aiTitledChats.has(chatId)) return;
+  const project = projectManager.getProject(projectId);
+  if (project?.aiNamingEnabled !== 'on') return;
+  aiTitledChats.add(chatId);
+  generateChatTitle(promptText).then((aiTitle) => {
+    if (aiTitle) {
+      projectManager.updateChat(chatId, { label: aiTitle });
+      io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: aiTitle });
+    }
+  }).catch(() => {});
+}
 
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
@@ -142,6 +160,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
                 const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
                 projectManager.updateChat(chatId, { label: newLabel });
                 io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+                tryAiTitle(chatId, projectId, firstPrompt, io);
               }
             }
           } else if (newState.status === 'idle' && (prevState.status === 'working' || prevState.status === 'starting')) {
@@ -159,6 +178,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
                 const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
                 projectManager.updateChat(chatId, { label: newLabel });
                 io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+                tryAiTitle(chatId, projectId, firstPrompt, io);
               }
             }
           }
@@ -225,6 +245,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
               const newLabel = promptText.slice(0, 50) + (promptText.length > 50 ? '...' : '');
               projectManager.updateChat(chatId, { label: newLabel });
               io.to(`project:${session.projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+              tryAiTitle(chatId, session.projectId, promptText, io);
             } else {
               // Desktop sends chars individually — fall back to JSONL with retries
               const projectPath = projectManager.getProjectPath(session.projectId);
@@ -239,6 +260,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
                     const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
                     projectManager.updateChat(chatId, { label: newLabel });
                     io.to(`project:${session.projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+                    tryAiTitle(chatId, session.projectId, firstPrompt, io);
                   } else {
                     setTimeout(() => tryRename(attempts - 1), 2000);
                   }

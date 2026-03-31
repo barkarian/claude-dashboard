@@ -102,6 +102,7 @@ function getProject(projectId: string): Project | null {
     createdAt: row.created_at,
     shellOverride: row.shell_override || null,
     defaultAdapter: (row.default_adapter as ChatAdapter) || 'claude-agent-sdk',
+    aiNamingEnabled: (row.ai_naming_enabled as 'none' | 'on') || 'none',
     scripts,
     chats,
   };
@@ -138,6 +139,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     createdAt: now,
     shellOverride: null,
     defaultAdapter: 'claude-agent-sdk',
+    aiNamingEnabled: 'none',
     scripts: [],
     chats: [],
   };
@@ -164,12 +166,13 @@ function registerProject(name: string, projectPath: string): Project {
     createdAt: now,
     shellOverride: null,
     defaultAdapter: 'claude-agent-sdk',
+    aiNamingEnabled: 'none',
     scripts: [],
     chats: [],
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; aiNamingEnabled?: 'none' | 'on' }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -187,6 +190,9 @@ function updateProject(projectId: string, updates: { name?: string; path?: strin
   }
   if (updates.defaultAdapter !== undefined) {
     db.prepare('UPDATE projects SET default_adapter = ? WHERE id = ?').run(updates.defaultAdapter, projectId);
+  }
+  if (updates.aiNamingEnabled !== undefined) {
+    db.prepare('UPDATE projects SET ai_naming_enabled = ? WHERE id = ?').run(updates.aiNamingEnabled, projectId);
   }
 
   return getProject(projectId);

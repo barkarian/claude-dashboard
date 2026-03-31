@@ -39,6 +39,7 @@ export interface Project {
   createdAt: string;
   shellOverride: string | null;
   defaultAdapter: ChatAdapter;
+  aiNamingEnabled: 'none' | 'on';
   scripts: Script[];
   chats: Chat[];
 }
