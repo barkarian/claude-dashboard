@@ -711,16 +711,27 @@ export class JsonlWatcher extends EventEmitter {
   }
 
   /**
-   * Apply hook signal overrides. Signals are authoritative over JSONL-derived state.
+   * Apply hook signal overrides. Signals are authoritative over JSONL-derived state,
+   * but rich JSONL-derived states (question/plan/permission) are preserved because
+   * they carry more context than the signal alone.
    */
   private applySignalOverrides(sessionId: string, state: SessionStateContext): SessionStateContext {
+    // Rich JSONL-derived states that should NOT be overridden by stop/working signals.
+    // These states mean Claude is waiting for specific user interaction — the stop hook
+    // fires at end of assistant turn, but these ARE the end of the turn.
+    const isRichWaitingState =
+      state.status === 'question-awaiting' ||
+      state.status === 'questions-awaiting' ||
+      state.status === 'plan-awaiting' ||
+      state.status === 'permission-awaiting';
+
     if (this.endedSignals.has(sessionId)) {
       return { ...state, status: 'idle' };
     }
     const perm = this.pendingPermissions.get(sessionId);
     if (perm) {
       // Don't override JSONL-derived question/plan states — those are richer than the signal
-      if (state.status === 'question-awaiting' || state.status === 'questions-awaiting' || state.status === 'plan-awaiting') {
+      if (isRichWaitingState) {
         return state;
       }
       const pendingTool: ToolPermissionPayload = {
@@ -731,9 +742,19 @@ export class JsonlWatcher extends EventEmitter {
       return { ...state, status: 'permission-awaiting', pendingTool };
     }
     if (this.stopSignals.has(sessionId)) {
+      // Preserve rich waiting states — stop hook fires at end of turn but
+      // question/plan/permission states ARE the end of the turn
+      if (isRichWaitingState) {
+        return state;
+      }
       return { ...state, status: 'idle' };
     }
     if (this.workingSignals.has(sessionId)) {
+      // Preserve rich waiting states — working signal from prompt submission
+      // shouldn't override a question/plan that arrived after
+      if (isRichWaitingState) {
+        return state;
+      }
       return { ...state, status: 'working' };
     }
     return state;
@@ -758,6 +779,27 @@ export class JsonlWatcher extends EventEmitter {
         if (typeof content === 'string' && this.stopSignals.has(sessionId)) {
           this.stopSignals.delete(sessionId);
           try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.stop.json`)); } catch {}
+        }
+      }
+      // TURN_END → clear working signal (the turn is over, Claude is no longer working)
+      if (entry.type === 'system' && (entry.subtype === 'turn_duration' || entry.subtype === 'stop_hook_summary')) {
+        if (this.workingSignals.has(sessionId)) {
+          this.workingSignals.delete(sessionId);
+          try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
+        }
+      }
+      // Interrupted → clear working signal
+      if (entry.type === 'user' && entry.message) {
+        const content = entry.message.content;
+        const interruptText = '[Request interrupted by user]';
+        const isInterrupt = typeof content === 'string'
+          ? content.includes(interruptText)
+          : Array.isArray(content) && content.some(
+              (b: any) => b.type === 'text' && typeof b.text === 'string' && b.text.includes(interruptText)
+            );
+        if (isInterrupt && this.workingSignals.has(sessionId)) {
+          this.workingSignals.delete(sessionId);
+          try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
         }
       }
     }

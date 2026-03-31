@@ -215,9 +215,9 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       <div className="flex-1 overflow-hidden relative">
         <div ref={containerRef} className="absolute inset-0" />
 
-        {/* Floating arrow overlay — top-right corner of terminal, mobile only */}
+        {/* Floating arrow overlay — top-left corner of terminal, mobile only */}
         {hasOverlayContent && (
-          <div className="absolute top-2 right-2 z-30 flex flex-col items-center gap-1 md:hidden">
+          <div className="absolute top-2 left-2 z-30 flex flex-col items-center gap-1 md:hidden">
             {/* Action buttons for terminal prompts */}
             {terminalPromptMode?.type === 'dismiss' && (
               <button
