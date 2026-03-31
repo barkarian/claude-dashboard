@@ -377,10 +377,16 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     const offset = parseInt(req.query.offset as string) || 0;
     const search = (req.query.search as string) || '';
 
-    // Clean up empty chats (only on first page / no search — avoid during paginated browsing)
+    // Clean up empty SDK chats (only on first page / no search — avoid during paginated browsing).
+    // Skip claude-code chats: they don't use chat_messages and get a session_id on start.
     if (offset === 0 && !search) {
       const allChats = projectManager.listChats(req.params.id);
-      const emptyChats = allChats.filter(c => c.label === 'New Chat' && !c.draftMessage && (!projectManager.getChatMessages(c.id) || projectManager.getChatMessages(c.id).length === 0));
+      const emptyChats = allChats.filter(c =>
+        c.label === 'New Chat'
+        && !c.draftMessage
+        && c.adapter !== 'claude-code'
+        && (!projectManager.getChatMessages(c.id) || projectManager.getChatMessages(c.id).length === 0)
+      );
       for (const chat of emptyChats) {
         sdkSessionManager.endSession(chat.id);
         projectManager.deleteChat(chat.id);

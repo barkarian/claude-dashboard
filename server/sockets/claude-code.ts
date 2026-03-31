@@ -39,6 +39,10 @@ interface CCSession {
   exitCode: number | null;
   jsonlSessionId: string | null;
   jsonlStateHandler: ((...args: any[]) => void) | null;
+  /** Accumulates raw PTY input until the first Enter so we can auto-title the chat */
+  inputBuffer: string;
+  /** True once we've attempted the first-input rename (prevents retries) */
+  hasAutoRenamed: boolean;
 }
 
 // Map<chatId, CCSession>
@@ -86,6 +90,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         exitCode: null,
         jsonlSessionId: null,
         jsonlStateHandler: null,
+        inputBuffer: '',
+        hasAutoRenamed: false,
       };
 
       sessions.set(chatId, session);
@@ -127,6 +133,17 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
             sendPushEvent('chat-plan', { preview: 'Plan ready for review', chatId });
           } else if (newState.status === 'permission-awaiting' && newState.pendingTool) {
             sendPushEvent('chat-permission', { preview: `Approve: ${newState.pendingTool.toolName}`, chatId });
+          } else if (newState.status === 'working' && prevState.status === 'starting') {
+            // Auto-title: rename "New Chat" as soon as the agent starts working on the first prompt
+            const chat = projectManager.getChat(chatId);
+            if (chat && chat.label === 'New Chat' && sessionId) {
+              const firstPrompt = readFirstUserPrompt(sessionId, projectPath);
+              if (firstPrompt) {
+                const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
+                projectManager.updateChat(chatId, { label: newLabel });
+                io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+              }
+            }
           } else if (newState.status === 'idle' && (prevState.status === 'working' || prevState.status === 'starting')) {
             const preview = newState.lastTextPreview || 'Response ready';
             sendPushEvent('chat-reply', { preview, chatId });
@@ -134,7 +151,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
             projectManager.markChatUnread(chatId);
             io.to(`project:${projectId}`).emit('chat:unread', { chatId });
 
-            // Auto-title: rename "New Chat" on first completion
+            // Auto-title fallback: rename "New Chat" on first completion if not yet renamed
             const chat = projectManager.getChat(chatId);
             if (chat && chat.label === 'New Chat' && sessionId) {
               const firstPrompt = readFirstUserPrompt(sessionId, projectPath);
@@ -188,6 +205,50 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
     const session = sessions.get(chatId);
     if (session && session.status === 'running') {
       session.pty.write(data);
+
+      // Auto-title: rename "New Chat" on first user Enter
+      if (!session.hasAutoRenamed) {
+        session.inputBuffer += data;
+        if (data.includes('\r') || data.includes('\n')) {
+          session.hasAutoRenamed = true;
+          // Extract printable text before the first Enter
+          const promptText = session.inputBuffer
+            .split(/[\r\n]/)[0]
+            .replace(/\x1b\[[^A-Za-z]*[A-Za-z]/g, '') // strip ANSI escapes
+            .replace(/[\x00-\x1f\x7f]/g, '')           // strip control chars
+            .trim();
+
+          const chat = projectManager.getChat(chatId);
+          if (chat && chat.label === 'New Chat') {
+            if (promptText && !promptText.startsWith('/')) {
+              // Mobile sends full text + \r in one chunk — rename immediately
+              const newLabel = promptText.slice(0, 50) + (promptText.length > 50 ? '...' : '');
+              projectManager.updateChat(chatId, { label: newLabel });
+              io.to(`project:${session.projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+            } else {
+              // Desktop sends chars individually — fall back to JSONL with retries
+              const projectPath = projectManager.getProjectPath(session.projectId);
+              const sid = session.jsonlSessionId;
+              if (sid && projectPath) {
+                const tryRename = (attempts: number) => {
+                  if (attempts <= 0) return;
+                  const c = projectManager.getChat(chatId);
+                  if (!c || c.label !== 'New Chat') return;
+                  const firstPrompt = readFirstUserPrompt(sid, projectPath);
+                  if (firstPrompt) {
+                    const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
+                    projectManager.updateChat(chatId, { label: newLabel });
+                    io.to(`project:${session.projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+                  } else {
+                    setTimeout(() => tryRename(attempts - 1), 2000);
+                  }
+                };
+                setTimeout(() => tryRename(3), 1000);
+              }
+            }
+          }
+        }
+      }
 
       // Touch last_activity_at when user presses Enter (throttled to every 10s)
       if (data.includes('\r') || data.includes('\n')) {

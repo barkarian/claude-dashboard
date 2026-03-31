@@ -7,8 +7,8 @@ import type { Socket } from 'socket.io-client';
 import { useTheme } from '../context/ThemeContext.tsx';
 
 // Width in px that the container is stretched to before CSS-scaling back down.
-// Lower = larger apparent font on mobile. 400 → ~2× the previous 800 value.
-const WIDE_WIDTH = 400;
+// Lower = larger apparent font on mobile. Higher = smaller text, more content visible.
+const WIDE_WIDTH = 500;
 
 interface UseTerminalOptions {
   socket: Socket | null;
