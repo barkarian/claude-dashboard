@@ -394,16 +394,6 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
           </button>
         </div>
 
-        {/* Right: Rec button (mobile only) */}
-        {native && (
-          <div className="flex items-center">
-            <TerminalRecordButton
-              onOpenScriptPicker={() => setShowSavedRecordings(true)}
-              onOpenLivePreview={() => setShowLivePreview(true)}
-              disabled={disabled}
-            />
-          </div>
-        )}
       </div>
 
       {/* Prompt input area */}
@@ -416,13 +406,11 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
         />
 
         <div className="flex items-end gap-2">
-          {!native && (
-            <TerminalRecordButton
-              onOpenScriptPicker={() => setShowSavedRecordings(true)}
-              onOpenLivePreview={() => setShowLivePreview(true)}
-              disabled={disabled}
-            />
-          )}
+          <TerminalRecordButton
+            onOpenScriptPicker={() => setShowSavedRecordings(true)}
+            onOpenLivePreview={() => setShowLivePreview(true)}
+            disabled={disabled}
+          />
 
           <textarea
             ref={textareaRef}
