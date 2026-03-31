@@ -676,6 +676,10 @@ export class JsonlWatcher extends EventEmitter {
     }
     const perm = this.pendingPermissions.get(sessionId);
     if (perm) {
+      // Don't override JSONL-derived question/plan states — those are richer than the signal
+      if (state.status === 'question-awaiting' || state.status === 'questions-awaiting' || state.status === 'plan-awaiting') {
+        return state;
+      }
       const pendingTool: ToolPermissionPayload = {
         toolName: perm.tool_name || 'Unknown',
         toolInput: perm.tool_input || {},
