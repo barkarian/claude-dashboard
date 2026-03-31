@@ -252,6 +252,27 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
       <div className="flex items-center px-2 py-1.5 bg-bg-surface/50">
         {/* Left: Keys popover + info icon */}
         <div className="flex items-center gap-1">
+          {/* Esc — standalone for quick access */}
+          <button
+            type="button"
+            onClick={() => btn(ESC)}
+            disabled={disabled}
+            className="px-2 py-1.5 rounded text-[11px] font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30"
+          >
+            Esc
+          </button>
+
+          {/* Switch Mode (Shift+Tab) — standalone for quick access */}
+          <button
+            type="button"
+            onClick={() => btn(SHIFT_TAB)}
+            disabled={disabled}
+            className="px-2 py-1.5 rounded text-[11px] font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30"
+          >
+            Switch Mode
+          </button>
+
+          {/* Keys popover — remaining keys */}
           <Popover>
             <PopoverTrigger asChild>
               <button
@@ -267,25 +288,11 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="p-1.5 min-w-[140px]">
               <button
-                onClick={() => btn(ESC)}
-                disabled={disabled}
-                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-              >
-                Esc
-              </button>
-              <button
                 onClick={() => btn(TAB)}
                 disabled={disabled}
                 className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
               >
                 Tab
-              </button>
-              <button
-                onClick={() => btn(SHIFT_TAB)}
-                disabled={disabled}
-                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-              >
-                Shift+Tab
               </button>
               <div className="my-1 border-t border-border" />
               <button
@@ -432,7 +439,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
             placeholder={
               disabled
                 ? 'Session not active'
-                : 'Message Claude Code... (Enter to send)'
+                : 'How can I help you?'
             }
             rows={1}
             disabled={disabled}

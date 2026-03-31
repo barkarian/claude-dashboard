@@ -273,7 +273,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
               ? 'Session not active'
               : isStreaming
                 ? 'Claude is working...'
-                : 'Message Claude Code... (@ for files, Cmd+Enter to send)'
+                : 'How can I help you?'
           }
           rows={1}
           disabled={disabled}

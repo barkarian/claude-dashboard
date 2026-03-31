@@ -191,7 +191,7 @@ export default function PromptInput({ projectId, onSend, onCancel, onSelect, isT
           }}
           onKeyDown={handleKeyDown}
           className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[42px] max-h-[200px] py-2.5"
-          placeholder={disabled ? 'Session not active' : isThinking ? 'Claude is thinking...' : 'Message Claude Code... (@ for files, Cmd+Enter to send)'}
+          placeholder={disabled ? 'Session not active' : isThinking ? 'Claude is thinking...' : 'How can I help you?'}
           rows={1}
           disabled={disabled}
         />

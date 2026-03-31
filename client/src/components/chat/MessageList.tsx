@@ -25,7 +25,7 @@ const MessageList = forwardRef<HTMLDivElement, MessageListProps>(({ messages }, 
   }
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+    <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 scrollbar-left">
       {messages.map((message) => (
         <SDKMessageBubble key={message.id} message={message} />
       ))}

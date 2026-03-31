@@ -29,6 +29,14 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-border-light;
   }
+
+  /* Move scrollbar to the left side */
+  .scrollbar-left {
+    direction: rtl;
+  }
+  .scrollbar-left > * {
+    direction: ltr;
+  }
   :root {
     /* Background */
     --color-bg: 15 17 23;              /* #0f1117 */
