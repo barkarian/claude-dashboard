@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Button } from '../ui/button.tsx';
+
 import { useLocation } from 'react-router-dom';
 import FilePicker from './FilePicker.tsx';
 import TerminalRecordButton from './TerminalRecordButton.tsx';
@@ -280,23 +280,32 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
         />
 
         {isStreaming ? (
-          <Button onClick={onInterrupt} variant="danger" className="flex-shrink-0 py-2.5">
+          <button
+            type="button"
+            onClick={onInterrupt}
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-danger text-white active:bg-danger/80 transition-colors"
+            title="Stop"
+          >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <rect x="6" y="6" width="12" height="12" rx="1" />
+              <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
-            Stop
-          </Button>
+          </button>
         ) : (
-          <Button
+          <button
+            type="button"
             onClick={handleSend}
             disabled={!value.trim() || disabled}
-            className="flex-shrink-0 py-2.5"
+            className={`flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
+              !value.trim() || disabled
+                ? 'bg-bg-surface border border-border text-text-dim'
+                : 'bg-primary text-white active:bg-primary-hover'
+            }`}
+            title="Send"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
             </svg>
-            Send
-          </Button>
+          </button>
         )}
       </div>
 

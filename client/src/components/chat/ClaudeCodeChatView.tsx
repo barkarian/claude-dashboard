@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
@@ -7,6 +7,8 @@ import { useSessionStates } from '../../hooks/useSessionStatuses.ts';
 import { useClaudeCode } from '../../hooks/useClaudeCode.ts';
 import { useDraft } from '../../hooks/useDraft.ts';
 import { ccSwipeOverride, type SwipeDirection } from '../../utils/ccSwipeOverride.ts';
+import { haptics } from '../../utils/haptics.ts';
+import { isCapacitorNative } from '../../utils/platform.ts';
 import CCPromptInput from './CCPromptInput.tsx';
 
 // ANSI escape sequences
@@ -16,6 +18,10 @@ const ARROW_MAP: Record<string, string> = {
   right: '\x1b[C',
   left: '\x1b[D',
 };
+const ARROW_UP = '\x1b[A';
+const ARROW_DOWN = '\x1b[B';
+const ARROW_RIGHT = '\x1b[C';
+const ARROW_LEFT = '\x1b[D';
 
 interface ClaudeCodeChatViewProps {
   projectId: string;
@@ -177,11 +183,138 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     }, 200);
   }
 
+  const native = isCapacitorNative();
+  const [showSwipeInfo, setShowSwipeInfo] = useState(false);
+
+  // Arrow overlay computed values
+  const showUp = allowedDirections.has('up');
+  const showDown = allowedDirections.has('down');
+  const showLeft = allowedDirections.has('left');
+  const showRight = allowedDirections.has('right');
+  const hasArrows = showUp || showDown || showLeft || showRight;
+  const hasOverlayContent = hasArrows || !!terminalPromptMode;
+
+  const arrowLabel = sessionState?.status === 'question-awaiting' ? 'Select'
+    : sessionState?.status === 'questions-awaiting' ? 'Navigate'
+    : sessionState?.status === 'plan-awaiting' ? 'Plan'
+    : sessionState?.status === 'permission-awaiting' ? 'Permission'
+    : hasArrows ? 'Tasks'
+    : '';
+
+  function overlayBtn(seq: string) {
+    if (status !== 'running') return;
+    haptics.impactLight();
+    handleArrow(seq);
+  }
+
+  const overlayBtnBase = 'flex items-center justify-center rounded-lg bg-bg-surface/70 border border-border/50 text-text-muted active:bg-bg-surface/90 transition-colors backdrop-blur-sm disabled:opacity-30';
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Terminal wrapper: flex-1 for correct height, terminal positioned inside */}
       <div className="flex-1 overflow-hidden relative">
         <div ref={containerRef} className="absolute inset-0" />
+
+        {/* Floating arrow overlay — top-right corner of terminal, mobile only */}
+        {hasOverlayContent && (
+          <div className="absolute top-2 right-2 z-30 flex flex-col items-center gap-1 md:hidden">
+            {/* Action buttons for terminal prompts */}
+            {terminalPromptMode?.type === 'dismiss' && (
+              <button
+                type="button"
+                onClick={() => overlayBtn(' ')}
+                disabled={status !== 'running'}
+                className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-white bg-primary/80 backdrop-blur-sm active:bg-primary transition-colors disabled:opacity-30"
+              >
+                Dismiss
+              </button>
+            )}
+            {terminalPromptMode?.type === 'detail-view' && (
+              <button
+                type="button"
+                onClick={() => overlayBtn(ARROW_LEFT)}
+                disabled={status !== 'running'}
+                className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-white bg-primary/80 backdrop-blur-sm active:bg-primary transition-colors disabled:opacity-30 flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+                Go Back
+              </button>
+            )}
+
+            {/* Arrow label */}
+            {!terminalPromptMode && hasArrows && (
+              <span className="text-[8px] font-semibold text-primary/80 uppercase tracking-wider">
+                {arrowLabel}
+              </span>
+            )}
+
+            {/* Arrow buttons */}
+            {!terminalPromptMode && hasArrows && (
+              <div className="flex items-center gap-0.5">
+                {showLeft && (
+                  <button type="button" onClick={() => overlayBtn(ARROW_LEFT)} disabled={status !== 'running'} className={`w-8 h-8 ${overlayBtnBase}`}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                    </svg>
+                  </button>
+                )}
+                {(showUp || showDown) && (
+                  <div className="flex flex-col gap-0.5">
+                    {showUp && (
+                      <button type="button" onClick={() => overlayBtn(ARROW_UP)} disabled={status !== 'running'} className={`w-8 h-6 ${overlayBtnBase}`}>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                        </svg>
+                      </button>
+                    )}
+                    {showDown && (
+                      <button type="button" onClick={() => overlayBtn(ARROW_DOWN)} disabled={status !== 'running'} className={`w-8 h-6 ${overlayBtnBase}`}>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                )}
+                {showRight && (
+                  <button type="button" onClick={() => overlayBtn(ARROW_RIGHT)} disabled={status !== 'running'} className={`w-8 h-8 ${overlayBtnBase}`}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Swipe info icon — center of overlay */}
+            {native && (
+              <button
+                type="button"
+                onClick={() => setShowSwipeInfo(prev => !prev)}
+                className="w-6 h-6 flex items-center justify-center rounded-full bg-bg-surface/60 backdrop-blur-sm text-text-dim hover:text-primary transition-colors"
+                title="Swipe gesture info"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                </svg>
+              </button>
+            )}
+
+            {/* Swipe info tooltip */}
+            {native && showSwipeInfo && (
+              <div className="bg-bg-surface/90 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg text-[10px] text-text-muted w-36">
+                <div className="space-y-0.5">
+                  <div>Swipe up = Arrow Down</div>
+                  <div>Swipe down = Arrow Up</div>
+                  <div>Swipe left = Arrow Right</div>
+                  <div>Swipe right = Arrow Left</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status bar when exited */}
@@ -211,8 +344,6 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           status={status}
           isSelectionMode={isSelectionMode}
           unifiedStatus={sessionState?.status}
-          terminalPromptMode={terminalPromptMode}
-          allowedDirections={allowedDirections}
           onSend={handleSend}
           onArrow={handleArrow}
           onInterrupt={handleInterrupt}
