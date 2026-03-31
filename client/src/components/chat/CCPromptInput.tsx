@@ -14,11 +14,17 @@ import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import api from '../../utils/api.ts';
 import type { SavedRecording } from '../../../../shared/types/models.ts';
+import type { UnifiedStatus } from '../../../../shared/types/session.ts';
+import type { TerminalPromptMode } from '../../hooks/useClaudeCode.ts';
+import type { SwipeDirection } from '../../utils/ccSwipeOverride.ts';
 
 interface CCPromptInputProps {
   projectId: string;
   status: 'disconnected' | 'running' | 'exited' | 'error';
   isSelectionMode?: boolean;
+  unifiedStatus?: UnifiedStatus;
+  terminalPromptMode?: TerminalPromptMode;
+  allowedDirections?: Set<SwipeDirection>;
   onSend: (data: string) => void;
   onArrow: (data: string) => void;
   onInterrupt: () => void;
@@ -36,7 +42,7 @@ const ESC = '\x1b';
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';
 
-export default function CCPromptInput({ projectId, status, isSelectionMode, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, isSelectionMode, unifiedStatus, terminalPromptMode, allowedDirections, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
   const [value, setValue] = useState(initialDraft || '');
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -158,6 +164,26 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
   }
 
   const btnBase = 'flex items-center justify-center rounded bg-bg-surface border border-border text-text-muted hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30';
+
+  // Dynamic arrow visibility based on allowed directions
+  const showUp = !!allowedDirections?.has('up');
+  const showDown = !!allowedDirections?.has('down');
+  const showLeft = !!allowedDirections?.has('left');
+  const showRight = !!allowedDirections?.has('right');
+  const hasArrows = showUp || showDown || showLeft || showRight;
+
+  // Arrow group label
+  const arrowLabel = unifiedStatus === 'question-awaiting' ? 'Select'
+    : unifiedStatus === 'questions-awaiting' ? 'Navigate'
+    : unifiedStatus === 'plan-awaiting' ? 'Plan'
+    : unifiedStatus === 'permission-awaiting' ? 'Permission'
+    : hasArrows ? 'Tasks'
+    : '';
+
+  // Stop button: shown when Claude is working and prompt is empty
+  const showStop = unifiedStatus === 'working' && !value.trim();
+  // Send disabled: when prompt is empty and not in selection mode
+  const sendDisabled = disabled || (!value.trim() && !isSelectionMode);
 
   return (
     <div className="flex-shrink-0 border-t border-border relative">
@@ -375,30 +401,77 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
           )}
         </div>
 
-        {/* Center: Arrow keys */}
-        <div className="flex-1 flex items-center justify-center gap-0.5">
-          <button type="button" onClick={() => btn(ARROW_LEFT)} disabled={disabled} className={`w-7 h-7 ${btnBase}`} title="Left">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <div className="flex flex-col gap-0.5">
-            <button type="button" onClick={() => btn(ARROW_UP)} disabled={disabled} className={`w-7 h-5 ${btnBase}`} title="Up">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-              </svg>
+        {/* Center: Dynamic arrow keys + action buttons */}
+        <div className="flex-1 flex items-center justify-center gap-1">
+          {/* Action buttons for terminal prompts */}
+          {terminalPromptMode?.type === 'dismiss' && (
+            <button
+              type="button"
+              onClick={() => btn(' ')}
+              disabled={disabled}
+              className="px-2.5 py-1.5 rounded text-[11px] font-medium text-white bg-primary hover:bg-primary-hover active:bg-primary-hover transition-colors disabled:opacity-30"
+            >
+              Dismiss
             </button>
-            <button type="button" onClick={() => btn(ARROW_DOWN)} disabled={disabled} className={`w-7 h-5 ${btnBase}`} title="Down">
+          )}
+          {terminalPromptMode?.type === 'detail-view' && (
+            <button
+              type="button"
+              onClick={() => btn(ARROW_LEFT)}
+              disabled={disabled}
+              className="px-2.5 py-1.5 rounded text-[11px] font-medium text-white bg-primary hover:bg-primary-hover active:bg-primary-hover transition-colors disabled:opacity-30 flex items-center gap-1"
+            >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
               </svg>
+              Go Back
             </button>
-          </div>
-          <button type="button" onClick={() => btn(ARROW_RIGHT)} disabled={disabled} className={`w-7 h-7 ${btnBase}`} title="Right">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
+          )}
+
+          {/* Arrow label */}
+          {!terminalPromptMode && hasArrows && (
+            <span className="text-[9px] font-medium text-primary uppercase tracking-wider mr-0.5">
+              {arrowLabel}
+            </span>
+          )}
+
+          {/* Dynamic arrows: only render directions present in allowedDirections */}
+          {!terminalPromptMode && hasArrows && (
+            <div className="flex items-center gap-0.5">
+              {showLeft && (
+                <button type="button" onClick={() => btn(ARROW_LEFT)} disabled={disabled} className={`w-7 h-7 ${btnBase}`} title="Left">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+              )}
+              {(showUp || showDown) && (
+                <div className="flex flex-col gap-0.5">
+                  {showUp && (
+                    <button type="button" onClick={() => btn(ARROW_UP)} disabled={disabled} className={`w-7 h-5 ${btnBase}`} title="Up">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                      </svg>
+                    </button>
+                  )}
+                  {showDown && (
+                    <button type="button" onClick={() => btn(ARROW_DOWN)} disabled={disabled} className={`w-7 h-5 ${btnBase}`} title="Down">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
+              {showRight && (
+                <button type="button" onClick={() => btn(ARROW_RIGHT)} disabled={disabled} className={`w-7 h-7 ${btnBase}`} title="Right">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
       </div>
@@ -445,13 +518,24 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, onSe
             disabled={disabled}
           />
 
-          {/* Unified Send / Select button */}
-          {(() => {
+          {/* Unified Send / Select / Stop button */}
+          {showStop ? (
+            <Button
+              onClick={() => { haptics.impactMedium(); onArrow(ESC); }}
+              disabled={disabled}
+              className="flex-shrink-0 py-2.5 bg-danger hover:bg-danger/90 text-white"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+              </svg>
+              Stop
+            </Button>
+          ) : (() => {
             const showSelect = !!(isSelectionMode && !value.trim());
             return (
               <Button
                 onClick={handleSend}
-                disabled={disabled}
+                disabled={sendDisabled}
                 className="flex-shrink-0 py-2.5"
               >
                 {showSelect ? (

@@ -169,13 +169,19 @@ function SwipeHandler() {
 
         const MIN_DIST = 40;
         if (absDx > absDy && absDx > MIN_DIST) {
-          haptics.impactLight();
           // Natural scroll: swipe right = arrow left, swipe left = arrow right
-          ccSwipeOverride.current(dx > 0 ? 'left' : 'right');
+          const dir = dx > 0 ? 'left' as const : 'right' as const;
+          if (ccSwipeOverride.allowedDirections.has(dir)) {
+            haptics.impactLight();
+            ccSwipeOverride.current(dir);
+          }
         } else if (absDy > absDx && absDy > MIN_DIST) {
-          haptics.impactLight();
           // Natural scroll: swipe up = arrow down, swipe down = arrow up
-          ccSwipeOverride.current(dy > 0 ? 'up' : 'down');
+          const dir = dy > 0 ? 'up' as const : 'down' as const;
+          if (ccSwipeOverride.allowedDirections.has(dir)) {
+            haptics.impactLight();
+            ccSwipeOverride.current(dir);
+          }
         }
         return;
       }

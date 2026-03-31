@@ -39,6 +39,7 @@ export interface SessionStateContext {
   questions?: QuestionPayload[];       // Stored in full for future interactive UI
   plan?: PlanPayload;
   pendingTool?: ToolPermissionPayload;
+  hasBackgroundTasks?: boolean;        // True when run_in_background Bash tasks are active
   lastTextPreview?: string;            // For notifications
   lastEntryTimestamp?: number;
 }

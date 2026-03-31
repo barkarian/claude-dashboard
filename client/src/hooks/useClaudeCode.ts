@@ -17,10 +17,13 @@ interface UseClaudeCodeOptions {
   conversationId?: string | null;
 }
 
+export type TerminalPromptMode = null | { type: 'dismiss' } | { type: 'detail-view' };
+
 interface UseClaudeCodeReturn {
   terminal: RefObject<Terminal | null>;
   status: 'disconnected' | 'running' | 'exited' | 'error';
   isSelectionMode: boolean;
+  terminalPromptMode: TerminalPromptMode;
   write: (data: string) => void;
   stop: () => void;
   searchFindNext: (query: string, incremental?: boolean) => boolean;
@@ -37,6 +40,7 @@ export function useClaudeCode(
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [terminalPromptMode, setTerminalPromptMode] = useState<TerminalPromptMode>(null);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { terminalTheme } = useTheme();
@@ -74,6 +78,32 @@ export function useClaudeCode(
       }
     }
     return false;
+  }, []);
+
+  // Detect interactive prompts at the bottom of the terminal:
+  // - "Press Space, Enter, or Escape to dismiss"
+  // - "← to go back · Esc/Enter/Space to close · x to stop"
+  const detectTerminalPrompt = useCallback((): TerminalPromptMode => {
+    const term = termRef.current;
+    if (!term) return null;
+    const buffer = term.buffer.active;
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
+
+    for (let row = scanStart; row >= Math.max(0, scanStart - 20); row--) {
+      const line = buffer.getLine(row);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      // "← to go back · Esc/Enter/Space to close · x to stop"
+      if (/go\s*back/i.test(text) && /close/i.test(text)) {
+        return { type: 'detail-view' };
+      }
+      // "Press Space, Enter, or Escape to dismiss"
+      if (/Space.*Enter.*Escape.*dismiss/i.test(text) || /press.*to\s+dismiss/i.test(text)) {
+        return { type: 'dismiss' };
+      }
+    }
+    return null;
   }, []);
 
   useEffect(() => {
@@ -423,10 +453,11 @@ export function useClaudeCode(
         captureScrollState();
         term.write(data);
         scheduleScrollCorrection();
-        // Debounce selection mode detection
+        // Debounce selection mode + terminal prompt detection
         if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
         selectionTimerRef.current = setTimeout(() => {
           setIsSelectionMode(detectSelectionMode());
+          setTerminalPromptMode(detectTerminalPrompt());
         }, 100);
       }
     };
@@ -559,5 +590,5 @@ export function useClaudeCode(
     searchAddonRef.current?.clearDecorations();
   }, []);
 
-  return { terminal: termRef, status, isSelectionMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
+  return { terminal: termRef, status, isSelectionMode, terminalPromptMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
 }

@@ -46,6 +46,8 @@ type MachineEvent =
   | { type: 'TOOL_RESULT'; timestamp: number; toolUseIds: string[] }
   | { type: 'ASSISTANT_STREAMING'; timestamp: number; entry: ParsedEntry }
   | { type: 'ASSISTANT_TOOL_USE'; timestamp: number; toolUseIds: string[]; entry: ParsedEntry }
+  | { type: 'BACKGROUND_TASK_START'; timestamp: number; toolUseId: string }
+  | { type: 'BACKGROUND_TASK_COMPLETE'; timestamp: number; toolUseId: string }
   | { type: 'TURN_END'; timestamp: number }
   | { type: 'INTERRUPTED'; timestamp: number };
 
@@ -55,6 +57,8 @@ interface MachineContext {
   pendingToolIds: string[];
   lastAssistantEntry: ParsedEntry | null;
   interrupted: boolean;
+  /** tool_use_ids of Bash commands started with run_in_background: true */
+  activeBackgroundTaskIds: Set<string>;
 }
 
 // Signal types
@@ -171,9 +175,13 @@ function parseTimestamp(entry: ParsedEntry): number {
 }
 
 /**
- * Convert a parsed JSONL entry into a state machine event.
+ * Convert a parsed JSONL entry into state machine event(s).
+ * Returns an array because a single entry can produce multiple events
+ * (e.g. an assistant message with both a normal tool_use and a background Bash).
  */
-function entryToEvent(entry: ParsedEntry): MachineEvent | null {
+function entryToEvents(entry: ParsedEntry): MachineEvent[] {
+  const events: MachineEvent[] = [];
+
   if (entry.type === 'user' && entry.message) {
     const content = entry.message.content;
     const ts = parseTimestamp(entry);
@@ -181,14 +189,14 @@ function entryToEvent(entry: ParsedEntry): MachineEvent | null {
     // Check for interruption
     const interruptText = '[Request interrupted by user]';
     if (typeof content === 'string' && content.includes(interruptText)) {
-      return { type: 'INTERRUPTED', timestamp: ts };
+      return [{ type: 'INTERRUPTED', timestamp: ts }];
     }
     if (Array.isArray(content)) {
       const isInterrupt = content.some(
         (b: any) => b.type === 'text' && typeof b.text === 'string' && b.text.includes(interruptText)
       );
       if (isInterrupt) {
-        return { type: 'INTERRUPTED', timestamp: ts };
+        return [{ type: 'INTERRUPTED', timestamp: ts }];
       }
 
       // Check for tool results
@@ -196,19 +204,19 @@ function entryToEvent(entry: ParsedEntry): MachineEvent | null {
         .filter((b: any) => b.type === 'tool_result')
         .map((b: any) => b.tool_use_id as string);
       if (toolUseIds.length > 0) {
-        return { type: 'TOOL_RESULT', timestamp: ts, toolUseIds };
+        return [{ type: 'TOOL_RESULT', timestamp: ts, toolUseIds }];
       }
 
       // User prompt in array form (with text blocks)
       const hasTextBlock = content.some((b: any) => b.type === 'text');
       if (hasTextBlock) {
-        return { type: 'USER_PROMPT', timestamp: ts, entry };
+        return [{ type: 'USER_PROMPT', timestamp: ts, entry }];
       }
     }
 
     // String content = user prompt
     if (typeof content === 'string') {
-      return { type: 'USER_PROMPT', timestamp: ts, entry };
+      return [{ type: 'USER_PROMPT', timestamp: ts, entry }];
     }
   }
 
@@ -217,33 +225,65 @@ function entryToEvent(entry: ParsedEntry): MachineEvent | null {
     const ts = parseTimestamp(entry);
 
     if (Array.isArray(content)) {
+      // Detect Bash calls with run_in_background: true
+      for (const block of content) {
+        if (block.type === 'tool_use' && block.name === 'Bash' && block.input?.run_in_background === true) {
+          events.push({ type: 'BACKGROUND_TASK_START', timestamp: ts, toolUseId: block.id });
+        }
+      }
+
       // Find non-auto-approved tool_use blocks
       const toolUseBlocks = content.filter(
         (b: any) => b.type === 'tool_use' && !AUTO_APPROVED_TOOLS.has(b.name)
       );
       if (toolUseBlocks.length > 0) {
         const toolUseIds = toolUseBlocks.map((b: any) => b.id as string);
-        return { type: 'ASSISTANT_TOOL_USE', timestamp: ts, toolUseIds, entry };
+        events.push({ type: 'ASSISTANT_TOOL_USE', timestamp: ts, toolUseIds, entry });
+        return events;
       }
     }
 
-    return { type: 'ASSISTANT_STREAMING', timestamp: ts, entry };
+    events.push({ type: 'ASSISTANT_STREAMING', timestamp: ts, entry });
+    return events;
+  }
+
+  // queue-operation records signal background task completion
+  if (entry.type === 'queue-operation' && entry.operation === 'enqueue') {
+    const content = typeof entry.content === 'string' ? entry.content : '';
+    if (content.includes('<status>completed</status>') || content.includes('<status>error</status>')) {
+      const toolIdMatch = content.match(/<tool-use-id>([^<]+)<\/tool-use-id>/);
+      if (toolIdMatch) {
+        events.push({ type: 'BACKGROUND_TASK_COMPLETE', timestamp: parseTimestamp(entry), toolUseId: toolIdMatch[1] });
+      }
+    }
   }
 
   if (entry.type === 'system') {
     if (entry.subtype === 'turn_duration' || entry.subtype === 'stop_hook_summary') {
-      return { type: 'TURN_END', timestamp: parseTimestamp(entry) };
+      events.push({ type: 'TURN_END', timestamp: parseTimestamp(entry) });
     }
   }
 
-  return null;
+  return events;
 }
 
 /**
  * Pure transition function for the state machine.
  */
 function transition(ctx: MachineContext, event: MachineEvent): MachineContext {
-  const next = { ...ctx };
+  const next = { ...ctx, activeBackgroundTaskIds: new Set(ctx.activeBackgroundTaskIds) };
+
+  // Background task events are state-independent
+  if (event.type === 'BACKGROUND_TASK_START') {
+    next.activeBackgroundTaskIds.add(event.toolUseId);
+    next.lastActivityAt = event.timestamp;
+    return next;
+  }
+  if (event.type === 'BACKGROUND_TASK_COMPLETE') {
+    next.activeBackgroundTaskIds.delete(event.toolUseId);
+    next.lastActivityAt = event.timestamp;
+    return next;
+  }
 
   if (event.type === 'INTERRUPTED') {
     next.interrupted = true;
@@ -352,15 +392,16 @@ function transition(ctx: MachineContext, event: MachineEvent): MachineContext {
  */
 function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
   const timestamp = ctx.lastActivityAt || undefined;
+  const hasBg = ctx.activeBackgroundTaskIds.size > 0 || undefined;
 
   // Interrupted
   if (ctx.interrupted) {
-    return { status: 'interrupted', lastEntryTimestamp: timestamp };
+    return { status: 'interrupted', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
   }
 
   // Working
   if (ctx.state === 'working') {
-    return { status: 'working', lastEntryTimestamp: timestamp };
+    return { status: 'working', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
   }
 
   // Waiting for approval — inspect last assistant entry for rich payloads
@@ -392,6 +433,7 @@ function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
         return {
           status: questions.length > 1 ? 'questions-awaiting' : 'question-awaiting',
           questions: questionPayloads,
+          hasBackgroundTasks: hasBg,
           lastEntryTimestamp: timestamp,
         };
       }
@@ -408,30 +450,30 @@ function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
               }))
             : [],
         };
-        return { status: 'plan-awaiting', plan, lastEntryTimestamp: timestamp };
+        return { status: 'plan-awaiting', plan, hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
       }
 
       // Other tools → permission-awaiting
       const description = buildToolDescription(toolName, toolInput);
       const pendingTool: ToolPermissionPayload = { toolName, toolInput, description };
-      return { status: 'permission-awaiting', pendingTool, lastEntryTimestamp: timestamp };
+      return { status: 'permission-awaiting', pendingTool, hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
     }
   }
 
   // Waiting for input — idle or idle with preview
   if (ctx.state === 'waiting_for_input') {
     if (!ctx.lastAssistantEntry?.message) {
-      return { status: 'idle', lastEntryTimestamp: timestamp };
+      return { status: 'idle', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
     }
 
     const msg = ctx.lastAssistantEntry.message;
     const content: any[] = Array.isArray(msg.content) ? msg.content : [];
     const lastText = [...content].reverse().find((b: any) => b.type === 'text');
     const preview = lastText?.text?.slice(0, 100);
-    return { status: 'idle', lastTextPreview: preview, lastEntryTimestamp: timestamp };
+    return { status: 'idle', hasBackgroundTasks: hasBg, lastTextPreview: preview, lastEntryTimestamp: timestamp };
   }
 
-  return { status: 'working', lastEntryTimestamp: timestamp };
+  return { status: 'working', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
 }
 
 /**
@@ -444,11 +486,12 @@ function deriveStateFromEntries(entries: ParsedEntry[]): SessionStateContext {
     pendingToolIds: [],
     lastAssistantEntry: null,
     interrupted: false,
+    activeBackgroundTaskIds: new Set(),
   };
 
   for (const entry of entries) {
-    const event = entryToEvent(entry);
-    if (event) {
+    const events = entryToEvents(entry);
+    for (const event of events) {
       machine = transition(machine, event);
     }
   }

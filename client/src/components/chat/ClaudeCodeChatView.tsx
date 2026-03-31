@@ -6,9 +6,8 @@ import { useSearch, type SearchHandler } from '../../context/SearchContext.tsx';
 import { useSessionStates } from '../../hooks/useSessionStatuses.ts';
 import { useClaudeCode } from '../../hooks/useClaudeCode.ts';
 import { useDraft } from '../../hooks/useDraft.ts';
-import { ccSwipeOverride } from '../../utils/ccSwipeOverride.ts';
+import { ccSwipeOverride, type SwipeDirection } from '../../utils/ccSwipeOverride.ts';
 import CCPromptInput from './CCPromptInput.tsx';
-import QuestionArrowOverlay from './QuestionArrowOverlay.tsx';
 
 // ANSI escape sequences
 const ARROW_MAP: Record<string, string> = {
@@ -37,11 +36,6 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const { updateDraft } = useDraft(projectId, chatId, setProject);
   const sessionStates = useSessionStates(projectId);
   const sessionState = chatId ? sessionStates[chatId] : undefined;
-  const questionStatus = sessionState?.status === 'question-awaiting'
-    ? 'single' as const
-    : sessionState?.status === 'questions-awaiting'
-      ? 'multiple' as const
-      : null;
 
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
@@ -49,7 +43,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     updateDraft(text);
   }, [updateDraft]);
 
-  const { terminal, status, isSelectionMode, write, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
+  const { terminal, status, isSelectionMode, terminalPromptMode, write, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -59,11 +53,54 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Keep ref up to date for the swipe handler
   writeRef.current = write;
 
+  // Compute allowed arrow/swipe directions based on session state + terminal prompts
+  const allowedDirections = useMemo<Set<SwipeDirection>>(() => {
+    const dirs = new Set<SwipeDirection>();
+    const unifiedStatus = sessionState?.status;
+
+    // Terminal prompt detection overrides session state
+    if (terminalPromptMode?.type === 'detail-view') {
+      dirs.add('left');
+      return dirs;
+    }
+    // dismiss mode: no arrows, just the action button
+    if (terminalPromptMode?.type === 'dismiss') {
+      return dirs;
+    }
+
+    switch (unifiedStatus) {
+      case 'question-awaiting':
+        dirs.add('up');
+        dirs.add('down');
+        break;
+      case 'questions-awaiting':
+        dirs.add('up');
+        dirs.add('down');
+        dirs.add('left');
+        dirs.add('right');
+        break;
+      case 'plan-awaiting':
+      case 'permission-awaiting':
+        dirs.add('up');
+        dirs.add('down');
+        break;
+      case 'working':
+      case 'idle':
+        if (sessionState?.hasBackgroundTasks) {
+          dirs.add('down');
+          dirs.add('left');
+          dirs.add('right');
+        }
+        break;
+    }
+    return dirs;
+  }, [sessionState?.status, sessionState?.hasBackgroundTasks, terminalPromptMode]);
+
   // Register swipe override: map swipe gestures to arrow keys + scroll to bottom.
   // Also set containerEl so only swipes starting on the terminal trigger arrows.
   useEffect(() => {
     ccSwipeOverride.containerEl = containerRef.current?.parentElement || null;
-    ccSwipeOverride.current = (direction: 'up' | 'down' | 'left' | 'right') => {
+    ccSwipeOverride.current = (direction: SwipeDirection) => {
       writeRef.current(ARROW_MAP[direction]);
       setTimeout(() => terminal.current?.scrollToBottom(), 50);
     };
@@ -72,6 +109,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       ccSwipeOverride.containerEl = null;
     };
   }, [terminal]);
+
+  // Sync allowed swipe directions
+  useEffect(() => {
+    ccSwipeOverride.allowedDirections = allowedDirections;
+  }, [allowedDirections]);
 
   // Register search handler for Ctrl+F
   const searchHandler = useMemo<SearchHandler>(() => ({
@@ -137,15 +179,6 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Conditional arrow overlay above terminal — mobile only, shown when question(s) awaiting */}
-      {questionStatus && (
-        <QuestionArrowOverlay
-          multiple={questionStatus === 'multiple'}
-          onArrow={handleArrow}
-          disabled={status !== 'running'}
-        />
-      )}
-
       {/* Terminal wrapper: flex-1 for correct height, terminal positioned inside */}
       <div className="flex-1 overflow-hidden relative">
         <div ref={containerRef} className="absolute inset-0" />
@@ -177,6 +210,9 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           projectId={projectId}
           status={status}
           isSelectionMode={isSelectionMode}
+          unifiedStatus={sessionState?.status}
+          terminalPromptMode={terminalPromptMode}
+          allowedDirections={allowedDirections}
           onSend={handleSend}
           onArrow={handleArrow}
           onInterrupt={handleInterrupt}
