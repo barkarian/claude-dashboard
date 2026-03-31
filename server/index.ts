@@ -29,6 +29,8 @@ import credentialService from './services/credentialService.ts';
 import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
+import jsonlWatcher from './services/jsonlWatcher.ts';
+import { installHooks } from './services/signalHooks.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials, getOrCreateSessionSecret } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
 import permissionManagerService from './services/permissionManager.ts';
@@ -189,6 +191,12 @@ setTunnelClientIO(io);
 // Register socket handlers
 registerSocketHandlers(io);
 
+// Start JSONL watcher (chokidar + signal file watching + stale checker)
+jsonlWatcher.startGlobalWatch();
+
+// Install Claude Code hooks for authoritative session signal files
+installHooks();
+
 // Start idle session cleanup sweep
 sdkSessionManager.startIdleCleanup();
 
@@ -253,6 +261,7 @@ async function shutdown(): Promise<void> {
   sdkSessionManager.endAllSessions();
   sdkSessionManager.stopIdleCleanup();
   fileService.stopAllWatching();
+  jsonlWatcher.dispose();
 
   // Disconnect tunnel (don't await remote calls — they may hang)
   tunnelManager.deactivateAllEndpoints().catch(() => {});

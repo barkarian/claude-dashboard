@@ -1,6 +1,3 @@
-import type { Question } from './sdk.ts';
-import type { SessionStatus } from './interactive.ts';
-
 // === Unified Session Status (JSONL-derived, replaces SessionStatus + SDKSessionStatus) ===
 
 export type UnifiedStatus =
@@ -17,7 +14,11 @@ export type UnifiedStatus =
 
 // === JSONL State Payloads ===
 
-export interface QuestionPayload extends Question {
+export interface QuestionPayload {
+  question: string;
+  header: string;
+  options: Array<{ label: string; description: string }>;
+  multiSelect: boolean;
   selectedIndex?: number; // For future arrow-button UI
 }
 
@@ -44,8 +45,10 @@ export interface SessionStateContext {
 
 // === Legacy compat ===
 
+type LegacyStatus = 'starting' | 'idle' | 'thinking' | 'waiting-input' | 'exited';
+
 /** Map UnifiedStatus to legacy SessionStatus for gradual UI migration */
-export function mapToLegacyStatus(status: UnifiedStatus): SessionStatus {
+export function mapToLegacyStatus(status: UnifiedStatus): LegacyStatus {
   switch (status) {
     case 'starting': return 'starting';
     case 'idle': return 'idle';

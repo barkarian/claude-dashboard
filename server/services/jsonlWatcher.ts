@@ -2,11 +2,17 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { watch, type FSWatcher } from 'chokidar';
 import type { SessionStateContext, UnifiedStatus, QuestionPayload, PlanPayload, ToolPermissionPayload } from '../../shared/types/session.ts';
 import type { SDKChatMessage, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock } from '../../shared/types/sdk.ts';
 
-const DEBOUNCE_MS = 150;
-const TAIL_BYTES = 64 * 1024; // Read last 64KB of JSONL
+// --- Constants ---
+
+const DEBOUNCE_MS = 200;
+const STALE_TIMEOUT_MS = 15_000;
+const STALE_CHECK_INTERVAL_MS = 10_000;
+const SIGNALS_DIR = path.join(os.homedir(), '.claude', 'session-signals');
+const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 // Tools that are auto-approved (never trigger permission-awaiting)
 const AUTO_APPROVED_TOOLS = new Set([
@@ -15,63 +21,73 @@ const AUTO_APPROVED_TOOLS = new Set([
   'Agent', 'TaskStop', 'NotebookEdit',
 ]);
 
+// --- Types ---
+
+interface ParsedEntry {
+  type: string;
+  message?: any;
+  timestamp?: string;
+  uuid?: string;
+  subtype?: string;
+  [key: string]: any;
+}
+
+interface TailResult {
+  entries: ParsedEntry[];
+  newPosition: number;
+  hadPartialLine: boolean;
+}
+
+// State machine types
+type MachineState = 'working' | 'waiting_for_approval' | 'waiting_for_input';
+
+type MachineEvent =
+  | { type: 'USER_PROMPT'; timestamp: number; entry: ParsedEntry }
+  | { type: 'TOOL_RESULT'; timestamp: number; toolUseIds: string[] }
+  | { type: 'ASSISTANT_STREAMING'; timestamp: number; entry: ParsedEntry }
+  | { type: 'ASSISTANT_TOOL_USE'; timestamp: number; toolUseIds: string[]; entry: ParsedEntry }
+  | { type: 'TURN_END'; timestamp: number }
+  | { type: 'INTERRUPTED'; timestamp: number };
+
+interface MachineContext {
+  state: MachineState;
+  lastActivityAt: number;
+  pendingToolIds: string[];
+  lastAssistantEntry: ParsedEntry | null;
+  interrupted: boolean;
+}
+
+// Signal types
+interface PendingPermission {
+  session_id: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  pending_since: string;
+}
+
 interface WatchedSession {
   sessionId: string;
   projectPath: string;
   filePath: string;
-  watcher: fs.FSWatcher | null;
-  debounceTimer: ReturnType<typeof setTimeout> | null;
   state: SessionStateContext;
+  bytePosition: number;
+  entries: ParsedEntry[];
 }
 
-/**
- * Encode a project path to match Claude Code's directory naming.
- * `/Users/foo/bar` → `-Users-foo-bar`
- */
+// --- Path helpers ---
+
 function encodeProjectPath(projectPath: string): string {
   return projectPath.replace(/\//g, '-');
 }
 
-/**
- * Get the JSONL file path for a session.
- */
 function getJsonlPath(sessionId: string, projectPath: string): string {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(projectPath));
   return path.join(claudeDir, `${sessionId}.jsonl`);
 }
 
-/**
- * Read the tail of a file (last N bytes) and return complete lines.
- */
-function readTail(filePath: string, bytes: number): string[] {
-  try {
-    const stat = fs.statSync(filePath);
-    if (stat.size === 0) return [];
+// --- Incremental JSONL reading ---
 
-    const start = Math.max(0, stat.size - bytes);
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(Math.min(bytes, stat.size));
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
-
-    const text = buf.toString('utf-8');
-    const lines = text.split('\n').filter(Boolean);
-
-    // If we started mid-file, the first line may be truncated — skip it
-    if (start > 0 && lines.length > 0) {
-      lines.shift();
-    }
-
-    return lines;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Parse a JSONL line safely.
- */
-function parseLine(line: string): any | null {
+function parseLine(line: string): ParsedEntry | null {
   try {
     return JSON.parse(line);
   } catch {
@@ -80,193 +96,377 @@ function parseLine(line: string): any | null {
 }
 
 /**
- * Extract the last assistant and user entries from JSONL lines.
+ * Incrementally read new JSONL entries from a file starting at a byte offset.
+ * Handles partial lines at EOF safely.
  */
-function findLastEntries(lines: string[]): { lastAssistant: any | null; lastUser: any | null } {
-  let lastAssistant: any | null = null;
-  let lastUser: any | null = null;
-
-  // Parse from the end for efficiency
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const entry = parseLine(lines[i]);
-    if (!entry) continue;
-
-    if (entry.type === 'assistant' && !lastAssistant) {
-      lastAssistant = entry;
-    } else if (entry.type === 'user' && entry.message && !lastUser) {
-      lastUser = entry;
+function tailRead(filePath: string, fromByte: number): TailResult {
+  try {
+    const stat = fs.statSync(filePath);
+    if (fromByte >= stat.size) {
+      return { entries: [], newPosition: fromByte, hadPartialLine: false };
     }
 
-    // Found both — stop scanning
-    if (lastAssistant && lastUser) break;
-  }
+    const fd = fs.openSync(filePath, 'r');
+    const readSize = stat.size - fromByte;
+    const buf = Buffer.alloc(readSize);
+    fs.readSync(fd, buf, 0, readSize, fromByte);
+    fs.closeSync(fd);
 
-  return { lastAssistant, lastUser };
-}
+    const content = buf.toString('utf-8');
+    const lines = content.split('\n');
 
-/**
- * Check if the last tool_use has a matching tool_result in a subsequent user entry.
- * This indicates the tool was auto-approved.
- */
-function hasMatchingToolResult(lines: string[], toolUseId: string, assistantIndex: number): boolean {
-  for (let i = assistantIndex + 1; i < lines.length; i++) {
-    const entry = parseLine(lines[i]);
-    if (!entry) continue;
+    const entries: ParsedEntry[] = [];
+    let bytesConsumed = 0;
+    let hadPartialLine = false;
 
-    // Look in user entries for tool_result
-    if (entry.type === 'user' && entry.message) {
-      const content = entry.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === 'tool_result' && block.tool_use_id === toolUseId) {
-            return true;
-          }
-        }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isLastLine = i === lines.length - 1;
+      const lineBytes = Buffer.byteLength(line, 'utf-8');
+
+      // Last line might be partial if file doesn't end with newline
+      if (isLastLine && !content.endsWith('\n') && line.length > 0) {
+        hadPartialLine = true;
+        break;
       }
+
+      // Skip empty lines
+      if (!line.trim()) {
+        bytesConsumed += lineBytes + (isLastLine ? 0 : 1);
+        continue;
+      }
+
+      // Skip lines that don't look like JSON objects
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) {
+        bytesConsumed += lineBytes + 1;
+        continue;
+      }
+
+      const entry = parseLine(line);
+      if (entry) {
+        entries.push(entry);
+      }
+      bytesConsumed += lineBytes + 1;
     }
 
-    // If we hit another assistant entry, stop looking
-    if (entry.type === 'assistant') break;
+    return {
+      entries,
+      newPosition: fromByte + bytesConsumed,
+      hadPartialLine,
+    };
+  } catch {
+    return { entries: [], newPosition: fromByte, hadPartialLine: false };
   }
-  return false;
+}
+
+// --- State machine ---
+
+function parseTimestamp(entry: ParsedEntry): number {
+  if (entry?.timestamp) {
+    const t = new Date(entry.timestamp).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+  return 0;
 }
 
 /**
- * Derive SessionStateContext from JSONL tail content.
+ * Convert a parsed JSONL entry into a state machine event.
  */
-function deriveState(lines: string[]): SessionStateContext {
-  const { lastAssistant, lastUser } = findLastEntries(lines);
+function entryToEvent(entry: ParsedEntry): MachineEvent | null {
+  if (entry.type === 'user' && entry.message) {
+    const content = entry.message.content;
+    const ts = parseTimestamp(entry);
 
-  // Check for interruption in last user entry
-  if (lastUser?.message) {
-    const content = lastUser.message.content;
+    // Check for interruption
     const interruptText = '[Request interrupted by user]';
     if (typeof content === 'string' && content.includes(interruptText)) {
-      return { status: 'interrupted', lastEntryTimestamp: parseTimestamp(lastUser) };
+      return { type: 'INTERRUPTED', timestamp: ts };
     }
     if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block.type === 'text' && typeof block.text === 'string' && block.text.includes(interruptText)) {
-          return { status: 'interrupted', lastEntryTimestamp: parseTimestamp(lastUser) };
-        }
+      const isInterrupt = content.some(
+        (b: any) => b.type === 'text' && typeof b.text === 'string' && b.text.includes(interruptText)
+      );
+      if (isInterrupt) {
+        return { type: 'INTERRUPTED', timestamp: ts };
       }
+
+      // Check for tool results
+      const toolUseIds = content
+        .filter((b: any) => b.type === 'tool_result')
+        .map((b: any) => b.tool_use_id as string);
+      if (toolUseIds.length > 0) {
+        return { type: 'TOOL_RESULT', timestamp: ts, toolUseIds };
+      }
+
+      // User prompt in array form (with text blocks)
+      const hasTextBlock = content.some((b: any) => b.type === 'text');
+      if (hasTextBlock) {
+        return { type: 'USER_PROMPT', timestamp: ts, entry };
+      }
+    }
+
+    // String content = user prompt
+    if (typeof content === 'string') {
+      return { type: 'USER_PROMPT', timestamp: ts, entry };
     }
   }
 
-  // No assistant entry yet → idle (fresh session)
-  if (!lastAssistant?.message) {
-    return { status: 'idle' };
+  if (entry.type === 'assistant' && entry.message) {
+    const content = entry.message.content;
+    const ts = parseTimestamp(entry);
+
+    if (Array.isArray(content)) {
+      // Find non-auto-approved tool_use blocks
+      const toolUseBlocks = content.filter(
+        (b: any) => b.type === 'tool_use' && !AUTO_APPROVED_TOOLS.has(b.name)
+      );
+      if (toolUseBlocks.length > 0) {
+        const toolUseIds = toolUseBlocks.map((b: any) => b.id as string);
+        return { type: 'ASSISTANT_TOOL_USE', timestamp: ts, toolUseIds, entry };
+      }
+    }
+
+    return { type: 'ASSISTANT_STREAMING', timestamp: ts, entry };
   }
 
-  const msg = lastAssistant.message;
-  const stopReason = msg.stop_reason;
-  const content: any[] = Array.isArray(msg.content) ? msg.content : [];
-  const timestamp = parseTimestamp(lastAssistant);
+  if (entry.type === 'system') {
+    if (entry.subtype === 'turn_duration' || entry.subtype === 'stop_hook_summary') {
+      return { type: 'TURN_END', timestamp: parseTimestamp(entry) };
+    }
+  }
 
-  if (stopReason === 'end_turn') {
-    // Extract last text preview
+  return null;
+}
+
+/**
+ * Pure transition function for the state machine.
+ */
+function transition(ctx: MachineContext, event: MachineEvent): MachineContext {
+  const next = { ...ctx };
+
+  if (event.type === 'INTERRUPTED') {
+    next.interrupted = true;
+    next.lastActivityAt = event.timestamp;
+    next.state = 'waiting_for_input';
+    next.pendingToolIds = [];
+    return next;
+  }
+
+  // Clear interrupted on any new activity
+  next.interrupted = false;
+
+  switch (ctx.state) {
+    case 'working':
+      switch (event.type) {
+        case 'USER_PROMPT':
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = [];
+          break;
+        case 'ASSISTANT_STREAMING':
+          next.lastActivityAt = event.timestamp;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'ASSISTANT_TOOL_USE':
+          next.state = 'waiting_for_approval';
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = event.toolUseIds;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'TOOL_RESULT': {
+          next.lastActivityAt = event.timestamp;
+          const remaining = ctx.pendingToolIds.filter(id => !event.toolUseIds.includes(id));
+          next.pendingToolIds = remaining;
+          break;
+        }
+        case 'TURN_END':
+          next.state = 'waiting_for_input';
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = [];
+          break;
+      }
+      break;
+
+    case 'waiting_for_approval':
+      switch (event.type) {
+        case 'TOOL_RESULT': {
+          next.state = 'working';
+          next.lastActivityAt = event.timestamp;
+          const remaining = ctx.pendingToolIds.filter(id => !event.toolUseIds.includes(id));
+          next.pendingToolIds = remaining;
+          break;
+        }
+        case 'USER_PROMPT':
+          next.state = 'working';
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = [];
+          break;
+        case 'ASSISTANT_STREAMING':
+          next.lastActivityAt = event.timestamp;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'ASSISTANT_TOOL_USE':
+          // New tool use while waiting — update pending tools
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = event.toolUseIds;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'TURN_END':
+          next.state = 'waiting_for_input';
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = [];
+          break;
+      }
+      break;
+
+    case 'waiting_for_input':
+      switch (event.type) {
+        case 'USER_PROMPT':
+          next.state = 'working';
+          next.lastActivityAt = event.timestamp;
+          break;
+        case 'ASSISTANT_STREAMING':
+          // Partial logs from resumed sessions
+          next.lastActivityAt = event.timestamp;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'ASSISTANT_TOOL_USE':
+          // Catching up on entries from a resumed session
+          next.state = 'waiting_for_approval';
+          next.lastActivityAt = event.timestamp;
+          next.pendingToolIds = event.toolUseIds;
+          next.lastAssistantEntry = event.entry;
+          break;
+        case 'TURN_END':
+          next.lastActivityAt = event.timestamp;
+          break;
+      }
+      break;
+  }
+
+  return next;
+}
+
+/**
+ * Map the 3-state machine + last assistant entry → our rich SessionStateContext.
+ */
+function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
+  const timestamp = ctx.lastActivityAt || undefined;
+
+  // Interrupted
+  if (ctx.interrupted) {
+    return { status: 'interrupted', lastEntryTimestamp: timestamp };
+  }
+
+  // Working
+  if (ctx.state === 'working') {
+    return { status: 'working', lastEntryTimestamp: timestamp };
+  }
+
+  // Waiting for approval — inspect last assistant entry for rich payloads
+  if (ctx.state === 'waiting_for_approval' && ctx.lastAssistantEntry?.message) {
+    const msg = ctx.lastAssistantEntry.message;
+    const content: any[] = Array.isArray(msg.content) ? msg.content : [];
+
+    // Find the last tool_use block (non-auto-approved)
+    const lastToolUse = [...content].reverse().find(
+      (b: any) => b.type === 'tool_use' && !AUTO_APPROVED_TOOLS.has(b.name)
+    );
+
+    if (lastToolUse) {
+      const toolName: string = lastToolUse.name || '';
+      const toolInput: Record<string, unknown> = lastToolUse.input || {};
+
+      // AskUserQuestion → question-awaiting
+      if (toolName === 'AskUserQuestion') {
+        const questions = (toolInput.questions as any[]) || [];
+        const questionPayloads: QuestionPayload[] = questions.map((q: any) => ({
+          question: q.question || '',
+          header: q.header || '',
+          options: (q.options || []).map((o: any) => ({
+            label: o.label || '',
+            description: o.description || '',
+          })),
+          multiSelect: q.multiSelect || false,
+        }));
+        return {
+          status: questions.length > 1 ? 'questions-awaiting' : 'question-awaiting',
+          questions: questionPayloads,
+          lastEntryTimestamp: timestamp,
+        };
+      }
+
+      // ExitPlanMode → plan-awaiting
+      if (toolName === 'ExitPlanMode') {
+        const plan: PlanPayload = {
+          plan: (toolInput.plan as string) || '',
+          planFilePath: (toolInput.planFilePath as string) || '',
+          allowedPrompts: Array.isArray(toolInput.allowedPrompts)
+            ? (toolInput.allowedPrompts as any[]).map((p: any) => ({
+                tool: p.tool || '',
+                prompt: p.prompt || '',
+              }))
+            : [],
+        };
+        return { status: 'plan-awaiting', plan, lastEntryTimestamp: timestamp };
+      }
+
+      // Other tools → permission-awaiting
+      const description = buildToolDescription(toolName, toolInput);
+      const pendingTool: ToolPermissionPayload = { toolName, toolInput, description };
+      return { status: 'permission-awaiting', pendingTool, lastEntryTimestamp: timestamp };
+    }
+  }
+
+  // Waiting for input — idle or idle with preview
+  if (ctx.state === 'waiting_for_input') {
+    if (!ctx.lastAssistantEntry?.message) {
+      return { status: 'idle', lastEntryTimestamp: timestamp };
+    }
+
+    const msg = ctx.lastAssistantEntry.message;
+    const content: any[] = Array.isArray(msg.content) ? msg.content : [];
     const lastText = [...content].reverse().find((b: any) => b.type === 'text');
     const preview = lastText?.text?.slice(0, 100);
     return { status: 'idle', lastTextPreview: preview, lastEntryTimestamp: timestamp };
   }
 
-  if (stopReason === 'tool_use') {
-    // Find the last tool_use block
-    const lastToolUse = [...content].reverse().find((b: any) => b.type === 'tool_use');
-    if (!lastToolUse) {
-      return { status: 'working', lastEntryTimestamp: timestamp };
-    }
-
-    const toolName: string = lastToolUse.name || '';
-    const toolInput: Record<string, unknown> = lastToolUse.input || {};
-    const toolId: string = lastToolUse.id || '';
-
-    // AskUserQuestion → question-awaiting
-    if (toolName === 'AskUserQuestion') {
-      const questions = (toolInput.questions as any[]) || [];
-      const questionPayloads: QuestionPayload[] = questions.map((q: any) => ({
-        question: q.question || '',
-        header: q.header || '',
-        options: (q.options || []).map((o: any) => ({
-          label: o.label || '',
-          description: o.description || '',
-        })),
-        multiSelect: q.multiSelect || false,
-      }));
-
-      return {
-        status: questions.length > 1 ? 'questions-awaiting' : 'question-awaiting',
-        questions: questionPayloads,
-        lastEntryTimestamp: timestamp,
-      };
-    }
-
-    // ExitPlanMode → plan-awaiting
-    if (toolName === 'ExitPlanMode') {
-      const plan: PlanPayload = {
-        plan: (toolInput.plan as string) || '',
-        planFilePath: (toolInput.planFilePath as string) || '',
-        allowedPrompts: Array.isArray(toolInput.allowedPrompts)
-          ? (toolInput.allowedPrompts as any[]).map((p: any) => ({
-              tool: p.tool || '',
-              prompt: p.prompt || '',
-            }))
-          : [],
-      };
-      return { status: 'plan-awaiting', plan, lastEntryTimestamp: timestamp };
-    }
-
-    // EnterPlanMode → still working (exploring plan mode)
-    if (toolName === 'EnterPlanMode') {
-      return { status: 'working', lastEntryTimestamp: timestamp };
-    }
-
-    // Auto-approved tools → check for matching tool_result
-    if (AUTO_APPROVED_TOOLS.has(toolName)) {
-      // Find the index of the last assistant entry to check for tool_result after it
-      const assistantIndex = findAssistantIndex(lines, lastAssistant);
-      if (assistantIndex >= 0 && hasMatchingToolResult(lines, toolId, assistantIndex)) {
-        return { status: 'working', lastEntryTimestamp: timestamp };
-      }
-      // No result yet but it's an auto-approved tool → still working
-      return { status: 'working', lastEntryTimestamp: timestamp };
-    }
-
-    // Other tools → permission-awaiting
-    const description = buildToolDescription(toolName, toolInput);
-    const pendingTool: ToolPermissionPayload = {
-      toolName,
-      toolInput,
-      description,
-    };
-    return { status: 'permission-awaiting', pendingTool, lastEntryTimestamp: timestamp };
-  }
-
-  // null/undefined stop_reason → still streaming
-  if (!stopReason) {
-    return { status: 'working', lastEntryTimestamp: timestamp };
-  }
-
   return { status: 'working', lastEntryTimestamp: timestamp };
 }
 
-function parseTimestamp(entry: any): number | undefined {
-  if (entry?.timestamp) {
-    const t = new Date(entry.timestamp).getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  return undefined;
-}
+/**
+ * Derive SessionStateContext by running all entries through the state machine.
+ */
+function deriveStateFromEntries(entries: ParsedEntry[]): SessionStateContext {
+  let machine: MachineContext = {
+    state: 'waiting_for_input',
+    lastActivityAt: 0,
+    pendingToolIds: [],
+    lastAssistantEntry: null,
+    interrupted: false,
+  };
 
-function findAssistantIndex(lines: string[], target: any): number {
-  const targetUuid = target?.uuid;
-  if (!targetUuid) return -1;
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const entry = parseLine(lines[i]);
-    if (entry?.uuid === targetUuid) return i;
+  for (const entry of entries) {
+    const event = entryToEvent(entry);
+    if (event) {
+      machine = transition(machine, event);
+    }
   }
-  return -1;
+
+  // Apply stale timeout
+  if (machine.lastActivityAt > 0) {
+    const elapsed = Date.now() - machine.lastActivityAt;
+    if (elapsed > STALE_TIMEOUT_MS) {
+      if (machine.state === 'working' && machine.pendingToolIds.length === 0) {
+        machine.state = 'waiting_for_input';
+      } else if (machine.state === 'waiting_for_approval') {
+        machine.state = 'waiting_for_input';
+        machine.pendingToolIds = [];
+      }
+    }
+  }
+
+  return mapMachineToSessionState(machine);
 }
 
 function buildToolDescription(toolName: string, toolInput: Record<string, unknown>): string {
@@ -282,27 +482,121 @@ function buildToolDescription(toolName: string, toolInput: Record<string, unknow
   return `Claude wants to use: ${toolName}`;
 }
 
+// --- Signal file helpers ---
+
+function parseSignalFilename(filepath: string): { sessionId: string; type: 'working' | 'permission' | 'stop' | 'ended' } | null {
+  const filename = path.basename(filepath);
+  const match = filename.match(/^(.+)\.(working|permission|stop|ended)\.json$/);
+  if (!match) return null;
+  return { sessionId: match[1], type: match[2] as 'working' | 'permission' | 'stop' | 'ended' };
+}
+
+// --- Main watcher class ---
+
 /**
  * Watches JSONL session files and derives SessionStateContext from their content.
- * Emits 'state-change' events when the state changes.
+ * Uses chokidar for reliable file watching, incremental byte-position reading,
+ * a state machine for status derivation, signal file overrides from hooks,
+ * and stale timeout detection.
+ *
+ * Emits 'state-change' events: (sessionId, newState, prevState)
  */
 export class JsonlWatcher extends EventEmitter {
   private sessions = new Map<string, WatchedSession>();
+  private projectsWatcher: FSWatcher | null = null;
+  private signalWatcher: FSWatcher | null = null;
+  private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Signal maps — authoritative overrides from hook scripts
+  private pendingPermissions = new Map<string, PendingPermission>();
+  private workingSignals = new Set<string>();
+  private stopSignals = new Set<string>();
+  private endedSignals = new Set<string>();
+
+  /**
+   * Start the global chokidar watchers and stale checker.
+   * Call once at server startup.
+   */
+  startGlobalWatch(): void {
+    // Watch all JSONL files under ~/.claude/projects/
+    if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+      fs.mkdirSync(CLAUDE_PROJECTS_DIR, { recursive: true });
+    }
+
+    this.projectsWatcher = watch(CLAUDE_PROJECTS_DIR, {
+      persistent: true,
+      ignoreInitial: true,
+      depth: 2,
+      ignored: /agent-.*\.jsonl$/,
+    });
+
+    this.projectsWatcher.on('change', (filepath: string) => {
+      if (!filepath.endsWith('.jsonl')) return;
+      for (const watched of this.sessions.values()) {
+        if (watched.filePath === filepath) {
+          this.debouncedProcess(watched);
+          return;
+        }
+      }
+    });
+
+    this.projectsWatcher.on('error', () => {
+      // Silently handle — directory may not exist yet
+    });
+
+    // Watch signal directory for hook outputs
+    if (!fs.existsSync(SIGNALS_DIR)) {
+      fs.mkdirSync(SIGNALS_DIR, { recursive: true });
+    }
+
+    this.signalWatcher = watch(SIGNALS_DIR, {
+      persistent: true,
+      ignoreInitial: false,
+      depth: 0,
+    });
+
+    this.signalWatcher
+      .on('add', (filepath: string) => {
+        if (filepath.endsWith('.json')) this.handleSignalFile(filepath);
+      })
+      .on('change', (filepath: string) => {
+        if (filepath.endsWith('.json')) this.handleSignalFile(filepath);
+      })
+      .on('unlink', (filepath: string) => {
+        if (filepath.endsWith('.json')) this.handleSignalRemoved(filepath);
+      })
+      .on('error', () => {
+        // Ignore — directory may not exist if hooks aren't set up
+      });
+
+    // Load any existing signal files
+    this.loadExistingSignals();
+
+    // Start periodic stale check
+    this.staleCheckInterval = setInterval(() => {
+      this.checkStaleSessions();
+    }, STALE_CHECK_INTERVAL_MS);
+  }
 
   watchSession(sessionId: string, projectPath: string): void {
-    // Already watching this session
     if (this.sessions.has(sessionId)) return;
 
     const filePath = getJsonlPath(sessionId, projectPath);
-    const initialState: SessionStateContext = { status: 'starting' };
+    const dir = path.dirname(filePath);
+
+    // Ensure directory exists so chokidar can see the file when it's created
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
 
     const watched: WatchedSession = {
       sessionId,
       projectPath,
       filePath,
-      watcher: null,
-      debounceTimer: null,
-      state: initialState,
+      state: { status: 'starting' },
+      bytePosition: 0,
+      entries: [],
     };
 
     this.sessions.set(sessionId, watched);
@@ -311,21 +605,17 @@ export class JsonlWatcher extends EventEmitter {
     if (fs.existsSync(filePath)) {
       this.processFile(watched);
     }
-
-    // Start watching. The file might not exist yet, so watch the directory.
-    this.startWatching(watched);
   }
 
   unwatchSession(sessionId: string): void {
     const watched = this.sessions.get(sessionId);
     if (!watched) return;
 
-    if (watched.watcher) {
-      watched.watcher.close();
-      watched.watcher = null;
-    }
-    if (watched.debounceTimer) {
-      clearTimeout(watched.debounceTimer);
+    // Clear any pending debounce
+    const timer = this.debounceTimers.get(watched.filePath);
+    if (timer) {
+      clearTimeout(timer);
+      this.debounceTimers.delete(watched.filePath);
     }
 
     this.sessions.delete(sessionId);
@@ -335,48 +625,38 @@ export class JsonlWatcher extends EventEmitter {
     return this.sessions.get(sessionId)?.state || null;
   }
 
-  private startWatching(watched: WatchedSession): void {
-    const dir = path.dirname(watched.filePath);
-    const filename = path.basename(watched.filePath);
+  private debouncedProcess(watched: WatchedSession): void {
+    const existing = this.debounceTimers.get(watched.filePath);
+    if (existing) clearTimeout(existing);
 
-    // Ensure directory exists
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    try {
-      watched.watcher = fs.watch(dir, (eventType, changedFile) => {
-        if (changedFile === filename) {
-          this.scheduleProcess(watched);
-        }
-      });
-
-      watched.watcher.on('error', () => {
-        // Silently handle watch errors — file may not exist yet
-      });
-    } catch {
-      // Directory watching failed — will retry on next watchSession call
-    }
-  }
-
-  private scheduleProcess(watched: WatchedSession): void {
-    if (watched.debounceTimer) {
-      clearTimeout(watched.debounceTimer);
-    }
-    watched.debounceTimer = setTimeout(() => {
-      watched.debounceTimer = null;
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(watched.filePath);
       this.processFile(watched);
     }, DEBOUNCE_MS);
+
+    this.debounceTimers.set(watched.filePath, timer);
   }
 
   private processFile(watched: WatchedSession): void {
-    const lines = readTail(watched.filePath, TAIL_BYTES);
-    if (lines.length === 0) return;
+    const { entries: newEntries, newPosition } = tailRead(watched.filePath, watched.bytePosition);
+    if (newEntries.length === 0 && watched.entries.length > 0) return;
 
-    const newState = deriveState(lines);
+    // Accumulate entries and update byte position
+    watched.entries.push(...newEntries);
+    watched.bytePosition = newPosition;
+
+    // Auto-clear signals based on new entries
+    this.autoClearSignals(watched.sessionId, newEntries);
+
+    // Derive state from full entry history
+    let newState = deriveStateFromEntries(watched.entries);
+
+    // Apply signal overrides (authoritative)
+    newState = this.applySignalOverrides(watched.sessionId, newState);
+
     const prevState = watched.state;
 
-    // Only emit if status or key context changed
+    // Only emit if meaningful change
     if (
       newState.status !== prevState.status ||
       newState.lastTextPreview !== prevState.lastTextPreview ||
@@ -388,14 +668,188 @@ export class JsonlWatcher extends EventEmitter {
   }
 
   /**
+   * Apply hook signal overrides. Signals are authoritative over JSONL-derived state.
+   */
+  private applySignalOverrides(sessionId: string, state: SessionStateContext): SessionStateContext {
+    if (this.endedSignals.has(sessionId)) {
+      return { ...state, status: 'idle' };
+    }
+    const perm = this.pendingPermissions.get(sessionId);
+    if (perm) {
+      const pendingTool: ToolPermissionPayload = {
+        toolName: perm.tool_name || 'Unknown',
+        toolInput: perm.tool_input || {},
+        description: buildToolDescription(perm.tool_name || 'Unknown', perm.tool_input || {}),
+      };
+      return { ...state, status: 'permission-awaiting', pendingTool };
+    }
+    if (this.stopSignals.has(sessionId)) {
+      return { ...state, status: 'idle' };
+    }
+    if (this.workingSignals.has(sessionId)) {
+      return { ...state, status: 'working' };
+    }
+    return state;
+  }
+
+  /**
+   * Auto-clear signals when corresponding JSONL events are detected.
+   */
+  private autoClearSignals(sessionId: string, newEntries: ParsedEntry[]): void {
+    for (const entry of newEntries) {
+      // Tool result → clear pending permission
+      if (entry.type === 'user' && entry.message && Array.isArray(entry.message.content)) {
+        const hasToolResult = entry.message.content.some((b: any) => b.type === 'tool_result');
+        if (hasToolResult && this.pendingPermissions.has(sessionId)) {
+          this.pendingPermissions.delete(sessionId);
+          try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.permission.json`)); } catch {}
+        }
+      }
+      // User prompt → clear stop signal
+      if (entry.type === 'user' && entry.message) {
+        const content = entry.message.content;
+        if (typeof content === 'string' && this.stopSignals.has(sessionId)) {
+          this.stopSignals.delete(sessionId);
+          try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.stop.json`)); } catch {}
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle a signal file being created/updated.
+   */
+  private handleSignalFile(filepath: string): void {
+    const parsed = parseSignalFilename(filepath);
+    if (!parsed) return;
+
+    const { sessionId, type } = parsed;
+
+    let data: any;
+    try {
+      data = JSON.parse(fs.readFileSync(filepath, 'utf-8'));
+    } catch {
+      return;
+    }
+
+    if (type === 'working') {
+      this.workingSignals.add(sessionId);
+      this.stopSignals.delete(sessionId);
+    } else if (type === 'permission') {
+      this.pendingPermissions.set(sessionId, data as PendingPermission);
+    } else if (type === 'stop') {
+      this.stopSignals.add(sessionId);
+      this.workingSignals.delete(sessionId);
+      this.pendingPermissions.delete(sessionId);
+    } else if (type === 'ended') {
+      this.endedSignals.add(sessionId);
+      this.workingSignals.delete(sessionId);
+      this.pendingPermissions.delete(sessionId);
+      this.stopSignals.delete(sessionId);
+    }
+
+    // Re-emit state for this session if we're watching it
+    const watched = this.sessions.get(sessionId);
+    if (watched) {
+      let newState = deriveStateFromEntries(watched.entries);
+      newState = this.applySignalOverrides(sessionId, newState);
+      const prevState = watched.state;
+      if (newState.status !== prevState.status || newState.lastTextPreview !== prevState.lastTextPreview) {
+        watched.state = newState;
+        this.emit('state-change', sessionId, newState, prevState);
+      }
+    }
+  }
+
+  /**
+   * Handle a signal file being removed.
+   */
+  private handleSignalRemoved(filepath: string): void {
+    const parsed = parseSignalFilename(filepath);
+    if (!parsed) return;
+
+    const { sessionId, type } = parsed;
+
+    if (type === 'working') this.workingSignals.delete(sessionId);
+    else if (type === 'permission') this.pendingPermissions.delete(sessionId);
+    else if (type === 'stop') this.stopSignals.delete(sessionId);
+    else if (type === 'ended') this.endedSignals.delete(sessionId);
+
+    // Re-derive state without the signal
+    const watched = this.sessions.get(sessionId);
+    if (watched) {
+      let newState = deriveStateFromEntries(watched.entries);
+      newState = this.applySignalOverrides(sessionId, newState);
+      const prevState = watched.state;
+      if (newState.status !== prevState.status) {
+        watched.state = newState;
+        this.emit('state-change', sessionId, newState, prevState);
+      }
+    }
+  }
+
+  /**
+   * Load existing signal files on startup.
+   */
+  private loadExistingSignals(): void {
+    try {
+      const files = fs.readdirSync(SIGNALS_DIR);
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          this.handleSignalFile(path.join(SIGNALS_DIR, file));
+        }
+      }
+    } catch {
+      // Directory doesn't exist or can't be read
+    }
+  }
+
+  /**
+   * Periodically check for stale sessions stuck in "working".
+   */
+  private checkStaleSessions(): void {
+    for (const watched of this.sessions.values()) {
+      if (watched.state.status !== 'working') continue;
+
+      // Re-derive (stale timeout is built into deriveStateFromEntries)
+      let newState = deriveStateFromEntries(watched.entries);
+      newState = this.applySignalOverrides(watched.sessionId, newState);
+
+      if (newState.status !== watched.state.status) {
+        const prev = watched.state;
+        watched.state = newState;
+        this.emit('state-change', watched.sessionId, newState, prev);
+      }
+    }
+  }
+
+  /**
    * Clean up all watchers on shutdown.
    */
   dispose(): void {
-    for (const [sessionId] of this.sessions) {
-      this.unwatchSession(sessionId);
+    if (this.projectsWatcher) {
+      this.projectsWatcher.close();
+      this.projectsWatcher = null;
     }
+    if (this.signalWatcher) {
+      this.signalWatcher.close();
+      this.signalWatcher = null;
+    }
+    if (this.staleCheckInterval) {
+      clearInterval(this.staleCheckInterval);
+      this.staleCheckInterval = null;
+    }
+    for (const timer of this.debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
+    this.sessions.clear();
   }
 }
+
+// ==========================================
+// History / prompt reading (unchanged)
+// ==========================================
 
 /**
  * Read a session's JSONL file and return the conversation as SDKChatMessage[].
