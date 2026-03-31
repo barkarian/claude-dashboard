@@ -4,12 +4,14 @@ import { Button } from '../ui/button.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import ScriptPickerPanel from './ScriptPickerPanel.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
+import SavedRecordingsPanel from './SavedRecordingsPanel.tsx';
 
 interface DesktopRecordingControlsProps {
   projectId: string;
+  onInsertText?: (text: string) => void;
 }
 
-export default function DesktopRecordingControls({ projectId }: DesktopRecordingControlsProps) {
+export default function DesktopRecordingControls({ projectId, onInsertText }: DesktopRecordingControlsProps) {
   const { activeRecording, recordings, stopRecording, getRecordingContent } = useTerminalRecording();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -278,6 +280,25 @@ export default function DesktopRecordingControls({ projectId }: DesktopRecording
                 </div>
               )}
             </div>
+          )}
+
+          {/* ── Saved Recordings (persisted) ── */}
+          {!activeRecording && !showScriptPicker && showPanel && (
+            <SavedRecordingsPanel
+              projectId={projectId}
+              onInsert={(content) => {
+                if (onInsertText) {
+                  onInsertText(content);
+                  setShowPanel(false);
+                } else {
+                  // Fallback: copy to clipboard on desktop
+                  navigator.clipboard.writeText(content).catch(() => {});
+                  setCopiedId('saved');
+                  setTimeout(() => setCopiedId(null), 2000);
+                }
+              }}
+              onClose={() => setShowPanel(false)}
+            />
           )}
         </PopoverContent>
       </Popover>

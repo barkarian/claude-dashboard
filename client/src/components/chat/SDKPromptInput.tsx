@@ -8,9 +8,13 @@ import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
+import SavedRecordingsPanel, { formatSavedRecording, buildRecordingHeader } from './SavedRecordingsPanel.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
+import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { haptics } from '../../utils/haptics.ts';
+import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
+import type { SavedRecording } from '../../../../shared/types/models.ts';
 
 interface SDKPromptInputProps {
   projectId: string;
@@ -35,6 +39,29 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const pendingAutoSendRef = useRef<string | null>(null);
 
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
+  const isMobile = useIsMobile();
+  const [showSavedRecordings, setShowSavedRecordings] = useState(false);
+
+  // Mobile auto-insert: prepend saved recordings into prompt on chat open
+  useEffect(() => {
+    if (!isMobile) return;
+    api.get<{ recordings: SavedRecording[] }>(`/api/projects/${projectId}/recordings`)
+      .then(res => {
+        const recs = res.recordings;
+        if (!recs?.length) return;
+        setValue(prev => {
+          // Filter out recordings already present in the prompt (deduplicate by header)
+          const newRecs = recs.filter(r => {
+            const header = buildRecordingHeader(r);
+            return !prev.includes(header);
+          });
+          if (!newRecs.length) return prev;
+          const content = newRecs.map(formatSavedRecording).join('\n\n');
+          return content + (prev ? '\n\n' + prev : '');
+        });
+      })
+      .catch(() => {});
+  }, [isMobile, projectId]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -172,6 +199,33 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
         </div>
       )}
 
+      {showSavedRecordings && !activeRecording && !showScriptPicker && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
+          <div className="bg-bg-surface border border-border rounded-xl shadow-xl overflow-hidden">
+            <div className="p-3 border-b border-border">
+              <button
+                onClick={() => { setShowSavedRecordings(false); setShowScriptPicker(true); }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
+              >
+                <svg className="w-4 h-4 text-danger" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="7" />
+                </svg>
+                New Recording
+              </button>
+            </div>
+            <SavedRecordingsPanel
+              projectId={projectId}
+              onInsert={(content) => {
+                setValue(prev => content + (prev ? '\n\n' + prev : ''));
+                setShowSavedRecordings(false);
+              }}
+              onClose={() => setShowSavedRecordings(false)}
+              compact
+            />
+          </div>
+        </div>
+      )}
+
       {showLivePreview && activeRecording && (
         <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
           <RecordingPreviewPanel
@@ -202,7 +256,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
         </button>
 
         <TerminalRecordButton
-          onOpenScriptPicker={() => setShowScriptPicker(true)}
+          onOpenScriptPicker={() => setShowSavedRecordings(true)}
           onOpenLivePreview={() => setShowLivePreview(true)}
           disabled={disabled}
         />

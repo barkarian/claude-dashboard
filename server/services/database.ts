@@ -92,6 +92,24 @@ db.exec(`
   );
 `);
 
+// Recordings table (per-project terminal recording persistence)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS recordings (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    scripts TEXT NOT NULL,
+    lines TEXT NOT NULL,
+    browser_lines TEXT NOT NULL DEFAULT '[]',
+    line_count INTEGER NOT NULL DEFAULT 0,
+    browser_line_count INTEGER NOT NULL DEFAULT 0,
+    duration_secs INTEGER,
+    started_at TEXT NOT NULL,
+    stopped_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_recordings_project ON recordings(project_id);
+`);
+
 // --- Migrations ---
 // Add shell_override column to projects (safe to re-run)
 try {

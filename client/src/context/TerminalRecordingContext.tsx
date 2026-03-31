@@ -1,6 +1,7 @@
 import { createContext, useCallback, useRef, useState, useEffect, type ReactNode } from 'react';
 import { useSocket } from './SocketContext.tsx';
 import { stripAnsi } from '../utils/ansi.ts';
+import api from '../utils/api.ts';
 
 export interface RecordingScript {
   scriptId: string;
@@ -249,6 +250,16 @@ export function TerminalRecordingProvider({ children }: { children: ReactNode })
       next.set(id, recording);
       return next;
     });
+
+    // Persist to database
+    api.post(`/api/projects/${projectId}/recordings`, {
+      id,
+      scripts: scripts.map(s => ({ scriptId: s.scriptId, label: s.label, command: s.command })),
+      lines: recording.lines,
+      browserLines: recording.browserLines,
+      startedAt,
+      stoppedAt: recording.stoppedAt,
+    }).catch((err) => console.error('Failed to persist recording:', err));
 
     activeRef.current = null;
     bufferRef.current = { lines: [], rawLines: [], browserLines: [] };

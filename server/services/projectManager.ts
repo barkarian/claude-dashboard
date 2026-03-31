@@ -5,7 +5,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry, ChatAdapter } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry, ChatAdapter, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
 // === Project Methods ===
 
@@ -435,6 +435,78 @@ function getChatMessages(chatId: string): ChatHistoryEntry[] {
   });
 }
 
+// === Recording Methods ===
+
+const MAX_RECORDINGS_PER_PROJECT = 20;
+
+function saveRecording(projectId: string, recording: {
+  id: string;
+  scripts: SavedRecordingScript[];
+  lines: string[];
+  browserLines: string[];
+  startedAt: number;
+  stoppedAt: number;
+}): void {
+  const durationSecs = Math.round((recording.stoppedAt - recording.startedAt) / 1000);
+  const startedAt = new Date(recording.startedAt).toISOString();
+  const stoppedAt = new Date(recording.stoppedAt).toISOString();
+
+  db.prepare(`
+    INSERT INTO recordings (id, project_id, scripts, lines, browser_lines, line_count, browser_line_count, duration_secs, started_at, stopped_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    recording.id,
+    projectId,
+    JSON.stringify(recording.scripts),
+    JSON.stringify(recording.lines),
+    JSON.stringify(recording.browserLines),
+    recording.lines.length,
+    recording.browserLines.length,
+    durationSecs,
+    startedAt,
+    stoppedAt,
+  );
+
+  // Enforce per-project limit: delete oldest beyond MAX
+  const excess = db.prepare(`
+    SELECT id FROM recordings WHERE project_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?
+  `).all(projectId, MAX_RECORDINGS_PER_PROJECT) as any[];
+  for (const row of excess) {
+    db.prepare('DELETE FROM recordings WHERE id = ?').run(row.id);
+  }
+}
+
+function listRecordings(projectId: string): SavedRecording[] {
+  const rows = db.prepare('SELECT * FROM recordings WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as any[];
+  return rows.map(mapRowToRecording);
+}
+
+function getRecording(recordingId: string): SavedRecording | null {
+  const row = db.prepare('SELECT * FROM recordings WHERE id = ?').get(recordingId) as any;
+  if (!row) return null;
+  return mapRowToRecording(row);
+}
+
+function deleteRecording(recordingId: string): void {
+  db.prepare('DELETE FROM recordings WHERE id = ?').run(recordingId);
+}
+
+function mapRowToRecording(r: any): SavedRecording {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    scripts: JSON.parse(r.scripts),
+    lines: JSON.parse(r.lines),
+    browserLines: JSON.parse(r.browser_lines),
+    lineCount: r.line_count,
+    browserLineCount: r.browser_line_count,
+    durationSecs: r.duration_secs,
+    startedAt: r.started_at,
+    stoppedAt: r.stopped_at,
+    createdAt: r.created_at,
+  };
+}
+
 export default {
   // Projects
   listProjects,
@@ -467,4 +539,9 @@ export default {
   deleteChat,
   addMessage,
   getChatMessages,
+  // Recordings
+  saveRecording,
+  listRecordings,
+  getRecording,
+  deleteRecording,
 };

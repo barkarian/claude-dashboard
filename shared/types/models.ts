@@ -128,3 +128,25 @@ export interface BranchList {
   local: string[];
   remote: string[];
 }
+
+// === Saved Recordings ===
+
+export interface SavedRecordingScript {
+  scriptId: string;
+  label: string;
+  command: string;
+}
+
+export interface SavedRecording {
+  id: string;
+  projectId: string;
+  scripts: SavedRecordingScript[];
+  lines: string[];
+  browserLines: string[];
+  lineCount: number;
+  browserLineCount: number;
+  durationSecs: number | null;
+  startedAt: string;
+  stoppedAt: string | null;
+  createdAt: string;
+}

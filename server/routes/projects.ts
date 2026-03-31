@@ -483,6 +483,49 @@ router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: st
   }
 });
 
+// --- Saved recordings ---
+
+router.get('/:id/recordings', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const recordings = projectManager.listRecordings(req.params.id);
+    res.json({ recordings });
+  } catch (err) {
+    console.error('Error listing recordings:', err);
+    res.status(500).json({ error: 'Failed to list recordings' });
+  }
+});
+
+router.post('/:id/recordings', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { id, scripts, lines, browserLines, startedAt, stoppedAt } = req.body;
+    if (!id || !scripts || !lines) {
+      return res.status(400).json({ error: 'id, scripts, and lines are required' });
+    }
+    projectManager.saveRecording(req.params.id, {
+      id,
+      scripts,
+      lines,
+      browserLines: browserLines || [],
+      startedAt,
+      stoppedAt,
+    });
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('Error saving recording:', err);
+    res.status(500).json({ error: 'Failed to save recording' });
+  }
+});
+
+router.delete('/:id/recordings/:recId', async (req: Request<{ id: string; recId: string }>, res: Response) => {
+  try {
+    projectManager.deleteRecording(req.params.recId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting recording:', err);
+    res.status(500).json({ error: 'Failed to delete recording' });
+  }
+});
+
 // --- Prompt history (previous message picker) ---
 
 router.get('/:id/prompt-history', async (req: Request<{ id: string }>, res: Response) => {
