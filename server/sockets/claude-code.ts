@@ -224,7 +224,14 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
   socket.on('cc:input', ({ chatId, data }: CCInputPayload) => {
     const session = sessions.get(chatId);
     if (session && session.status === 'running') {
-      session.pty.write(data);
+      // Wrap multi-line input in bracketed paste sequences so the shell
+      // accepts the block instead of showing "[pasted N lines]" and stalling.
+      if (data.includes('\n')) {
+        const stripped = data.endsWith('\r') ? data.slice(0, -1) : data;
+        session.pty.write(`\x1b[200~${stripped}\x1b[201~\r`);
+      } else {
+        session.pty.write(data);
+      }
 
       // Auto-title: rename "New Chat" on first user Enter
       if (!session.hasAutoRenamed) {
