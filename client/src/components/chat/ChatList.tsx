@@ -70,10 +70,6 @@ function StatusBadge({ state }: { state: SessionStateContext }) {
       text = 'Active';
       dotClass = 'bg-success';
       break;
-    case 'interrupted':
-      text = 'Interrupted';
-      dotClass = 'bg-warning';
-      break;
     default:
       return null;
   }

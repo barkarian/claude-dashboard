@@ -2,13 +2,12 @@
 
 export type UnifiedStatus =
   | 'starting'            // Process launching, no JSONL yet
-  | 'idle'                // stop_reason == 'end_turn', waiting for next prompt
+  | 'idle'                // stop_reason == 'end_turn' OR interrupted — waiting for next prompt
   | 'working'             // Streaming or tool execution in progress
   | 'question-awaiting'   // AskUserQuestion, questions.length == 1
   | 'questions-awaiting'  // AskUserQuestion, questions.length > 1
   | 'plan-awaiting'       // ExitPlanMode, waiting for accept/reject
   | 'permission-awaiting' // Bash/Edit/Write etc. pending approval
-  | 'interrupted'         // "[Request interrupted by user]"
   | 'exited'
   | 'error';
 
@@ -58,7 +57,6 @@ export function mapToLegacyStatus(status: UnifiedStatus): LegacyStatus {
     case 'questions-awaiting':
     case 'plan-awaiting':
     case 'permission-awaiting': return 'waiting-input';
-    case 'interrupted': return 'idle';
     case 'exited': return 'exited';
     case 'error': return 'exited';
     default: return 'idle';

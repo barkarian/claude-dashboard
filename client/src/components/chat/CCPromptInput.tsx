@@ -117,7 +117,23 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, unif
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      onArrow(ESC);
+      if (value.trim()) {
+        // First tap: clear the input ("clear line")
+        setValue('');
+        onDraftChange?.('');
+      } else if (
+        unifiedStatus === 'working' ||
+        unifiedStatus === 'question-awaiting' ||
+        unifiedStatus === 'questions-awaiting' ||
+        unifiedStatus === 'plan-awaiting' ||
+        unifiedStatus === 'permission-awaiting'
+      ) {
+        // Empty input + active session: send SIGINT to interrupt/cancel
+        onInterrupt();
+      } else {
+        // Idle / starting / exited — forward raw escape to PTY
+        onArrow(ESC);
+      }
       return;
     }
   }
@@ -344,7 +360,7 @@ export default function CCPromptInput({ projectId, status, isSelectionMode, unif
           {showStop ? (
             <button
               type="button"
-              onClick={() => { haptics.impactMedium(); onArrow(ESC); }}
+              onClick={() => { haptics.impactMedium(); onInterrupt(); }}
               disabled={disabled}
               className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-danger text-white active:bg-danger/80 transition-colors disabled:opacity-30"
               title="Stop"

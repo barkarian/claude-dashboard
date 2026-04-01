@@ -97,7 +97,6 @@ export default function ProjectDashboardPage() {
         case 'questions-awaiting': return 'questions';
         case 'plan-awaiting': return 'plan ready';
         case 'permission-awaiting': return activeSessionState.pendingTool?.toolName || 'permission';
-        case 'interrupted': return 'interrupted';
         default: return activeSessionState.status;
       }
     }
@@ -120,7 +119,6 @@ export default function ProjectDashboardPage() {
         case 'plan-awaiting': return 'bg-[#a855f7] animate-pulse';
         case 'permission-awaiting': return 'bg-warning animate-pulse';
         case 'starting': return 'bg-primary animate-pulse';
-        case 'interrupted': return 'bg-warning';
         default: return 'bg-text-dim';
       }
     }

@@ -56,7 +56,6 @@ interface MachineContext {
   lastActivityAt: number;
   pendingToolIds: string[];
   lastAssistantEntry: ParsedEntry | null;
-  interrupted: boolean;
   /** tool_use_ids of Bash commands started with run_in_background: true */
   activeBackgroundTaskIds: Set<string>;
 }
@@ -286,15 +285,11 @@ function transition(ctx: MachineContext, event: MachineEvent): MachineContext {
   }
 
   if (event.type === 'INTERRUPTED') {
-    next.interrupted = true;
     next.lastActivityAt = event.timestamp;
     next.state = 'waiting_for_input';
     next.pendingToolIds = [];
     return next;
   }
-
-  // Clear interrupted on any new activity
-  next.interrupted = false;
 
   switch (ctx.state) {
     case 'working':
@@ -394,11 +389,6 @@ function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
   const timestamp = ctx.lastActivityAt || undefined;
   const hasBg = ctx.activeBackgroundTaskIds.size > 0 || undefined;
 
-  // Interrupted
-  if (ctx.interrupted) {
-    return { status: 'interrupted', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
-  }
-
   // Working
   if (ctx.state === 'working') {
     return { status: 'working', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
@@ -485,7 +475,6 @@ function deriveStateFromEntries(entries: ParsedEntry[]): SessionStateContext {
     lastActivityAt: 0,
     pendingToolIds: [],
     lastAssistantEntry: null,
-    interrupted: false,
     activeBackgroundTaskIds: new Set(),
   };
 
@@ -730,10 +719,59 @@ export class JsonlWatcher extends EventEmitter {
     }
     const perm = this.pendingPermissions.get(sessionId);
     if (perm) {
-      // Don't override JSONL-derived question/plan states — those are richer than the signal
+      // If JSONL already derived a rich state, preserve it
       if (isRichWaitingState) {
         return state;
       }
+
+      const toolName = perm.tool_name || '';
+      const toolInput: Record<string, unknown> = perm.tool_input || {};
+
+      // AskUserQuestion → derive question-awaiting directly from signal data
+      // This handles the race where the signal arrives before the 200ms JSONL debounce
+      if (toolName === 'AskUserQuestion') {
+        const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
+        const questionPayloads: QuestionPayload[] = questions.map((q: any) => ({
+          question: q.question || '',
+          header: q.header || '',
+          options: (q.options || []).map((o: any) => ({
+            label: o.label || '',
+            description: o.description || '',
+          })),
+          multiSelect: q.multiSelect || false,
+        }));
+        // Fallback: single question string (Claude Code's typical AskUserQuestion format)
+        if (questionPayloads.length === 0 && typeof toolInput.question === 'string') {
+          questionPayloads.push({
+            question: toolInput.question,
+            header: '',
+            options: [],
+            multiSelect: false,
+          });
+        }
+        return {
+          ...state,
+          status: questions.length > 1 ? 'questions-awaiting' : 'question-awaiting',
+          questions: questionPayloads,
+        };
+      }
+
+      // ExitPlanMode → derive plan-awaiting directly from signal data
+      if (toolName === 'ExitPlanMode') {
+        const plan: PlanPayload = {
+          plan: (toolInput.plan as string) || '',
+          planFilePath: (toolInput.planFilePath as string) || '',
+          allowedPrompts: Array.isArray(toolInput.allowedPrompts)
+            ? (toolInput.allowedPrompts as any[]).map((p: any) => ({
+                tool: p.tool || '',
+                prompt: p.prompt || '',
+              }))
+            : [],
+        };
+        return { ...state, status: 'plan-awaiting', plan };
+      }
+
+      // Generic permission-awaiting for all other tools
       const pendingTool: ToolPermissionPayload = {
         toolName: perm.tool_name || 'Unknown',
         toolInput: perm.tool_input || {},
