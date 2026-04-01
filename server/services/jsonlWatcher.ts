@@ -795,6 +795,15 @@ export class JsonlWatcher extends EventEmitter {
       }
       return { ...state, status: 'working' };
     }
+
+    // JSONL-derived 'permission-awaiting' without a corresponding permission signal
+    // is unreliable: the JSONL can't distinguish "waiting for user approval" from
+    // "tool is auto-approved and running" (e.g. with --dangerously-skip-permissions).
+    // The signal is the authoritative source for genuine permission requests.
+    if (state.status === 'permission-awaiting' && !this.pendingPermissions.has(sessionId)) {
+      return { ...state, status: 'working' };
+    }
+
     return state;
   }
 
@@ -826,7 +835,7 @@ export class JsonlWatcher extends EventEmitter {
           try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
         }
       }
-      // Interrupted → clear working signal
+      // Interrupted → clear working signal and pending permission
       if (entry.type === 'user' && entry.message) {
         const content = entry.message.content;
         const interruptText = '[Request interrupted by user]';
@@ -835,9 +844,15 @@ export class JsonlWatcher extends EventEmitter {
           : Array.isArray(content) && content.some(
               (b: any) => b.type === 'text' && typeof b.text === 'string' && b.text.includes(interruptText)
             );
-        if (isInterrupt && this.workingSignals.has(sessionId)) {
-          this.workingSignals.delete(sessionId);
-          try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
+        if (isInterrupt) {
+          if (this.workingSignals.has(sessionId)) {
+            this.workingSignals.delete(sessionId);
+            try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
+          }
+          if (this.pendingPermissions.has(sessionId)) {
+            this.pendingPermissions.delete(sessionId);
+            try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.permission.json`)); } catch {}
+          }
         }
       }
     }
@@ -932,11 +947,16 @@ export class JsonlWatcher extends EventEmitter {
   }
 
   /**
-   * Periodically check for stale sessions stuck in "working".
+   * Periodically check for stale sessions stuck in active states.
+   * Covers 'working', 'question-awaiting', 'questions-awaiting',
+   * 'plan-awaiting', and 'permission-awaiting' — any state that could
+   * become stale if the JSONL or signals don't update (e.g. user
+   * interrupted a question via Escape and no new entries were written).
    */
   private checkStaleSessions(): void {
     for (const watched of this.sessions.values()) {
-      if (watched.state.status !== 'working') continue;
+      const s = watched.state.status;
+      if (s === 'idle' || s === 'starting' || s === 'exited' || s === 'error') continue;
 
       // Re-derive (stale timeout is built into deriveStateFromEntries)
       let newState = deriveStateFromEntries(watched.entries);
