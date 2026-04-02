@@ -275,7 +275,11 @@ export function useTerminal(
     // Handle user input
     if (!readOnly) {
       term.onData((data: string) => {
-        socket.emit('terminal:input', { projectId, scriptId, data });
+        // On mobile, multiline input (paste) triggers bracketed-paste mode which
+        // shows "[copy N lines]" and waits for an extra Enter.  Append \r so the
+        // paste is submitted automatically instead of leaving the user stuck.
+        const payload = (isMobile && data.includes('\n')) ? data + '\r' : data;
+        socket.emit('terminal:input', { projectId, scriptId, data: payload });
       });
     }
 
