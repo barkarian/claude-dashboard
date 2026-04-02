@@ -131,6 +131,12 @@ export interface BranchList {
   remote: string[];
 }
 
+export interface RepoInfo {
+  repoPath: string;
+  name: string;
+  changeCount: number;
+}
+
 // === Saved Recordings ===
 
 export interface SavedRecordingScript {

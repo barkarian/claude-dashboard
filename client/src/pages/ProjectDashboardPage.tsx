@@ -18,6 +18,7 @@ import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
 import DesktopRecordingControls from '../components/chat/DesktopRecordingControls.tsx';
+import { useRepoChanges } from '../hooks/useRepoChanges.ts';
 import api from '../utils/api.ts';
 import { haptics } from '../utils/haptics.ts';
 import type { Chat } from '../../../shared/types/models.ts';
@@ -44,7 +45,7 @@ export default function ProjectDashboardPage() {
   const sessionStatuses = useSessionStatuses(id);
   const sessionStates = useSessionStates(id);
   const prevStatusesRef = useRef<Record<string, string>>({});
-  const [diffCount, setDiffCount] = useState(0);
+  const { repos, selectedRepo, setSelectedRepo, totalChangeCount, refresh: refreshRepos } = useRepoChanges(id!);
   const { runningCount, processesWithPorts } = useProcessStatus(id);
   const keyboard = useKeyboardVisible();
   const [showProjectSettings, setShowProjectSettings] = useState(false);
@@ -63,14 +64,6 @@ export default function ProjectDashboardPage() {
       .then((data) => setDirExists(data.exists))
       .catch(() => setDirExists(false));
   }, [project?.id, id]);
-
-  // Fetch diff count for badge
-  useEffect(() => {
-    if (!id) return;
-    api.get<{ files?: any[] }>(`/api/projects/${id}/diff`)
-      .then((data) => setDiffCount(data.files?.length || 0))
-      .catch(() => setDiffCount(0));
-  }, [id]);
 
   // Derive current tab and active chat from pathname
   const pathAfterProject = location.pathname.split(`/project/${id}/`)[1] || '';
@@ -320,7 +313,7 @@ export default function ProjectDashboardPage() {
           <Route path="chats/:chatId" element={<ChatViewRouter projectId={id!} />} />
           <Route path="files" element={
             <div className="flex-1 flex flex-col overflow-hidden">
-              <FilesPage projectId={id!} />
+              <FilesPage projectId={id!} repos={repos} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} onRepoRefresh={refreshRepos} />
             </div>
           } />
         </Routes>
@@ -332,7 +325,7 @@ export default function ProjectDashboardPage() {
           projectId={id}
           currentTab={currentTab}
           scriptCount={scriptCount}
-          changeCount={diffCount}
+          changeCount={totalChangeCount}
           processesWithPorts={processesWithPorts}
         />
       )}

@@ -3,6 +3,7 @@ import path from 'path';
 import ignore, { type Ignore } from 'ignore';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { Server as SocketIOServer } from 'socket.io';
+import gitService from './gitService.ts';
 
 interface CacheEntry {
   files: string[];
@@ -134,6 +135,12 @@ function queueFileEvent(projectId: string, projectPath: string, io: SocketIOServ
     } else {
       io.to(room).emit('files:changed-batch', { projectId, changes: batch });
     }
+
+    // Emit updated repo change counts for badge
+    gitService.discoverRepos(projectPath).then(repos => {
+      const totalChangeCount = repos.reduce((sum, r) => sum + r.changeCount, 0);
+      io.to(room).emit('repos:change-counts', { projectId, repos, totalChangeCount });
+    }).catch(() => {});
   }, 500));
 }
 

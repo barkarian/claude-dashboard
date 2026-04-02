@@ -137,11 +137,34 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
+// Helper: resolve optional repoPath with path-traversal guard
+function resolveRepoPath(req: Request, projectPath: string): string {
+  const repoPath = (req.query.repoPath as string) || req.body?.repoPath || projectPath;
+  const resolved = path.resolve(repoPath);
+  if (!resolved.startsWith(path.resolve(projectPath))) {
+    throw new Error('Repo path outside project');
+  }
+  return resolved;
+}
+
+// Discover git repos within project
+router.get('/:id/repos', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const repos = await gitService.discoverRepos(projectPath);
+    res.json({ repos });
+  } catch (err) {
+    console.error('Error discovering repos:', err);
+    res.status(500).json({ error: 'Failed to discover repos' });
+  }
+});
+
 // Git status (lightweight — paths + statuses only, no diff content)
 router.get('/:id/status', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    const files = await gitService.getStatus(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    const files = await gitService.getStatus(targetPath);
     res.json({ files });
   } catch (err) {
     console.error('Error getting status:', err);
@@ -153,7 +176,8 @@ router.get('/:id/status', async (req: Request<{ id: string }>, res: Response) =>
 router.get('/:id/diff', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    const diff = await gitService.getDiff(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    const diff = await gitService.getDiff(targetPath);
     res.json(diff);
   } catch (err) {
     console.error('Error getting diff:', err);
@@ -164,11 +188,12 @@ router.get('/:id/diff', async (req: Request<{ id: string }>, res: Response) => {
 router.post('/:id/revert', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
+    const targetPath = resolveRepoPath(req, projectPath);
     const { filePath, all } = req.body;
     if (all) {
-      await gitService.revertAll(projectPath);
+      await gitService.revertAll(targetPath);
     } else if (filePath) {
-      await gitService.revertFile(projectPath, filePath);
+      await gitService.revertFile(targetPath, filePath);
     } else {
       return res.status(400).json({ error: 'filePath or all required' });
     }
@@ -182,8 +207,9 @@ router.post('/:id/revert', async (req: Request<{ id: string }>, res: Response) =
 router.post('/:id/commit', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
+    const targetPath = resolveRepoPath(req, projectPath);
     const { message } = req.body;
-    await gitService.commitAll(projectPath, message || 'Changes by Claude Code');
+    await gitService.commitAll(targetPath, message || 'Changes by Claude Code');
     res.json({ success: true });
   } catch (err) {
     console.error('Error committing:', err);
@@ -206,16 +232,17 @@ async function hasGithubToken(): Promise<boolean> {
 router.get('/:id/git-info', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    const isRepo = await gitService.checkIsRepo(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    const isRepo = await gitService.checkIsRepo(targetPath);
     const ghToken = await hasGithubToken();
     if (!isRepo) {
       return res.json({ isRepo: false, branch: null, remotes: [], log: [], unpushedCount: 0, hasGithubToken: ghToken });
     }
     const [branch, remotes, log, unpushedCount] = await Promise.all([
-      gitService.getCurrentBranch(projectPath),
-      gitService.getRemotes(projectPath),
-      gitService.getLog(projectPath),
-      gitService.getUnpushedCount(projectPath),
+      gitService.getCurrentBranch(targetPath),
+      gitService.getRemotes(targetPath),
+      gitService.getLog(targetPath),
+      gitService.getUnpushedCount(targetPath),
     ]);
     res.json({ isRepo, branch, remotes, log, unpushedCount, hasGithubToken: ghToken });
   } catch (err) {
@@ -228,7 +255,8 @@ router.get('/:id/git-info', async (req: Request<{ id: string }>, res: Response) 
 router.post('/:id/git-init', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    await gitService.init(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    await gitService.init(targetPath);
     res.json({ success: true });
   } catch (err) {
     console.error('Error initializing git:', err);
@@ -240,11 +268,12 @@ router.post('/:id/git-init', async (req: Request<{ id: string }>, res: Response)
 router.post('/:id/git-remote', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
+    const targetPath = resolveRepoPath(req, projectPath);
     const { name, url } = req.body;
     if (!name || !url) {
       return res.status(400).json({ error: 'name and url are required' });
     }
-    await gitService.addRemote(projectPath, name, url);
+    await gitService.addRemote(targetPath, name, url);
     res.json({ success: true });
   } catch (err) {
     console.error('Error adding remote:', err);
@@ -256,7 +285,8 @@ router.post('/:id/git-remote', async (req: Request<{ id: string }>, res: Respons
 router.post('/:id/git-push', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    await gitService.push(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    await gitService.push(targetPath);
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error pushing:', err);
@@ -268,7 +298,8 @@ router.post('/:id/git-push', async (req: Request<{ id: string }>, res: Response)
 router.get('/:id/git-branches', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
-    const branches = await gitService.listBranches(projectPath);
+    const targetPath = resolveRepoPath(req, projectPath);
+    const branches = await gitService.listBranches(targetPath);
     res.json(branches);
   } catch (err) {
     console.error('Error listing branches:', err);
@@ -280,18 +311,19 @@ router.get('/:id/git-branches', async (req: Request<{ id: string }>, res: Respon
 router.post('/:id/git-checkout', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
+    const targetPath = resolveRepoPath(req, projectPath);
     const { branch, force } = req.body;
     if (!branch) {
       return res.status(400).json({ error: 'branch is required' });
     }
     // Check for uncommitted changes unless force is set
     if (!force) {
-      const dirty = await gitService.hasUncommittedChanges(projectPath);
+      const dirty = await gitService.hasUncommittedChanges(targetPath);
       if (dirty) {
         return res.status(409).json({ error: 'You have uncommitted changes. Commit or stash them before switching branches.' });
       }
     }
-    await gitService.checkoutBranch(projectPath, branch);
+    await gitService.checkoutBranch(targetPath, branch);
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error checking out branch:', err);

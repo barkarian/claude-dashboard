@@ -6,10 +6,14 @@ import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import api from '../../utils/api.ts';
 import DiffViewer from './DiffViewer.tsx';
 import DiffActions from './DiffActions.tsx';
-import type { DiffResult, DiffFile } from '../../../../shared/types/models.ts';
+import { useAIGenerate } from '../../hooks/useAIGenerate.ts';
+import SendToChatDialog from '../scripts/SendToChatDialog.tsx';
+import type { DiffResult, DiffFile, GitInfo } from '../../../../shared/types/models.ts';
 
 interface DiffOverviewProps {
   projectId: string;
+  repoPath?: string;
+  onRepoRefresh?: () => void;
 }
 
 /** Build the download URL for a project file. */
@@ -43,19 +47,39 @@ function useLongPress(delay = 500) {
   return { open, setOpen, start, cancel, close };
 }
 
-export default function DiffOverview({ projectId }: DiffOverviewProps) {
+export default function DiffOverview({ projectId, repoPath, onRepoRefresh }: DiffOverviewProps) {
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
+  // Commit state (moved from GitPanel)
+  const [commitMsg, setCommitMsg] = useState('');
+  const [committing, setCommitting] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [unpushedCount, setUnpushedCount] = useState(0);
+  const [hasRemotes, setHasRemotes] = useState(false);
+  const [showSendToChat, setShowSendToChat] = useState(false);
+  const ai = useAIGenerate();
+
+  const repoQuery = repoPath ? `?repoPath=${encodeURIComponent(repoPath)}` : '';
+
   useEffect(() => {
     loadDiff();
-  }, [projectId]);
+    loadGitMeta();
+  }, [projectId, repoPath]);
+
+  // When AI generates a commit message, populate the textarea
+  useEffect(() => {
+    if (ai.result && !ai.isGenerating) {
+      setCommitMsg(ai.result);
+      ai.reset();
+    }
+  }, [ai.result, ai.isGenerating]);
 
   async function loadDiff() {
     setLoading(true);
     try {
-      const data = await api.get<DiffResult>(`/api/projects/${projectId}/diff`);
+      const data = await api.get<DiffResult>(`/api/projects/${projectId}/diff${repoQuery}`);
       setDiff(data);
     } catch (err) {
       console.error('Failed to load diff:', err);
@@ -64,10 +88,22 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
     }
   }
 
+  async function loadGitMeta() {
+    try {
+      const data = await api.get<GitInfo>(`/api/projects/${projectId}/git-info${repoQuery}`);
+      setUnpushedCount(data.unpushedCount);
+      setHasRemotes(data.remotes.length > 0);
+    } catch {
+      setUnpushedCount(0);
+      setHasRemotes(false);
+    }
+  }
+
   async function handleRevert(filePath: string) {
     try {
-      await api.post(`/api/projects/${projectId}/revert`, { filePath });
+      await api.post(`/api/projects/${projectId}/revert`, { filePath, repoPath });
       await loadDiff();
+      onRepoRefresh?.();
       if (selectedFile === filePath) setSelectedFile(null);
     } catch (err) {
       console.error('Failed to revert:', err);
@@ -77,8 +113,9 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
   async function handleRevertAll() {
     if (!confirm('Revert all changes? This cannot be undone.')) return;
     try {
-      await api.post(`/api/projects/${projectId}/revert`, { all: true });
+      await api.post(`/api/projects/${projectId}/revert`, { all: true, repoPath });
       await loadDiff();
+      onRepoRefresh?.();
       setSelectedFile(null);
     } catch (err) {
       console.error('Failed to revert all:', err);
@@ -86,14 +123,30 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
   }
 
   async function handleCommit() {
-    const message = prompt('Commit message:', 'Changes by Claude Code');
-    if (!message) return;
+    if (!commitMsg.trim()) return;
+    setCommitting(true);
     try {
-      await api.post(`/api/projects/${projectId}/commit`, { message });
+      await api.post(`/api/projects/${projectId}/commit`, { message: commitMsg.trim(), repoPath });
+      setCommitMsg('');
       await loadDiff();
-      setSelectedFile(null);
+      await loadGitMeta();
+      onRepoRefresh?.();
     } catch (err) {
       console.error('Failed to commit:', err);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  async function handlePush() {
+    setPushing(true);
+    try {
+      await api.post(`/api/projects/${projectId}/git-push`, { repoPath });
+      await loadGitMeta();
+    } catch (err) {
+      console.error('Failed to push:', err);
+    } finally {
+      setPushing(false);
     }
   }
 
@@ -142,14 +195,13 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
     );
   }
 
+  const showPush = hasRemotes && unpushedCount > 0;
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-text-muted">{files.length} file{files.length !== 1 ? 's' : ''} changed</span>
-        <div className="flex gap-2">
-          <Button onClick={handleRevertAll} variant="ghost" className="text-sm text-danger">Revert All</Button>
-          <Button onClick={handleCommit} className="text-sm">Commit All</Button>
-        </div>
+        <Button onClick={handleRevertAll} variant="ghost" className="text-sm text-danger">Revert All</Button>
       </div>
 
       {files.map((file) => (
@@ -161,6 +213,98 @@ export default function DiffOverview({ projectId }: DiffOverviewProps) {
           onRevert={() => handleRevert(file.path)}
         />
       ))}
+
+      {/* Commit Section */}
+      <section className="pt-3 border-t border-border space-y-2">
+        {/* Textarea with AI button inside */}
+        <div className="relative">
+          <textarea
+            value={commitMsg}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            placeholder="Commit message..."
+            rows={3}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 pr-10 text-sm text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none"
+          />
+          {/* AI generate button inside textarea */}
+          <button
+            onClick={() => ai.generateCommitMessage(projectId, repoPath)}
+            disabled={ai.isGenerating}
+            className="absolute right-2 top-2 p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-dim hover:text-primary disabled:opacity-50"
+            title="Generate with AI"
+          >
+            {ai.isGenerating ? (
+              <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* AI status indicator */}
+        {ai.isGenerating && ai.step && (
+          <div className="text-xs text-text-dim flex items-center gap-1.5">
+            <div className="animate-spin w-3 h-3 border border-current border-t-transparent rounded-full" />
+            {ai.step}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowSendToChat(true)}
+            className="flex-shrink-0"
+          >
+            <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+            </svg>
+            Commit via Chat
+          </Button>
+          <div className="flex-1" />
+          <Button size="sm" onClick={handleCommit} disabled={committing || !commitMsg.trim()} className="flex-shrink-0">
+            {committing ? 'Committing...' : 'Commit'}
+          </Button>
+        </div>
+
+        {/* Push button */}
+        {showPush && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handlePush}
+            disabled={pushing}
+            className="w-full"
+          >
+            {pushing ? (
+              <>
+                <div className="animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full mr-1.5" />
+                Pushing...
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                Push {unpushedCount} commit{unpushedCount !== 1 ? 's' : ''}
+              </>
+            )}
+          </Button>
+        )}
+      </section>
+
+      {/* Send to Chat Dialog */}
+      {showSendToChat && (
+        <SendToChatDialog
+          projectId={projectId}
+          content="commit the changes that we made until this point in this Chat, do not commit again in the future if I am not explicitly tell you to do that.."
+          contentLabel="Commit Request"
+          rawContent
+          onClose={() => setShowSendToChat(false)}
+        />
+      )}
     </div>
   );
 }

@@ -22,10 +22,11 @@ import type { BranchList } from '../../../../shared/types/models.ts';
 
 interface BranchSelectorProps {
   projectId: string;
+  repoPath?: string;
   onBranchChange: () => void;
 }
 
-export default function BranchSelector({ projectId, onBranchChange }: BranchSelectorProps) {
+export default function BranchSelector({ projectId, repoPath, onBranchChange }: BranchSelectorProps) {
   const navigate = useNavigate();
   const [branches, setBranches] = useState<BranchList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,9 +34,11 @@ export default function BranchSelector({ projectId, onBranchChange }: BranchSele
   const [switching, setSwitching] = useState<string | null>(null);
   const [dirtyAlert, setDirtyAlert] = useState<string | null>(null);
 
+  const repoQuery = repoPath ? `?repoPath=${encodeURIComponent(repoPath)}` : '';
+
   const loadBranches = useCallback(async () => {
     try {
-      const data = await api.get<BranchList>(`/api/projects/${projectId}/git-branches`);
+      const data = await api.get<BranchList>(`/api/projects/${projectId}/git-branches${repoQuery}`);
       setBranches(data);
     } catch {
       // Not a git repo or error — hide selector
@@ -43,14 +46,14 @@ export default function BranchSelector({ projectId, onBranchChange }: BranchSele
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, repoQuery]);
 
   useEffect(() => { loadBranches(); }, [loadBranches]);
 
   async function handleCheckout(branch: string) {
     setSwitching(branch);
     try {
-      await api.post(`/api/projects/${projectId}/git-checkout`, { branch });
+      await api.post(`/api/projects/${projectId}/git-checkout`, { branch, repoPath });
       haptics.impactLight();
       setSheetOpen(false);
       setBranches(prev => prev ? { ...prev, current: branch } : prev);

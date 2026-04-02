@@ -1,7 +1,7 @@
 import simpleGit, { CheckRepoActions } from 'simple-git';
 import fs from 'fs/promises';
 import path from 'path';
-import type { DiffResult, DiffFile, GitRemote, GitLogEntry, BranchList } from '../../shared/types/models.ts';
+import type { DiffResult, DiffFile, GitRemote, GitLogEntry, BranchList, RepoInfo } from '../../shared/types/models.ts';
 
 async function clone(repoUrl: string, targetPath: string): Promise<void> {
   const git = simpleGit();
@@ -237,6 +237,60 @@ async function checkoutBranch(targetPath: string, name: string): Promise<void> {
   }
 }
 
+const SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.cache',
+  '__pycache__', '.venv', 'venv', '.env', 'coverage', '.claude-dashboard',
+]);
+
+async function discoverRepos(projectPath: string): Promise<RepoInfo[]> {
+  const repos: RepoInfo[] = [];
+
+  async function hasGitDir(dir: string): Promise<boolean> {
+    try {
+      const stat = await fs.stat(path.join(dir, '.git'));
+      return stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  async function scanLevel(dir: string, depth: number): Promise<void> {
+    if (await hasGitDir(dir)) {
+      const rel = path.relative(projectPath, dir);
+      const name = rel || '.';
+      try {
+        const files = await getStatus(dir);
+        repos.push({ repoPath: dir, name, changeCount: files.length });
+      } catch {
+        repos.push({ repoPath: dir, name, changeCount: 0 });
+      }
+    }
+
+    if (depth >= 2) return;
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue;
+        await scanLevel(path.join(dir, entry.name), depth + 1);
+      }
+    } catch {
+      // Permission error or similar
+    }
+  }
+
+  await scanLevel(projectPath, 0);
+
+  // Sort: root first, then alphabetically
+  repos.sort((a, b) => {
+    if (a.name === '.') return -1;
+    if (b.name === '.') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return repos;
+}
+
 async function hasUncommittedChanges(targetPath: string): Promise<boolean> {
   const git = simpleGit(targetPath);
   const status = await git.status();
@@ -261,4 +315,5 @@ export default {
   listBranches,
   checkoutBranch,
   hasUncommittedChanges,
+  discoverRepos,
 };

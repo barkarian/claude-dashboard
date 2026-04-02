@@ -34,7 +34,7 @@ interface UseAIGenerateReturn {
   error: string | null;
   generateCommand: (projectId: string, description: string) => void;
   generateScripts: (projectId: string, mode: 'auto-detect' | 'describe', description?: string) => void;
-  generateCommitMessage: (projectId: string) => void;
+  generateCommitMessage: (projectId: string, repoPath?: string) => void;
   cancel: () => void;
   reset: () => void;
 }
@@ -133,7 +133,7 @@ export function useAIGenerate(): UseAIGenerateReturn {
   );
 
   const generateCommitMessage = useCallback(
-    (projectId: string) => {
+    (projectId: string, repoPath?: string) => {
       if (!socket || isGenerating) return;
       const sessionId = `commit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       sessionIdRef.current = sessionId;
@@ -143,7 +143,7 @@ export function useAIGenerate(): UseAIGenerateReturn {
       setPartialText('');
       setResult(null);
       setError(null);
-      socket.emit('ai:generate-commit-message', { sessionId, projectId });
+      socket.emit('ai:generate-commit-message', { sessionId, projectId, repoPath });
     },
     [socket, isGenerating],
   );
