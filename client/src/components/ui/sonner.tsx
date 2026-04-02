@@ -4,6 +4,9 @@ export function Toaster() {
   return (
     <SonnerToaster
       position="top-right"
+      style={{
+        top: "env(safe-area-inset-top, 0px)",
+      }}
       toastOptions={{
         style: {
           background: "rgb(var(--color-bg-surface))",
