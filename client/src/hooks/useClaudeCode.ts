@@ -117,7 +117,7 @@ export function useClaudeCode(
       fontSize: 14,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       theme: terminalTheme,
-      scrollback: 10000,
+      scrollback: 50000,
       scrollSensitivity: isMobile ? 5 : 1,
     });
 

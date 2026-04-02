@@ -18,7 +18,7 @@ import type {
   CCDetachPayload,
 } from '../../shared/types/socket-events.ts';
 
-const MAX_BUFFER_LINES = 5000;
+const MAX_BUFFER_LINES = 50000;
 
 // Guard: prevent duplicate AI title API calls across the 3 rename paths
 const aiTitledChats = new Set<string>();

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
@@ -114,10 +114,13 @@ interface ChatListProps {
 
 export default function ChatList({ projectId, project, sessionStatuses = {}, sessionStates = {} }: ChatListProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { socket } = useSocket();
   const { refreshProject } = useProject();
   const isMobile = useIsMobile();
   const activeChats = useGlobalActiveChats();
+  const activeChatMatch = location.pathname.match(/\/chats\/([^/]+)/);
+  const activeChatId = activeChatMatch ? activeChatMatch[1] : null;
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -136,15 +139,16 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
     return ids;
   });
 
-  // Listen for real-time unread events
+  // Listen for real-time unread events (skip if user is already viewing that chat)
   useEffect(() => {
     if (!socket) return;
     function handleUnread({ chatId }: { chatId: string }) {
+      if (chatId === activeChatId) return;
       setUnreadIds(prev => new Set(prev).add(chatId));
     }
     socket.on('chat:unread', handleUnread);
     return () => { socket.off('chat:unread', handleUnread); };
-  }, [socket]);
+  }, [socket, activeChatId]);
 
   // Navigate to a chat and mark it as read
   const goToChat = useCallback((chatId: string, state?: object) => {

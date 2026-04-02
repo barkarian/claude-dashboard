@@ -86,6 +86,18 @@ export default function ProjectDashboardPage() {
     }
   }, [activeChatId, id]);
 
+  // Auto-mark-read when a chat:unread event fires for the chat we're currently viewing
+  useEffect(() => {
+    if (!socket || !activeChatId || !id) return;
+    function handleUnread({ chatId }: { chatId: string }) {
+      if (chatId === activeChatId) {
+        api.put(`/api/projects/${id}/chats/${chatId}/read`).catch(() => {});
+      }
+    }
+    socket.on('chat:unread', handleUnread);
+    return () => { socket.off('chat:unread', handleUnread); };
+  }, [socket, activeChatId, id]);
+
   // Compute status display — prefer unified JSONL state, fall back to SDK activeChatStatus
   const activeSessionState = activeChatId ? sessionStates[activeChatId] : undefined;
 
