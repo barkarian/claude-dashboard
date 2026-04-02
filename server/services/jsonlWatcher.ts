@@ -971,6 +971,29 @@ export class JsonlWatcher extends EventEmitter {
   }
 
   /**
+   * Proactively clear the working signal for a session (e.g. when SIGINT is sent).
+   * Prevents the race where applySignalOverrides keeps overriding state to 'working'
+   * because the Stop hook or JSONL interrupt entry hasn't arrived yet.
+   */
+  clearWorkingSignal(sessionId: string): void {
+    if (!this.workingSignals.has(sessionId)) return;
+    this.workingSignals.delete(sessionId);
+    try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
+
+    // Re-derive and emit so the UI updates immediately
+    const watched = this.sessions.get(sessionId);
+    if (watched) {
+      let newState = deriveStateFromEntries(watched.entries);
+      newState = this.applySignalOverrides(sessionId, newState);
+      if (newState.status !== watched.state.status) {
+        const prev = watched.state;
+        watched.state = newState;
+        this.emit('state-change', sessionId, newState, prev);
+      }
+    }
+  }
+
+  /**
    * Clean up all watchers on shutdown.
    */
   dispose(): void {

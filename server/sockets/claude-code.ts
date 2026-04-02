@@ -240,6 +240,13 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         session.pty.write(data);
       }
 
+      // When SIGINT (\x03) or Escape (\x1b alone) is sent, proactively clear the
+      // working signal so the UI doesn't stay stuck in "thinking" while waiting
+      // for the Stop hook or JSONL interrupt entry to arrive.
+      if ((data === '\x03' || data === '\x1b') && session.jsonlSessionId) {
+        jsonlWatcher.clearWorkingSignal(session.jsonlSessionId);
+      }
+
       // Auto-title: rename "New Chat" on first user Enter
       if (!session.hasAutoRenamed) {
         session.inputBuffer += data;
