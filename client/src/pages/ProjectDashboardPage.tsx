@@ -224,13 +224,16 @@ export default function ProjectDashboardPage() {
   async function handleGenerateTitle() {
     if (!activeChatId) return;
     setGeneratingTitle(true);
+    toast.loading('Generating title...', { id: 'gen-title' });
     try {
       await api.post<{ title: string }>(
         `/api/projects/${id}/chats/${activeChatId}/generate-title`
       );
       await refreshProject();
+      toast.success('Title generated', { id: 'gen-title' });
     } catch (err) {
       console.error('Failed to generate title:', err);
+      toast.error('Failed to generate title', { id: 'gen-title' });
     } finally {
       setGeneratingTitle(false);
     }

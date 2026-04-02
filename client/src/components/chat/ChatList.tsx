@@ -14,6 +14,7 @@ import {
 } from '../ui/dropdown-menu.tsx';
 import api from '../../utils/api.ts';
 import { haptics } from '../../utils/haptics.ts';
+import { toast } from 'sonner';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
@@ -283,6 +284,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
 
   async function handleGenerateTitle(chat: Chat) {
     setGeneratingTitle(chat.id);
+    toast.loading('Generating title...', { id: `gen-title-${chat.id}` });
     try {
       const result = await api.post<{ title: string }>(
         `/api/projects/${projectId}/chats/${chat.id}/generate-title`
@@ -291,8 +293,10 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
         c.id === chat.id ? { ...c, label: result.title } : c
       ));
       refreshProject();
+      toast.success('Title generated', { id: `gen-title-${chat.id}` });
     } catch (err) {
       console.error('Failed to generate title:', err);
+      toast.error('Failed to generate title', { id: `gen-title-${chat.id}` });
     } finally {
       setGeneratingTitle(null);
     }
@@ -463,7 +467,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                       <span className="flex-shrink-0 w-2 h-2 rounded-full bg-border" />
                     )}
                     <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
-                      {chat.label}
+                      {generatingTitle === chat.id ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />
+                          <span className="text-text-muted italic">Generating...</span>
+                        </span>
+                      ) : chat.label}
                     </h4>
                     {chat.adapter === 'claude-code' && (
                       <span className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">

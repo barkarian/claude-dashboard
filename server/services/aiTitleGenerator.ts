@@ -16,9 +16,16 @@ export async function generateChatTitle(userMessage: string): Promise<string | n
       prompt: userMessage.slice(0, 500),
       options: {
         model: HAIKU_MODEL,
+        tools: [],
         allowedTools: [],
+        maxTurns: 1,
+        persistSession: false,
         systemPrompt: TITLE_SYSTEM_PROMPT,
-        stderr: () => {},
+        stderr: (data: string) => {
+          if (data.includes('Error') || data.includes('error')) {
+            console.error('[ai-title:stderr]', data.trim());
+          }
+        },
       },
     });
 
@@ -37,6 +44,9 @@ export async function generateChatTitle(userMessage: string): Promise<string | n
     }
 
     const cleaned = title.trim().replace(/^["']|["']$/g, '');
+    if (!cleaned) {
+      console.error('[ai-title] Empty title returned from model');
+    }
     return cleaned ? cleaned.slice(0, 80) : null;
   } catch (err) {
     console.error('[ai-title] Generation failed:', err);
