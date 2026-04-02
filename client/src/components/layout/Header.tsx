@@ -8,6 +8,9 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '../ui/dialog.tsx';
+import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '../ui/dropdown-menu.tsx';
 
@@ -20,6 +23,7 @@ interface HeaderProps {
   projectName?: string;
   projectPath?: string;
   chatName?: string;
+  chatDescription?: string | null;
   chatId?: string;
   projectId?: string;
   onEditChatName?: (newName: string) => Promise<void>;
@@ -41,6 +45,7 @@ export default function Header({
   projectName,
   projectPath,
   chatName,
+  chatDescription,
   chatId,
   projectId,
   onEditChatName,
@@ -61,6 +66,7 @@ export default function Header({
     _toggleSidebar();
   }
   const [editing, setEditing] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -190,6 +196,18 @@ export default function Header({
             ) : (
               <>
                 <span className="text-sm font-medium text-text truncate">{chatName}</span>
+                {chatDescription && (
+                  <button
+                    onClick={() => setShowInfo(true)}
+                    className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-all"
+                    aria-label="Chat summary"
+                    title="View summary"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                    </svg>
+                  </button>
+                )}
                 {onEditChatName && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -271,6 +289,19 @@ export default function Header({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Chat summary dialog */}
+      <Dialog open={showInfo} onOpenChange={setShowInfo}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{chatName}</DialogTitle>
+            <DialogDescription>AI-generated summary</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm text-text leading-relaxed">
+            {chatDescription}
+          </div>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

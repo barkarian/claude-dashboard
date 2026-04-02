@@ -185,11 +185,19 @@ try {
   // Column already exists — ignore
 }
 
-// Add keywords column to chats (AI-generated search keywords)
+// Add description column to chats (AI-generated chat summary for search & display)
 try {
-  db.exec(`ALTER TABLE chats ADD COLUMN keywords TEXT`);
+  db.exec(`ALTER TABLE chats ADD COLUMN description TEXT`);
 } catch {
   // Column already exists — ignore
+}
+
+// Migrate old keywords column to description if it exists
+try {
+  db.exec(`UPDATE chats SET description = keywords WHERE description IS NULL AND keywords IS NOT NULL`);
+  // We don't drop the old column — SQLite makes that hard and it's harmless
+} catch {
+  // keywords column doesn't exist — nothing to migrate
 }
 
 // Add ai_naming_enabled column to projects

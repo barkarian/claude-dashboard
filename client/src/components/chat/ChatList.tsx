@@ -10,6 +10,9 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '../ui/dialog.tsx';
+import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '../ui/dropdown-menu.tsx';
 import api from '../../utils/api.ts';
@@ -130,6 +133,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [generatingTitle, setGeneratingTitle] = useState<string | null>(null);
+  const [infoChat, setInfoChat] = useState<Chat | null>(null);
 
   // Track which chats have unread completions
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => {
@@ -284,16 +288,16 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
 
   async function handleGenerateTitle(chat: Chat) {
     setGeneratingTitle(chat.id);
-    toast.loading('Generating title...', { id: `gen-title-${chat.id}` });
+    toast.loading('Generating title & summary...', { id: `gen-title-${chat.id}` });
     try {
-      const result = await api.post<{ title: string }>(
+      const result = await api.post<{ title: string; description: string }>(
         `/api/projects/${projectId}/chats/${chat.id}/generate-title`
       );
       setChats(prev => prev.map(c =>
-        c.id === chat.id ? { ...c, label: result.title } : c
+        c.id === chat.id ? { ...c, label: result.title, description: result.description || null } : c
       ));
       refreshProject();
-      toast.success('Title generated', { id: `gen-title-${chat.id}` });
+      toast.success('Title & summary generated', { id: `gen-title-${chat.id}` });
     } catch (err) {
       console.error('Failed to generate title:', err);
       toast.error('Failed to generate title', { id: `gen-title-${chat.id}` });
@@ -511,6 +515,18 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                       </svg>
                     </button>
                   )}
+                  {chat.description && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setInfoChat(chat); }}
+                      className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all"
+                      aria-label="Chat summary"
+                      title="View summary"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                      </svg>
+                    </button>
+                  )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -611,6 +627,24 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Chat summary dialog */}
+      <Dialog open={!!infoChat} onOpenChange={(open) => !open && setInfoChat(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{infoChat?.label}</DialogTitle>
+            <DialogDescription>AI-generated summary</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm text-text leading-relaxed">
+            {infoChat?.description}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-dim mt-2">
+            <span>{infoChat?.adapter === 'claude-code' ? 'Claude Code' : 'Agent SDK'}</span>
+            <span className="text-border">&middot;</span>
+            <span>{infoChat && formatChatTime(infoChat.lastActivityAt || infoChat.createdAt)}</span>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </PullToRefresh>
   );

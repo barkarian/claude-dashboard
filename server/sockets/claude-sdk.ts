@@ -1,6 +1,6 @@
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import projectManager from '../services/projectManager.ts';
-import { generateChatTitleAndKeywords } from '../services/aiTitleGenerator.ts';
+import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { emitSidecarEvent } from '../services/sidecarEmitter.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import jsonlWatcher, { readSessionHistory } from '../services/jsonlWatcher.ts';
@@ -62,12 +62,12 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
             projectManager.updateChat(chatId, { label: fallbackLabel });
             io.to(`claude:${chatId}`).emit('claude:chat-renamed', { chatId, label: fallbackLabel });
 
-            // Fire-and-forget AI title + keywords generation if enabled
+            // Fire-and-forget AI title + description generation if enabled
             const project = projectManager.getProject(session.projectId);
             if (project?.aiNamingEnabled === 'on') {
-              generateChatTitleAndKeywords(prompt).then((result) => {
+              generateChatTitleAndDescription(prompt).then((result) => {
                 if (result) {
-                  projectManager.updateChat(chatId, { label: result.title, keywords: result.keywords || null });
+                  projectManager.updateChat(chatId, { label: result.title, description: result.description || null });
                   io.to(`claude:${chatId}`).emit('claude:chat-renamed', { chatId, label: result.title });
                   io.to(`project:${session.projectId}`).emit('claude:chat-renamed', { chatId, label: result.title });
                 }

@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
-import { generateChatTitleAndKeywords } from '../services/aiTitleGenerator.ts';
+import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import config from '../config.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
@@ -518,13 +518,13 @@ router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: strin
       return res.status(400).json({ error: 'No user message found to generate title from' });
     }
 
-    const result = await generateChatTitleAndKeywords(firstPrompt);
+    const result = await generateChatTitleAndDescription(firstPrompt);
     if (!result) {
       return res.status(500).json({ error: 'Failed to generate title' });
     }
 
-    projectManager.updateChat(req.params.chatId, { label: result.title, keywords: result.keywords || null });
-    res.json({ title: result.title, keywords: result.keywords });
+    projectManager.updateChat(req.params.chatId, { label: result.title, description: result.description || null });
+    res.json({ title: result.title, description: result.description });
   } catch (err) {
     console.error('Error generating chat title:', err);
     res.status(500).json({ error: 'Failed to generate title' });
