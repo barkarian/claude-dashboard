@@ -49,7 +49,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     updateDraft(text);
   }, [updateDraft]);
 
-  const { terminal, status, isSelectionMode, terminalPromptMode, write, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
+  const { terminal, status, terminalUIMode, write, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -59,21 +59,38 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Keep ref up to date for the swipe handler
   writeRef.current = write;
 
-  // Compute allowed arrow/swipe directions based on session state + terminal prompts
+  // Compute allowed arrow/swipe directions based on terminal UI mode + session state
   const allowedDirections = useMemo<Set<SwipeDirection>>(() => {
     const dirs = new Set<SwipeDirection>();
+    const m = terminalUIMode.mode;
+
+    // Terminal UI mode takes priority over JSONL session state
+    switch (m) {
+      case 'detail-view':
+        dirs.add('left');
+        return dirs;
+      case 'dismiss':
+        return dirs; // no arrows, just action button
+      case 'multi-choice':
+      case 'plan-review':
+        dirs.add('up');
+        dirs.add('down');
+        return dirs;
+      case 'multi-choice-tabs':
+        dirs.add('up');
+        dirs.add('down');
+        dirs.add('left');
+        dirs.add('right');
+        return dirs;
+      case 'text-input':
+      case 'free-prompt':
+        return dirs; // no arrows, user is typing
+      case 'none':
+        break; // fall through to JSONL-based logic
+    }
+
+    // Fallback: use JSONL session state
     const unifiedStatus = sessionState?.status;
-
-    // Terminal prompt detection overrides session state
-    if (terminalPromptMode?.type === 'detail-view') {
-      dirs.add('left');
-      return dirs;
-    }
-    // dismiss mode: no arrows, just the action button
-    if (terminalPromptMode?.type === 'dismiss') {
-      return dirs;
-    }
-
     switch (unifiedStatus) {
       case 'question-awaiting':
         dirs.add('up');
@@ -100,7 +117,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         break;
     }
     return dirs;
-  }, [sessionState?.status, sessionState?.hasBackgroundTasks, terminalPromptMode]);
+  }, [sessionState?.status, sessionState?.hasBackgroundTasks, terminalUIMode]);
 
   // Register swipe override: map swipe gestures to arrow keys + scroll to bottom.
   // Also set containerEl so only swipes starting on the terminal trigger arrows.
@@ -192,11 +209,11 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const showLeft = allowedDirections.has('left');
   const showRight = allowedDirections.has('right');
   const hasArrows = showUp || showDown || showLeft || showRight;
-  const hasOverlayContent = hasArrows || !!terminalPromptMode;
+  const hasOverlayContent = hasArrows || terminalUIMode.mode === 'dismiss' || terminalUIMode.mode === 'detail-view';
 
-  const arrowLabel = sessionState?.status === 'question-awaiting' ? 'Select'
-    : sessionState?.status === 'questions-awaiting' ? 'Navigate'
-    : sessionState?.status === 'plan-awaiting' ? 'Plan'
+  const arrowLabel = terminalUIMode.mode === 'multi-choice' ? 'Select'
+    : terminalUIMode.mode === 'multi-choice-tabs' ? 'Navigate'
+    : terminalUIMode.mode === 'plan-review' ? 'Plan'
     : sessionState?.status === 'permission-awaiting' ? 'Permission'
     : hasArrows ? 'Tasks'
     : '';
@@ -219,7 +236,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         {hasOverlayContent && (
           <div className="absolute top-2 left-2 z-30 flex flex-col items-center gap-1 md:hidden">
             {/* Action buttons for terminal prompts */}
-            {terminalPromptMode?.type === 'dismiss' && (
+            {terminalUIMode.mode === 'dismiss' && (
               <button
                 type="button"
                 onClick={() => overlayBtn(' ')}
@@ -229,7 +246,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
                 Dismiss
               </button>
             )}
-            {terminalPromptMode?.type === 'detail-view' && (
+            {terminalUIMode.mode === 'detail-view' && (
               <button
                 type="button"
                 onClick={() => overlayBtn(ARROW_LEFT)}
@@ -244,14 +261,14 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
             )}
 
             {/* Arrow label */}
-            {!terminalPromptMode && hasArrows && (
+            {terminalUIMode.mode !== 'dismiss' && terminalUIMode.mode !== 'detail-view' && hasArrows && (
               <span className="text-[8px] font-semibold text-primary/80 uppercase tracking-wider">
                 {arrowLabel}
               </span>
             )}
 
             {/* Arrow buttons */}
-            {!terminalPromptMode && hasArrows && (
+            {terminalUIMode.mode !== 'dismiss' && terminalUIMode.mode !== 'detail-view' && hasArrows && (
               <div className="flex items-center gap-0.5">
                 {showLeft && (
                   <button type="button" onClick={() => overlayBtn(ARROW_LEFT)} disabled={status !== 'running'} className={`w-8 h-8 ${overlayBtnBase}`}>
@@ -342,7 +359,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           key={chatId}
           projectId={projectId}
           status={status}
-          isSelectionMode={isSelectionMode}
+          terminalUIMode={terminalUIMode}
           unifiedStatus={sessionState?.status}
           onSend={handleSend}
           onArrow={handleArrow}

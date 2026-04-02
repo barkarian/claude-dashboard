@@ -4,7 +4,7 @@ import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager from '../services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
-import { generateChatTitle } from '../services/aiTitleGenerator.ts';
+import { generateChatTitleAndKeywords } from '../services/aiTitleGenerator.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
@@ -23,16 +23,16 @@ const MAX_BUFFER_LINES = 50000;
 // Guard: prevent duplicate AI title API calls across the 3 rename paths
 const aiTitledChats = new Set<string>();
 
-/** Fire-and-forget AI title generation for a CC chat (deduped per chatId) */
+/** Fire-and-forget AI title + keywords generation for a CC chat (deduped per chatId) */
 function tryAiTitle(chatId: string, projectId: string, promptText: string, io: SocketIOServer) {
   if (aiTitledChats.has(chatId)) return;
   const project = projectManager.getProject(projectId);
   if (project?.aiNamingEnabled !== 'on') return;
   aiTitledChats.add(chatId);
-  generateChatTitle(promptText).then((aiTitle) => {
-    if (aiTitle) {
-      projectManager.updateChat(chatId, { label: aiTitle });
-      io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: aiTitle });
+  generateChatTitleAndKeywords(promptText).then((result) => {
+    if (result) {
+      projectManager.updateChat(chatId, { label: result.title, keywords: result.keywords || null });
+      io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: result.title });
     }
   }).catch(() => {});
 }

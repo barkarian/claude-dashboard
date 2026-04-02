@@ -185,6 +185,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add keywords column to chats (AI-generated search keywords)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN keywords TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // Add ai_naming_enabled column to projects
 try {
   db.exec(`ALTER TABLE projects ADD COLUMN ai_naming_enabled TEXT DEFAULT 'none'`);

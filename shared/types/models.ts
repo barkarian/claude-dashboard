@@ -19,6 +19,7 @@ export interface ChatHistoryEntry {
 export interface Chat {
   id: string;
   label: string;
+  keywords: string | null;
   createdAt: string;
   lastActivityAt: string;
   history: ChatHistoryEntry[];

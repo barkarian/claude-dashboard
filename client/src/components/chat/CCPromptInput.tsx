@@ -13,11 +13,12 @@ import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import api from '../../utils/api.ts';
 import type { SavedRecording } from '../../../../shared/types/models.ts';
 import type { UnifiedStatus } from '../../../../shared/types/session.ts';
+import type { TerminalUIMode } from '../../utils/claudeTerminalRegexDetection.ts';
 
 interface CCPromptInputProps {
   projectId: string;
   status: 'disconnected' | 'running' | 'exited' | 'error';
-  isSelectionMode?: boolean;
+  terminalUIMode?: TerminalUIMode;
   unifiedStatus?: UnifiedStatus;
   onSend: (data: string) => void;
   onArrow: (data: string) => void;
@@ -36,7 +37,10 @@ const ARROW_DOWN = '\x1b[B';
 const ARROW_LEFT = '\x1b[D';
 const ARROW_RIGHT = '\x1b[C';
 
-export default function CCPromptInput({ projectId, status, isSelectionMode, unifiedStatus, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, terminalUIMode, unifiedStatus, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
+  const isSelectionMode = terminalUIMode?.mode === 'multi-choice'
+    || terminalUIMode?.mode === 'multi-choice-tabs'
+    || terminalUIMode?.mode === 'plan-review';
   const [value, setValue] = useState(initialDraft || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

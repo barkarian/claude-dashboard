@@ -284,6 +284,7 @@ function listChats(projectId: string): Chat[] {
   return rows.map(r => ({
     id: r.id,
     label: r.label,
+    keywords: r.keywords || null,
     createdAt: r.created_at,
     lastActivityAt: r.last_activity_at || r.created_at,
     history: [],
@@ -300,19 +301,30 @@ function listChats(projectId: string): Chat[] {
 function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: number; search?: string } = {}): { chats: Chat[]; total: number } {
   const limit = opts.limit ?? 20;
   const offset = opts.offset ?? 0;
-  const search = opts.search ? `%${opts.search}%` : '%';
+
+  if (opts.search) {
+    const pattern = `%${opts.search}%`;
+
+    const { total } = db.prepare(
+      'SELECT COUNT(*) as total FROM chats WHERE project_id = ? AND (label LIKE ? OR keywords LIKE ?)'
+    ).get(projectId, pattern, pattern) as any;
+
+    const rows = db.prepare(
+      'SELECT * FROM chats WHERE project_id = ? AND (label LIKE ? OR keywords LIKE ?) ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
+    ).all(projectId, pattern, pattern, limit, offset) as any[];
+
+    return { chats: rows.map(r => mapRowToChat(r)), total };
+  }
 
   const { total } = db.prepare(
-    'SELECT COUNT(*) as total FROM chats WHERE project_id = ? AND label LIKE ?'
-  ).get(projectId, search) as any;
+    'SELECT COUNT(*) as total FROM chats WHERE project_id = ?'
+  ).get(projectId) as any;
 
   const rows = db.prepare(
-    'SELECT * FROM chats WHERE project_id = ? AND label LIKE ? ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
-  ).all(projectId, search, limit, offset) as any[];
+    'SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
+  ).all(projectId, limit, offset) as any[];
 
-  const chats = rows.map(r => mapRowToChat(r));
-
-  return { chats, total };
+  return { chats: rows.map(r => mapRowToChat(r)), total };
 }
 
 function listChatsWithHistory(projectId: string): Chat[] {
@@ -324,6 +336,7 @@ function mapRowToChat(r: any): Chat {
   return {
     id: r.id,
     label: r.label,
+    keywords: r.keywords || null,
     createdAt: r.created_at,
     lastActivityAt: r.last_activity_at || r.created_at,
     history: getChatMessages(r.id),
@@ -345,6 +358,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
   return {
     id,
     label: label || 'New Chat',
+    keywords: null,
     createdAt: now,
     lastActivityAt: now,
     history: [],
@@ -364,11 +378,12 @@ function getChat(chatId: string): Chat | null {
   return mapRowToChat(row);
 }
 
-function updateChat(chatId: string, updates: { label?: string; sdkSessionId?: string | null; ccConversationId?: string | null; sessionId?: string | null; draftMessage?: string | null }): Chat | null {
+function updateChat(chatId: string, updates: { label?: string; keywords?: string | null; sdkSessionId?: string | null; ccConversationId?: string | null; sessionId?: string | null; draftMessage?: string | null }): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
   if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
+  if (updates.keywords !== undefined) db.prepare('UPDATE chats SET keywords = ? WHERE id = ?').run(updates.keywords, chatId);
   if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
   if (updates.ccConversationId !== undefined) db.prepare('UPDATE chats SET cc_conversation_id = ? WHERE id = ?').run(updates.ccConversationId, chatId);
   if (updates.sessionId !== undefined) db.prepare('UPDATE chats SET session_id = ? WHERE id = ?').run(updates.sessionId, chatId);

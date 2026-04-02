@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
 import { useTheme } from '../context/ThemeContext.tsx';
+import { detectTerminalUIMode, type TerminalUIMode } from '../utils/claudeTerminalRegexDetection.ts';
 
 // Width in px that the container is stretched to before CSS-scaling back down.
 // Lower = larger apparent font on mobile. Higher = smaller text, more content visible.
@@ -17,13 +18,10 @@ interface UseClaudeCodeOptions {
   conversationId?: string | null;
 }
 
-export type TerminalPromptMode = null | { type: 'dismiss' } | { type: 'detail-view' };
-
 interface UseClaudeCodeReturn {
   terminal: RefObject<Terminal | null>;
   status: 'disconnected' | 'running' | 'exited' | 'error';
-  isSelectionMode: boolean;
-  terminalPromptMode: TerminalPromptMode;
+  terminalUIMode: TerminalUIMode;
   write: (data: string) => void;
   stop: () => void;
   searchFindNext: (query: string, incremental?: boolean) => boolean;
@@ -39,9 +37,8 @@ export function useClaudeCode(
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'running' | 'exited' | 'error'>('disconnected');
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [terminalPromptMode, setTerminalPromptMode] = useState<TerminalPromptMode>(null);
-  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [terminalUIMode, setTerminalUIMode] = useState<TerminalUIMode>({ mode: 'none' });
+  const detectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { terminalTheme } = useTheme();
 
@@ -57,53 +54,20 @@ export function useClaudeCode(
     }
   }, [socket, chatId]);
 
-  // Detect whether the terminal is showing a numbered option menu (plan interview).
-  // Returns true when ❯ is on a numbered option that isn't "Type something".
-  const detectSelectionMode = useCallback((): boolean => {
+  // Extract lines near the cursor from the xterm buffer and run centralized detection.
+  const detectTerminalUI = useCallback((): TerminalUIMode => {
     const term = termRef.current;
-    if (!term) return false;
+    if (!term) return { mode: 'none' };
     const buffer = term.buffer.active;
     const cursorRow = buffer.baseY + buffer.cursorY;
     const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
-
-    for (let row = scanStart; row >= Math.max(0, scanStart - 40); row--) {
+    const scanEnd = Math.max(0, scanStart - 40);
+    const lines: string[] = [];
+    for (let row = scanStart; row >= scanEnd; row--) {
       const line = buffer.getLine(row);
-      if (!line) continue;
-      const text = line.translateToString(true);
-      // Match: optional spaces, ❯, optional spaces, digit(s), dot, space
-      if (/^\s*❯\s*\d+\.\s/.test(text)) {
-        // If the highlighted option is "Type something", it's not selection mode
-        if (/type\s+something/i.test(text)) return false;
-        return true;
-      }
+      if (line) lines.push(line.translateToString(true));
     }
-    return false;
-  }, []);
-
-  // Detect interactive prompts at the bottom of the terminal:
-  // - "Press Space, Enter, or Escape to dismiss"
-  // - "← to go back · Esc/Enter/Space to close · x to stop"
-  const detectTerminalPrompt = useCallback((): TerminalPromptMode => {
-    const term = termRef.current;
-    if (!term) return null;
-    const buffer = term.buffer.active;
-    const cursorRow = buffer.baseY + buffer.cursorY;
-    const scanStart = Math.min(buffer.length - 1, cursorRow + 5);
-
-    for (let row = scanStart; row >= Math.max(0, scanStart - 20); row--) {
-      const line = buffer.getLine(row);
-      if (!line) continue;
-      const text = line.translateToString(true);
-      // "← to go back · Esc/Enter/Space to close · x to stop"
-      if (/go\s*back/i.test(text) && /close/i.test(text)) {
-        return { type: 'detail-view' };
-      }
-      // "Press Space, Enter, or Escape to dismiss"
-      if (/Space.*Enter.*Escape.*dismiss/i.test(text) || /press.*to\s+dismiss/i.test(text)) {
-        return { type: 'dismiss' };
-      }
-    }
-    return null;
+    return detectTerminalUIMode(lines);
   }, []);
 
   useEffect(() => {
@@ -453,11 +417,10 @@ export function useClaudeCode(
         captureScrollState();
         term.write(data);
         scheduleScrollCorrection();
-        // Debounce selection mode + terminal prompt detection
-        if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
-        selectionTimerRef.current = setTimeout(() => {
-          setIsSelectionMode(detectSelectionMode());
-          setTerminalPromptMode(detectTerminalPrompt());
+        // Debounce terminal UI mode detection
+        if (detectionTimerRef.current) clearTimeout(detectionTimerRef.current);
+        detectionTimerRef.current = setTimeout(() => {
+          setTerminalUIMode(detectTerminalUI());
         }, 100);
       }
     };
@@ -538,7 +501,7 @@ export function useClaudeCode(
     document.fonts.ready.then(fitWhenReady);
 
     return () => {
-      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+      if (detectionTimerRef.current) clearTimeout(detectionTimerRef.current);
       if (retryTimer) clearTimeout(retryTimer);
       if (lateTimer) clearTimeout(lateTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -598,5 +561,5 @@ export function useClaudeCode(
     try { searchAddonRef.current?.clearDecorations(); } catch {}
   }, []);
 
-  return { terminal: termRef, status, isSelectionMode, terminalPromptMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
+  return { terminal: termRef, status, terminalUIMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
 }
