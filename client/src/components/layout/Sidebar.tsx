@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import { Button } from '../ui/button.tsx';
@@ -19,9 +19,12 @@ import {
 import api from '../../utils/api.ts';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
+import SwipeableRow from '../ui/SwipeableRow.tsx';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
+import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
+import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 
 export interface SidebarHandle {
   refreshProjects: () => void;
@@ -29,12 +32,79 @@ export interface SidebarHandle {
 
 const PAGE_SIZE = 20;
 
+// Status dot colors for active chats
+function statusDotClass(status: ActiveChat['status']): string {
+  switch (status) {
+    case 'working':
+      return 'bg-[#f97316] animate-pulse'; // orange pulsing (thinking)
+    case 'question-awaiting':
+    case 'questions-awaiting':
+    case 'plan-awaiting':
+    case 'permission-awaiting':
+      return 'bg-[#a855f7] animate-pulse'; // purple pulsing (awaiting user)
+    case 'unread':
+      return 'bg-success'; // solid green (new reply)
+    case 'new':
+      return 'bg-text'; // black/white neutral (new chat, no messages)
+    case 'seen':
+      return 'bg-border'; // grey (already read)
+    default:
+      return 'bg-border';
+  }
+}
+
+function statusLabel(status: ActiveChat['status']): string {
+  switch (status) {
+    case 'working': return 'Thinking';
+    case 'question-awaiting':
+    case 'questions-awaiting': return 'Question';
+    case 'plan-awaiting': return 'Plan';
+    case 'permission-awaiting': return 'Permission';
+    case 'unread': return 'New reply';
+    case 'new': return 'New';
+    case 'seen': return ''; // handled by dismiss button
+    default: return '';
+  }
+}
+
+function isAwaitingStatus(status: ActiveChat['status']): boolean {
+  return status === 'question-awaiting' || status === 'questions-awaiting' ||
+    status === 'plan-awaiting' || status === 'permission-awaiting';
+}
+
+// Badge color: purple if any awaiting, green if all replies (excludes working/seen/new from count)
+function badgeClass(chats: ActiveChat[]): string {
+  const counted = chats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status));
+  if (counted.length === 0) return 'bg-border text-text-dim';
+  if (counted.some(c => isAwaitingStatus(c.status))) return 'bg-[#a855f7] text-white'; // purple
+  return 'bg-success text-white'; // green (all new replies)
+}
+
+// Badge count: only new replies + awaiting (not thinking, not seen, not new)
+function badgeCount(chats: ActiveChat[]): number {
+  return chats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status)).length;
+}
+
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
   const { updateAvailable } = useDesktopUpdate();
   const { setOpenMobile } = useSidebar();
   const location = useLocation();
+  const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
+  const activeChats = useGlobalActiveChats();
+
+  // Track which project accordions are expanded
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = useCallback((projectId: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  }, []);
 
   const accountSettingsUrl = tunnelUrl
     ? new URL('/settings', tunnelUrl).href
@@ -131,8 +201,32 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   }
 
   // Display: API results when available, else local filter, else full list
-  const displayProjects = searchResults ?? localFiltered ?? projects;
+  // Sort projects with active chats to the top
+  const baseProjects = searchResults ?? localFiltered ?? projects;
+  const displayProjects = useMemo(() => {
+    return [...baseProjects].sort((a, b) => {
+      const aCount = activeChats.byProject[a.id]?.count || 0;
+      const bCount = activeChats.byProject[b.id]?.count || 0;
+      if (aCount > 0 && bCount === 0) return -1;
+      if (aCount === 0 && bCount > 0) return 1;
+      return 0;
+    });
+  }, [baseProjects, activeChats]);
   const showInfiniteScroll = !sidebarSearch.trim();
+
+  // Auto-expand projects that have active chats
+  useEffect(() => {
+    const activeProjectIds = Object.keys(activeChats.byProject).filter(
+      id => activeChats.byProject[id].count > 0
+    );
+    if (activeProjectIds.length > 0) {
+      setExpanded(prev => {
+        const next = new Set(prev);
+        for (const id of activeProjectIds) next.add(id);
+        return next;
+      });
+    }
+  }, [activeChats]);
 
   return (
     <Sidebar collapsible="offcanvas">
@@ -195,16 +289,101 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
                 </li>
               )}
-              {displayProjects.map((project) => (
-                <SidebarMenuItem key={project.id}>
-                  <SidebarMenuButton asChild isActive={location.pathname.startsWith(`/project/${project.id}`)}>
-                    <NavLink to={`/project/${project.id}`} className="flex items-center gap-3">
-                      <span className="w-2 h-2 rounded-full bg-border flex-shrink-0" />
-                      <span className="truncate">{project.name}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {displayProjects.map((project) => {
+                const projectActive = activeChats.byProject[project.id];
+                const count = projectActive?.count || 0;
+                const isExpanded = expanded.has(project.id);
+                const isActive = location.pathname.startsWith(`/project/${project.id}`);
+
+                return (
+                  <SidebarMenuItem key={project.id}>
+                    <div className="flex items-center w-full">
+                      {/* Expand/collapse toggle (only if has active chats) */}
+                      {count > 0 ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleExpanded(project.id); }}
+                          className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-text-dim hover:text-text transition-colors"
+                          aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                        >
+                          <svg
+                            className={`w-3 h-3 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      ) : (
+                        <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                          <span className="w-2 h-2 rounded-full bg-border" />
+                        </span>
+                      )}
+
+                      {/* Project link */}
+                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0">
+                        <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
+                          <span className="truncate">{project.name}</span>
+                          {count > 0 && (
+                            <span className={`ml-auto flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${badgeClass(projectActive.chats)}`}>
+                              {badgeCount(projectActive.chats) || count}
+                            </span>
+                          )}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </div>
+
+                    {/* Expanded: active chats list */}
+                    {count > 0 && isExpanded && (
+                      <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
+                        {projectActive.chats.map((chat) => {
+                          const isDismissible = chat.status === 'seen' || chat.status === 'new';
+                          const chatRow = (
+                            <button
+                              onClick={() => {
+                                setOpenMobile(false);
+                                navigate(`/project/${project.id}/chats/${chat.chatId}`);
+                              }}
+                              className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors hover:bg-bg-hover ${
+                                location.pathname.includes(chat.chatId) ? 'bg-bg-hover text-text' : 'text-text-dim'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
+                              <span className="truncate flex-1 text-left">{chat.label}</span>
+                              {isDismissible ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
+                                  }}
+                                  className="flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                                  aria-label="Dismiss"
+                                >
+                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              ) : (
+                                <span className="flex-shrink-0 text-[9px] opacity-70">{statusLabel(chat.status)}</span>
+                              )}
+                            </button>
+                          );
+
+                          return (
+                            <li key={chat.chatId}>
+                              {isDismissible ? (
+                                <SwipeableRow onDismiss={() => {
+                                  api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
+                                }}>
+                                  {chatRow}
+                                </SwipeableRow>
+                              ) : chatRow}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </SidebarMenuItem>
+                );
+              })}
 
               {sidebarSearch.trim() && !searchLoading && displayProjects.length === 0 && (
                 <li className="px-3 py-2 text-xs text-text-dim">No projects found</li>

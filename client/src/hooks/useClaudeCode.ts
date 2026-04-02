@@ -560,34 +560,42 @@ export function useClaudeCode(
   }, [containerRef, socket, projectId, chatId, terminalTheme]);
 
   const searchFindNext = useCallback((query: string, incremental?: boolean): boolean => {
-    return searchAddonRef.current?.findNext(query, {
-      incremental,
-      decorations: {
-        matchBackground: '#5c4a0a',
-        activeMatchBackground: '#8a6f0f',
-        matchBorder: '#eab308',
-        activeMatchBorder: '#facc15',
-        matchOverviewRuler: '#eab308',
-        activeMatchColorOverviewRuler: '#facc15',
-      },
-    }) ?? false;
+    try {
+      return searchAddonRef.current?.findNext(query, {
+        incremental,
+        decorations: {
+          matchBackground: '#5c4a0a',
+          activeMatchBackground: '#8a6f0f',
+          matchBorder: '#eab308',
+          activeMatchBorder: '#facc15',
+          matchOverviewRuler: '#eab308',
+          activeMatchColorOverviewRuler: '#facc15',
+        },
+      }) ?? false;
+    } catch {
+      return false;
+    }
   }, []);
 
   const searchFindPrevious = useCallback((query: string): boolean => {
-    return searchAddonRef.current?.findPrevious(query, {
-      decorations: {
-        matchBackground: '#5c4a0a',
-        activeMatchBackground: '#8a6f0f',
-        matchBorder: '#eab308',
-        activeMatchBorder: '#facc15',
-        matchOverviewRuler: '#eab308',
-        activeMatchColorOverviewRuler: '#facc15',
-      },
-    }) ?? false;
+    try {
+      return searchAddonRef.current?.findPrevious(query, {
+        decorations: {
+          matchBackground: '#5c4a0a',
+          activeMatchBackground: '#8a6f0f',
+          matchBorder: '#eab308',
+          activeMatchBorder: '#facc15',
+          matchOverviewRuler: '#eab308',
+          activeMatchColorOverviewRuler: '#facc15',
+        },
+      }) ?? false;
+    } catch {
+      return false;
+    }
   }, []);
 
   const searchClear = useCallback(() => {
-    searchAddonRef.current?.clearDecorations();
+    try { searchAddonRef.current?.clearDecorations(); } catch {}
   }, []);
 
   return { terminal: termRef, status, isSelectionMode, terminalPromptMode, write, stop, searchFindNext, searchFindPrevious, searchClear };

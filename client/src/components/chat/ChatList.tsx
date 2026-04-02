@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type MouseEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate } from 'react-router-dom';
@@ -18,6 +18,7 @@ import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
+import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 import type { SessionStateContext } from '../../../../shared/types/session.ts';
 
@@ -44,23 +45,23 @@ function StatusBadge({ state }: { state: SessionStateContext }) {
   switch (state.status) {
     case 'working':
       text = 'Thinking...';
-      dotClass = 'bg-success animate-pulse';
+      dotClass = 'bg-[#f97316] animate-pulse'; // orange
       break;
     case 'question-awaiting':
       text = state.questions?.[0]?.question?.slice(0, 30) || 'Question';
-      dotClass = 'bg-primary';
+      dotClass = 'bg-[#a855f7]'; // purple
       break;
     case 'questions-awaiting':
       text = `${state.questions?.length || 0} questions`;
-      dotClass = 'bg-primary';
+      dotClass = 'bg-[#a855f7]'; // purple
       break;
     case 'plan-awaiting':
       text = 'Plan ready';
-      dotClass = 'bg-[#a855f7]';
+      dotClass = 'bg-[#a855f7]'; // purple
       break;
     case 'permission-awaiting':
       text = `Needs: ${state.pendingTool?.toolName || 'Approval'}`;
-      dotClass = 'bg-warning';
+      dotClass = 'bg-[#a855f7]'; // purple
       break;
     case 'starting':
       text = 'Starting...';
@@ -116,6 +117,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
   const { socket } = useSocket();
   const { refreshProject } = useProject();
   const isMobile = useIsMobile();
+  const activeChats = useGlobalActiveChats();
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -292,6 +294,18 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
     }
   }
 
+  // Determine which chats are in 'seen' state (read but not dismissed from tracker)
+  const seenChatIds = useMemo(() => {
+    const ids = new Set<string>();
+    const projectData = activeChats.byProject[projectId];
+    if (projectData) {
+      for (const c of projectData.chats) {
+        if (c.status === 'seen') ids.add(c.chatId);
+      }
+    }
+    return ids;
+  }, [activeChats, projectId]);
+
   const showSearch = chats.length > 0 || searchQuery;
 
   return (
@@ -421,8 +435,16 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
         </div>
       ) : (
         <>
-          {chats.map((chat) => (
-            <SwipeableRow key={chat.id} onDelete={() => setDeleteTarget(chat)}>
+          {chats.map((chat) => {
+            const isSeen = seenChatIds.has(chat.id);
+            return (
+            <SwipeableRow
+              key={chat.id}
+              onDelete={isSeen ? undefined : () => setDeleteTarget(chat)}
+              onDismiss={isSeen ? () => {
+                api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
+              } : undefined}
+            >
             <Card
               className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
               onClick={() => goToChat(chat.id)}
@@ -432,6 +454,9 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                   <div className="flex items-center gap-1.5">
                     {unreadIds.has(chat.id) && (
                       <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
+                    )}
+                    {isSeen && !unreadIds.has(chat.id) && (
+                      <span className="flex-shrink-0 w-2 h-2 rounded-full bg-border" />
                     )}
                     <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
                       {chat.label}
@@ -458,6 +483,21 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {isSeen && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-text hover-hover:bg-bg-hover transition-all"
+                      aria-label="Dismiss from tracker"
+                      title="Dismiss from sidebar"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -505,7 +545,8 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
               </div>
             </Card>
             </SwipeableRow>
-          ))}
+            );
+          })}
 
           {/* Infinite scroll sentinel */}
           <div ref={sentinelRef} />

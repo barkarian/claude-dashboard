@@ -139,3 +139,28 @@ export interface FilesChangedPayload {
   event: 'add' | 'change' | 'unlink';
   path: string;
 }
+
+// === Global Active Chats (sidebar badges + dock badge) ===
+
+import type { UnifiedStatus } from './session.ts';
+
+export interface ActiveChat {
+  chatId: string;
+  label: string;
+  /** UnifiedStatus for live sessions, 'unread' for unseen replies, 'seen' for read-but-not-dismissed, 'new' for just-created chats */
+  status: UnifiedStatus | 'unread' | 'seen' | 'new';
+  projectId: string;
+}
+
+export interface ActiveProjectChats {
+  projectName: string;
+  chats: ActiveChat[];
+  count: number;
+}
+
+export interface GlobalActiveChats {
+  byProject: Record<string, ActiveProjectChats>;
+  totalCount: number;
+  /** Count of unread + awaiting chats only (excludes working/seen/new) — used for dock/app badge */
+  badgeCount: number;
+}

@@ -178,6 +178,13 @@ try {
   // Column already exists — ignore
 }
 
+// Add pinned column to chats (keeps chat in sidebar tracker after reading until manually dismissed)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+
 // Add ai_naming_enabled column to projects
 try {
   db.exec(`ALTER TABLE projects ADD COLUMN ai_naming_enabled TEXT DEFAULT 'none'`);

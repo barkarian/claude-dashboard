@@ -10,6 +10,8 @@ import type {
   ThinkingBlock,
 } from '../../shared/types/sdk.ts';
 import projectManager from './projectManager.ts';
+import activeChatsTracker from './activeChatsTracker.ts';
+import type { SessionStateContext } from '../../shared/types/session.ts';
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -77,10 +79,26 @@ function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
     status: mapToLegacyStatus(status),
   });
 
+  // Notify global active chats tracker
+  const sdkToUnifiedStatus: Record<string, string> = {
+    starting: 'starting', idle: 'idle', streaming: 'working',
+    'tool-use': 'working', 'waiting-permission': 'permission-awaiting',
+    exited: 'exited', error: 'error',
+  };
+  activeChatsTracker.onSessionStateChange(session.chatId, session.projectId, {
+    status: (sdkToUnifiedStatus[status] || 'idle') as SessionStateContext['status'],
+  });
+
   // Mark chat as unread when agent finishes (thinking/tool-use → idle)
   if (status === 'idle' && (prev === 'streaming' || prev === 'tool-use')) {
     projectManager.markChatUnread(session.chatId);
     session.io.to(`project:${session.projectId}`).emit('chat:unread', { chatId: session.chatId });
+    const chat = projectManager.getChat(session.chatId);
+    activeChatsTracker.onChatUnread(session.chatId, session.projectId, chat?.label || 'Chat');
+  }
+
+  if (status === 'exited') {
+    activeChatsTracker.onSessionExit(session.chatId);
   }
 }
 

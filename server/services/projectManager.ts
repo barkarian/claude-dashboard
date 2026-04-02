@@ -390,11 +390,15 @@ function updateStashedInput(chatId: string, text: string): void {
 }
 
 function markChatUnread(chatId: string): void {
-  db.prepare('UPDATE chats SET unread = 1 WHERE id = ?').run(chatId);
+  db.prepare('UPDATE chats SET unread = 1, pinned = 1 WHERE id = ?').run(chatId);
 }
 
 function markChatRead(chatId: string): void {
   db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(chatId);
+}
+
+function markChatDismissed(chatId: string): void {
+  db.prepare('UPDATE chats SET pinned = 0 WHERE id = ?').run(chatId);
 }
 
 function deleteChat(chatId: string): void {
@@ -541,6 +545,7 @@ export default {
   updateStashedInput,
   markChatUnread,
   markChatRead,
+  markChatDismissed,
   touchChatActivity,
   deleteChat,
   addMessage,

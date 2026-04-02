@@ -11,6 +11,7 @@ import sdkSessionManager from '../services/sdkSessionManager.ts';
 import { generateChatTitle } from '../services/aiTitleGenerator.ts';
 import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import config from '../config.ts';
+import activeChatsTracker from '../services/activeChatsTracker.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -422,6 +423,7 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     // Use explicit adapter if provided, otherwise fall back to project default
     const chatAdapter = adapter || project.defaultAdapter || 'claude-agent-sdk';
     const chat = projectManager.createChat(req.params.id, label, chatAdapter);
+    activeChatsTracker.onChatCreated(chat.id, req.params.id, chat.label);
     res.status(201).json({ chat });
   } catch (err) {
     console.error('Error creating chat:', err);
@@ -468,10 +470,22 @@ router.put('/:id/chats/:chatId/stashed-input', async (req: Request<{ id: string;
 router.put('/:id/chats/:chatId/read', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     projectManager.markChatRead(req.params.chatId);
+    activeChatsTracker.onChatRead(req.params.chatId);
     res.json({ success: true });
   } catch (err) {
     console.error('Error marking chat read:', err);
     res.status(500).json({ error: 'Failed to mark chat read' });
+  }
+});
+
+router.put('/:id/chats/:chatId/dismiss', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    projectManager.markChatDismissed(req.params.chatId);
+    activeChatsTracker.onChatDismiss(req.params.chatId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error dismissing chat:', err);
+    res.status(500).json({ error: 'Failed to dismiss chat' });
   }
 });
 
@@ -520,6 +534,7 @@ router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: strin
 router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     projectManager.deleteChat(req.params.chatId);
+    activeChatsTracker.onChatDismiss(req.params.chatId);
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting chat:', err);

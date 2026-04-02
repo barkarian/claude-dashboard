@@ -6,6 +6,7 @@ import processManager from '../services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import { generateChatTitle } from '../services/aiTitleGenerator.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
+import activeChatsTracker from '../services/activeChatsTracker.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 import { mapToLegacyStatus } from '../../shared/types/session.ts';
 import type {
@@ -141,6 +142,9 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
           // Also emit legacy status for backward compat
           io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: mapToLegacyStatus(newState.status) });
 
+          // Notify global active chats tracker
+          activeChatsTracker.onSessionStateChange(chatId, projectId, newState);
+
           // Push notifications for CC chats
           if (newState.status === 'question-awaiting' && newState.questions?.[0]) {
             const preview = `Claude asks: ${newState.questions[0].question.slice(0, 80)}`;
@@ -169,6 +173,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
             // Mark unread when agent transitions to idle
             projectManager.markChatUnread(chatId);
             io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+            const unreadChat = projectManager.getChat(chatId);
+            activeChatsTracker.onChatUnread(chatId, projectId, unreadChat?.label || 'Chat');
 
             // Auto-title fallback: rename "New Chat" on first completion if not yet renamed
             const chat = projectManager.getChat(chatId);
@@ -208,6 +214,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
           chatId,
           state: { status: 'exited' } as SessionStateContext,
         });
+        activeChatsTracker.onSessionExit(chatId);
       });
 
       // Emit running status to chat room and project room

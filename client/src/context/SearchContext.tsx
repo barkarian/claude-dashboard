@@ -46,19 +46,24 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Listen for Ctrl/Cmd+F on desktop
+  // Listen for Ctrl/Cmd+F on desktop — capture phase to prevent native find bar
   useEffect(() => {
     if (window.innerWidth < 768) return;
 
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
-        setIsOpen(true);
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsOpen(prev => {
+          if (prev) handlerRef.current?.clearSearch();
+          return !prev;
+        });
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   return (

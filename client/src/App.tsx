@@ -17,11 +17,13 @@ import { DesktopUpdateProvider } from './context/DesktopUpdateContext.tsx';
 import { SearchProvider } from './context/SearchContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import SearchOverlay from './components/ui/SearchOverlay.tsx';
+import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
 import { haptics } from './utils/haptics.ts';
 import { useBackButton } from './hooks/useBackButton.ts';
 import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
 import { ccSwipeOverride } from './utils/ccSwipeOverride.ts';
+import { useBadgeCount } from './hooks/useBadgeCount.ts';
 
 function BrandedLoader({ message }: { message?: string }) {
   return (
@@ -227,11 +229,18 @@ function BackButtonHandler() {
   return null;
 }
 
+// Syncs global active chat count to platform badge (dock icon / app icon).
+function BadgeManager() {
+  useBadgeCount();
+  return null;
+}
+
 export default function App() {
   const sidebarRef = useRef<SidebarHandle>(null);
   const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
 
   return (
+    <ErrorBoundary>
     <Routes>
       <Route path="/*" element={
         <ProtectedRoute>
@@ -242,6 +251,7 @@ export default function App() {
                 <NewProjectDrawerProvider>
                   <SwipeHandler />
                   <BackButtonHandler />
+                  <BadgeManager />
                   <SearchProvider>
                   <div className="app-layout flex w-full overflow-hidden">
                     <AppSidebar ref={sidebarRef} />
@@ -267,5 +277,6 @@ export default function App() {
         </ProtectedRoute>
       } />
     </Routes>
+    </ErrorBoundary>
   );
 }
