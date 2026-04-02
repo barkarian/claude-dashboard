@@ -542,7 +542,7 @@ export class JsonlWatcher extends EventEmitter {
 
   // Signal maps — authoritative overrides from hook scripts
   private pendingPermissions = new Map<string, PendingPermission>();
-  private workingSignals = new Set<string>();
+  private workingSignals = new Map<string, number>();  // sessionId → timestamp (ms)
   private stopSignals = new Set<string>();
   private endedSignals = new Set<string>();
 
@@ -787,13 +787,21 @@ export class JsonlWatcher extends EventEmitter {
       }
       return { ...state, status: 'idle' };
     }
-    if (this.workingSignals.has(sessionId)) {
-      // Preserve rich waiting states — working signal from prompt submission
-      // shouldn't override a question/plan that arrived after
-      if (isRichWaitingState) {
-        return state;
+    const workingTs = this.workingSignals.get(sessionId);
+    if (workingTs !== undefined) {
+      const signalAge = Date.now() - workingTs;
+      if (signalAge > STALE_TIMEOUT_MS) {
+        // Orphaned signal — stop hook failed or process crashed. Self-heal.
+        this.workingSignals.delete(sessionId);
+        try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
+        // Fall through to JSONL-derived state (no override)
+      } else {
+        // Fresh signal — apply the override
+        if (isRichWaitingState) {
+          return state;
+        }
+        return { ...state, status: 'working' };
       }
-      return { ...state, status: 'working' };
     }
 
     // JSONL-derived 'permission-awaiting' without a corresponding permission signal
@@ -875,7 +883,8 @@ export class JsonlWatcher extends EventEmitter {
     }
 
     if (type === 'working') {
-      this.workingSignals.add(sessionId);
+      const workingSince = data?.working_since ? new Date(data.working_since).getTime() : Date.now();
+      this.workingSignals.set(sessionId, isNaN(workingSince) ? Date.now() : workingSince);
       this.stopSignals.delete(sessionId);
     } else if (type === 'permission') {
       this.pendingPermissions.set(sessionId, data as PendingPermission);
@@ -958,9 +967,17 @@ export class JsonlWatcher extends EventEmitter {
       const s = watched.state.status;
       if (s === 'idle' || s === 'starting' || s === 'exited' || s === 'error') continue;
 
-      // Re-derive (stale timeout is built into deriveStateFromEntries)
-      let newState = deriveStateFromEntries(watched.entries);
-      newState = this.applySignalOverrides(watched.sessionId, newState);
+      // Derive from JSONL (stale timeout is built into deriveStateFromEntries).
+      const jsonlState = deriveStateFromEntries(watched.entries);
+
+      // If JSONL says idle but a working signal persists, the signal is stale.
+      // Clean it up so applySignalOverrides won't force "working" back on.
+      if (jsonlState.status === 'idle' && this.workingSignals.has(watched.sessionId)) {
+        this.workingSignals.delete(watched.sessionId);
+        try { fs.unlinkSync(path.join(SIGNALS_DIR, `${watched.sessionId}.working.json`)); } catch {}
+      }
+
+      const newState = this.applySignalOverrides(watched.sessionId, jsonlState);
 
       if (newState.status !== watched.state.status) {
         const prev = watched.state;
