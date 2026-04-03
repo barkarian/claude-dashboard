@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -20,6 +20,8 @@ import { haptics } from '../../utils/haptics.ts';
 import { toast } from 'sonner';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
+import type { SwipeAction } from '../ui/SwipeableRow.tsx';
+import ContextMenu from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
@@ -134,6 +136,8 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
   const [renameValue, setRenameValue] = useState('');
   const [generatingTitle, setGeneratingTitle] = useState<string | null>(null);
   const [infoChat, setInfoChat] = useState<Chat | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which chats have unread completions
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => {
@@ -306,6 +310,68 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
     }
   }
 
+  function handleSetUnread(chat: Chat) {
+    setUnreadIds(prev => new Set(prev).add(chat.id));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/unread`).catch(() => {});
+  }
+
+  function handleDismiss(chat: Chat) {
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
+  }
+
+  // Long-press handler for mobile context menu
+  function handleTouchStart(e: ReactTouchEvent, chat: Chat) {
+    if (!isMobile) return;
+    const touch = e.touches[0];
+    const x = touch.clientX;
+    const y = touch.clientY;
+    longPressTimer.current = setTimeout(() => {
+      haptics.impactLight();
+      setContextMenu({ chat, x, y });
+    }, 500);
+  }
+
+  function handleTouchEndCancel() {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  // Build swipe actions for mobile chat rows
+  function buildSwipeActions(chat: Chat, isSeen: boolean): SwipeAction[] {
+    const actions: SwipeAction[] = [];
+    if (!unreadIds.has(chat.id)) {
+      actions.push({
+        icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
+        label: 'Unread',
+        className: 'bg-primary',
+        onAction: () => handleSetUnread(chat),
+      });
+    }
+    if (isSeen) {
+      actions.push({
+        icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+        label: 'Dismiss',
+        className: 'bg-text-dim',
+        onAction: () => handleDismiss(chat),
+      });
+    }
+    actions.push({
+      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>,
+      label: 'Edit',
+      className: 'bg-[#6b7280]',
+      onAction: () => { setRenameTarget(chat); setRenameValue(chat.label); },
+    });
+    actions.push({
+      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+      label: 'Delete',
+      className: 'bg-danger',
+      onAction: () => { haptics.notificationWarning(); setDeleteTarget(chat); },
+    });
+    return actions;
+  }
+
   // Determine which chats are in 'seen' state (read but not dismissed from tracker)
   const seenChatIds = useMemo(() => {
     const ids = new Set<string>();
@@ -452,14 +518,20 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
             return (
             <SwipeableRow
               key={chat.id}
-              onDelete={isSeen ? undefined : () => setDeleteTarget(chat)}
-              onDismiss={isSeen ? () => {
-                api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
-              } : undefined}
+              {...(isMobile
+                ? { actions: buildSwipeActions(chat, isSeen) }
+                : {
+                    onDelete: isSeen ? undefined : () => setDeleteTarget(chat),
+                    onDismiss: isSeen ? () => handleDismiss(chat) : undefined,
+                  }
+              )}
             >
             <Card
               className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
               onClick={() => goToChat(chat.id)}
+              onTouchStart={(e) => handleTouchStart(e, chat)}
+              onTouchEnd={handleTouchEndCancel}
+              onTouchMove={handleTouchEndCancel}
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -500,11 +572,12 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  {isSeen && (
+                  {/* Dismiss button — desktop only */}
+                  {!isMobile && isSeen && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
+                        handleDismiss(chat);
                       }}
                       className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-text hover-hover:bg-bg-hover transition-all"
                       aria-label="Dismiss from tracker"
@@ -515,58 +588,64 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                       </svg>
                     </button>
                   )}
+                  {/* Info icon — bigger on mobile */}
                   {chat.description && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setInfoChat(chat); }}
-                      className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all"
+                      className={`flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all ${isMobile ? 'w-8 h-8' : 'w-7 h-7'}`}
                       aria-label="Chat summary"
                       title="View summary"
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <svg className={isMobile ? 'w-5 h-5' : 'w-3.5 h-3.5'} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                       </svg>
                     </button>
                   )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+                  {/* Edit dropdown + delete button — desktop only */}
+                  {!isMobile && (
+                    <>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-text-muted hover-hover:bg-bg-hover transition-all"
+                            aria-label="Edit chat"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+                            </svg>
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleGenerateTitle(chat); }}>
+                            {generatingTitle === chat.id ? (
+                              <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                              </svg>
+                            )}
+                            Auto generate title
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget(chat); setRenameValue(chat.label); }}>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                            </svg>
+                            Manual title
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       <button
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-text-muted hover-hover:bg-bg-hover transition-all"
-                        aria-label="Edit chat"
+                        onClick={(e) => promptDelete(chat, e)}
+                        className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-danger hover-hover:bg-bg-hover transition-all"
+                        aria-label="Delete chat"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                         </svg>
                       </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleGenerateTitle(chat); }}>
-                        {generatingTitle === chat.id ? (
-                          <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />
-                        ) : (
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                          </svg>
-                        )}
-                        Auto generate title
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget(chat); setRenameValue(chat.label); }}>
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
-                        </svg>
-                        Manual title
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <button
-                    onClick={(e) => promptDelete(chat, e)}
-                    className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-danger hover-hover:bg-bg-hover transition-all"
-                    aria-label="Delete chat"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
-                  </button>
+                    </>
+                  )}
                   <svg className="w-5 h-5 text-text-dim group-hover-hover:text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                   </svg>
@@ -645,6 +724,46 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile long-press context menu */}
+      <ContextMenu
+        open={!!contextMenu}
+        onClose={() => setContextMenu(null)}
+        position={{ x: contextMenu?.x || 0, y: contextMenu?.y || 0 }}
+        items={contextMenu ? [
+          ...(contextMenu.chat.description ? [{
+            label: 'View summary',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>,
+            onAction: () => setInfoChat(contextMenu.chat),
+          }] : []),
+          {
+            label: 'Auto generate title',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>,
+            onAction: () => handleGenerateTitle(contextMenu.chat),
+          },
+          {
+            label: 'Rename',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" /></svg>,
+            onAction: () => { setRenameTarget(contextMenu.chat); setRenameValue(contextMenu.chat.label); },
+          },
+          ...(!unreadIds.has(contextMenu.chat.id) ? [{
+            label: 'Set as unread',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
+            onAction: () => handleSetUnread(contextMenu.chat),
+          }] : []),
+          ...(seenChatIds.has(contextMenu.chat.id) ? [{
+            label: 'Dismiss',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            onAction: () => handleDismiss(contextMenu.chat),
+          }] : []),
+          {
+            label: 'Delete',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+            variant: 'danger' as const,
+            onAction: () => { haptics.notificationWarning(); setDeleteTarget(contextMenu.chat); },
+          },
+        ] : []}
+      />
 
     </PullToRefresh>
   );

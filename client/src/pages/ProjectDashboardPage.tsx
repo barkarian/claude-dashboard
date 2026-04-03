@@ -91,6 +91,16 @@ export default function ProjectDashboardPage() {
     return () => { socket.off('chat:unread', handleUnread); };
   }, [socket, activeChatId, id]);
 
+  // Refresh project data when any chat in this project is renamed (title generated)
+  useEffect(() => {
+    if (!socket) return;
+    function handleChatRenamed() {
+      refreshProject();
+    }
+    socket.on('claude:chat-renamed', handleChatRenamed);
+    return () => { socket.off('claude:chat-renamed', handleChatRenamed); };
+  }, [socket, refreshProject]);
+
   // Compute status display — prefer unified JSONL state, fall back to SDK activeChatStatus
   const activeSessionState = activeChatId ? sessionStates[activeChatId] : undefined;
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type TouchEvent as ReactTouchEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
@@ -19,7 +19,12 @@ import {
 import api from '../../utils/api.ts';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
-import SwipeableRow from '../ui/SwipeableRow.tsx';
+import ContextMenu from '../ui/ContextMenu.tsx';
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from '../ui/alert-dialog.tsx';
+import { haptics } from '../../utils/haptics.ts';
 import type { ProjectSummary } from '../../../../shared/types/models.ts';
 import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
@@ -93,6 +98,38 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
   const activeChats = useGlobalActiveChats();
+
+  // Context menu and delete confirmation state for sidebar chat long-press
+  const [sidebarCtx, setSidebarCtx] = useState<{ chat: ActiveChat; projectId: string; x: number; y: number } | null>(null);
+  const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: ActiveChat; projectId: string } | null>(null);
+  const sidebarLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleSidebarChatTouchStart(e: ReactTouchEvent, chat: ActiveChat, projectId: string) {
+    const touch = e.touches[0];
+    sidebarLongPress.current = setTimeout(() => {
+      haptics.impactLight();
+      setSidebarCtx({ chat, projectId, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  }
+  function handleSidebarChatTouchEndCancel() {
+    if (sidebarLongPress.current) {
+      clearTimeout(sidebarLongPress.current);
+      sidebarLongPress.current = null;
+    }
+  }
+
+  // Quick New Chat for a project
+  async function handleQuickNewChat(projectId: string) {
+    try {
+      const data = await api.post<{ chat: { id: string; adapter: string } }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
+      setOpenMobile(false);
+      navigate(`/project/${projectId}/chats/${data.chat.id}`, {
+        state: { isNewChat: true, adapter: data.chat.adapter },
+      });
+    } catch (err) {
+      console.error('Failed to create chat:', err);
+    }
+  }
 
   // Track which project accordions are expanded
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -329,6 +366,18 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                           )}
                         </NavLink>
                       </SidebarMenuButton>
+
+                      {/* Quick New Chat button */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleQuickNewChat(project.id); }}
+                        className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
+                        aria-label="New chat"
+                        title="New chat"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                      </button>
                     </div>
 
                     {/* Expanded: active chats list */}
@@ -336,46 +385,40 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
                         {projectActive.chats.map((chat) => {
                           const isDismissible = chat.status === 'seen' || chat.status === 'new';
-                          const chatRow = (
-                            <button
-                              onClick={() => {
-                                setOpenMobile(false);
-                                navigate(`/project/${project.id}/chats/${chat.chatId}`);
-                              }}
-                              className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors hover:bg-bg-hover ${
-                                location.pathname.includes(chat.chatId) ? 'bg-bg-hover text-text' : 'text-text-dim'
-                              }`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
-                              <span className="truncate flex-1 text-left">{chat.label}</span>
-                              {isDismissible ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
-                                  }}
-                                  className="flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-                                  aria-label="Dismiss"
-                                >
-                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                </button>
-                              ) : (
-                                <span className="flex-shrink-0 text-[9px] opacity-70">{statusLabel(chat.status)}</span>
-                              )}
-                            </button>
-                          );
 
                           return (
                             <li key={chat.chatId}>
-                              {isDismissible ? (
-                                <SwipeableRow onDismiss={() => {
-                                  api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
-                                }}>
-                                  {chatRow}
-                                </SwipeableRow>
-                              ) : chatRow}
+                              <button
+                                onClick={() => {
+                                  setOpenMobile(false);
+                                  navigate(`/project/${project.id}/chats/${chat.chatId}`);
+                                }}
+                                onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id)}
+                                onTouchEnd={handleSidebarChatTouchEndCancel}
+                                onTouchMove={handleSidebarChatTouchEndCancel}
+                                className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors hover:bg-bg-hover ${
+                                  location.pathname.includes(chat.chatId) ? 'bg-bg-hover text-text' : 'text-text-dim'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
+                                <span className="truncate flex-1 text-left">{chat.label}</span>
+                                {isDismissible ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
+                                    }}
+                                    className="flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                                    aria-label="Dismiss"
+                                  >
+                                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                ) : (
+                                  <span className="flex-shrink-0 text-[9px] opacity-70">{statusLabel(chat.status)}</span>
+                                )}
+                              </button>
                             </li>
                           );
                         })}
@@ -494,6 +537,65 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </Button>
         </div>
       </SidebarFooter>
+
+      {/* Sidebar chat long-press context menu */}
+      <ContextMenu
+        open={!!sidebarCtx}
+        onClose={() => setSidebarCtx(null)}
+        position={{ x: sidebarCtx?.x || 0, y: sidebarCtx?.y || 0 }}
+        items={sidebarCtx ? [
+          ...(sidebarCtx.chat.status === 'unread' ? [] : [{
+            label: 'Set as unread',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
+            onAction: () => {
+              api.put(`/api/projects/${sidebarCtx.projectId}/chats/${sidebarCtx.chat.chatId}/unread`).catch(() => {});
+            },
+          }]),
+          ...((sidebarCtx.chat.status === 'seen' || sidebarCtx.chat.status === 'new') ? [{
+            label: 'Dismiss',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            onAction: () => {
+              api.put(`/api/projects/${sidebarCtx.projectId}/chats/${sidebarCtx.chat.chatId}/dismiss`).catch(() => {});
+            },
+          }] : []),
+          {
+            label: 'Delete',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+            variant: 'danger' as const,
+            onAction: () => {
+              haptics.notificationWarning();
+              setSidebarDeleteTarget({ chat: sidebarCtx.chat, projectId: sidebarCtx.projectId });
+            },
+          },
+        ] : []}
+      />
+
+      {/* Sidebar chat delete confirmation */}
+      <AlertDialog open={!!sidebarDeleteTarget} onOpenChange={(open) => !open && setSidebarDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{sidebarDeleteTarget?.chat.label}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (sidebarDeleteTarget) {
+                  haptics.notificationError();
+                  api.delete(`/api/projects/${sidebarDeleteTarget.projectId}/chats/${sidebarDeleteTarget.chat.chatId}`).catch(() => {});
+                }
+                setSidebarDeleteTarget(null);
+              }}
+              className="bg-danger hover:bg-danger/90 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </Sidebar>
   );

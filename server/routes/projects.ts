@@ -470,6 +470,17 @@ router.patch('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: str
       return res.status(404).json({ error: 'Chat not found' });
     }
     const updated = projectManager.updateChat(req.params.chatId, req.body);
+
+    // Broadcast label change if the label was updated
+    if (req.body.label && req.body.label !== chat.label) {
+      const io = activeChatsTracker.getIO();
+      if (io) {
+        io.to(`project:${req.params.id}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: req.body.label });
+        io.to(`claude:${req.params.chatId}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: req.body.label });
+      }
+      activeChatsTracker.onChatRenamed(req.params.chatId, req.body.label);
+    }
+
     res.json({ chat: updated });
   } catch (err) {
     console.error('Error updating chat:', err);
@@ -507,6 +518,19 @@ router.put('/:id/chats/:chatId/read', async (req: Request<{ id: string; chatId: 
   } catch (err) {
     console.error('Error marking chat read:', err);
     res.status(500).json({ error: 'Failed to mark chat read' });
+  }
+});
+
+router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+    projectManager.markChatUnread(req.params.chatId);
+    activeChatsTracker.onChatUnread(req.params.chatId, req.params.id, chat.label);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error marking chat unread:', err);
+    res.status(500).json({ error: 'Failed to mark chat unread' });
   }
 });
 
@@ -556,6 +580,15 @@ router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: strin
     }
 
     projectManager.updateChat(req.params.chatId, { label: result.title, description: result.description || null });
+
+    // Broadcast title change to all clients in the project + chat rooms
+    const io = activeChatsTracker.getIO();
+    if (io) {
+      io.to(`project:${req.params.id}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: result.title });
+      io.to(`claude:${req.params.chatId}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: result.title });
+    }
+    activeChatsTracker.onChatRenamed(req.params.chatId, result.title);
+
     res.json({ title: result.title, description: result.description });
   } catch (err) {
     console.error('Error generating chat title:', err);

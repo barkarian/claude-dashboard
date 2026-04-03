@@ -284,6 +284,11 @@ function broadcast(): void {
   io.to('global:active-chats').emit('global:active-chats', snapshot);
 }
 
+/** Return the Socket.IO server instance (for emitting events from routes). */
+function getIO(): SocketIOServer | null {
+  return io;
+}
+
 export default {
   init,
   onSessionStateChange,
@@ -294,4 +299,5 @@ export default {
   onSessionExit,
   onChatRenamed,
   getSnapshot,
+  getIO,
 };
