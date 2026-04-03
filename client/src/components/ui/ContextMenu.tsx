@@ -13,9 +13,13 @@ interface ContextMenuProps {
   onClose: () => void;
   position: { x: number; y: number };
   items: ContextMenuItem[];
+  header?: ReactNode;
+  showBackdrop?: boolean;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export default function ContextMenu({ open, onClose, position, items }: ContextMenuProps) {
+export default function ContextMenu({ open, onClose, position, items, header, showBackdrop = true, onMouseEnter, onMouseLeave }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Adjust position to stay within viewport
@@ -32,22 +36,43 @@ export default function ContextMenu({ open, onClose, position, items }: ContextM
     }
   }, [open, position]);
 
+  // Click-outside handler when no backdrop
+  useEffect(() => {
+    if (!open || showBackdrop) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, showBackdrop, onClose]);
+
   if (!open) return null;
 
   return createPortal(
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-[9998]"
-        onClick={onClose}
-        onTouchEnd={(e) => { e.preventDefault(); onClose(); }}
-      />
+      {showBackdrop && (
+        <div
+          className="fixed inset-0 z-[9998]"
+          onClick={onClose}
+          onTouchEnd={(e) => { e.preventDefault(); onClose(); }}
+        />
+      )}
       {/* Menu */}
       <div
         ref={menuRef}
-        className="fixed z-[9999] min-w-[180px] py-1 bg-bg-surface border border-border rounded-xl shadow-lg shadow-black/40 overflow-hidden"
+        className="fixed z-[9999] min-w-[180px] max-w-[280px] py-1 bg-bg-surface border border-border rounded-xl shadow-lg shadow-black/40 overflow-hidden"
         style={{ left: position.x, top: position.y }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
+        {header && (
+          <div className="px-4 py-2.5 border-b border-border">
+            {header}
+          </div>
+        )}
         {items.map((item, i) => (
           <button
             key={i}

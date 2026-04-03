@@ -2,8 +2,11 @@ import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardR
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
-import { Button } from '../ui/button.tsx';
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
+import { Separator } from '../ui/separator.tsx';
 import {
+  SIDEBAR_WIDTH,
+  SIDEBAR_WIDTH_MOBILE,
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -93,22 +96,36 @@ function badgeCount(chats: ActiveChat[]): number {
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
   const { updateAvailable } = useDesktopUpdate();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, openMobile, isMobile } = useSidebar();
   const location = useLocation();
   const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
   const activeChats = useGlobalActiveChats();
 
   // Context menu and delete confirmation state for sidebar chat long-press
-  const [sidebarCtx, setSidebarCtx] = useState<{ chat: ActiveChat; projectId: string; x: number; y: number } | null>(null);
+  const [sidebarCtx, setSidebarCtx] = useState<{ chat: ActiveChat; projectId: string; projectPath: string; x: number; y: number; trigger: 'longpress' | 'hover' } | null>(null);
   const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: ActiveChat; projectId: string } | null>(null);
   const sidebarLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ideMenu, setIdeMenu] = useState<{ projectPath: string; x: number; y: number } | null>(null);
+  const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function handleSidebarChatTouchStart(e: ReactTouchEvent, chat: ActiveChat, projectId: string) {
+  // Close popover when mobile sidebar closes
+  useEffect(() => {
+    if (isMobile && !openMobile) setSidebarCtx(null);
+  }, [openMobile, isMobile]);
+
+  // Cleanup hover timers
+  useEffect(() => () => {
+    if (hoverShowRef.current) clearTimeout(hoverShowRef.current);
+    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
+  }, []);
+
+  function handleSidebarChatTouchStart(e: ReactTouchEvent, chat: ActiveChat, projectId: string, projectPath: string) {
     const touch = e.touches[0];
     sidebarLongPress.current = setTimeout(() => {
       haptics.impactLight();
-      setSidebarCtx({ chat, projectId, x: touch.clientX, y: touch.clientY });
+      setSidebarCtx({ chat, projectId, projectPath, x: touch.clientX, y: touch.clientY, trigger: 'longpress' });
     }, 500);
   }
   function handleSidebarChatTouchEndCancel() {
@@ -116,6 +133,48 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       clearTimeout(sidebarLongPress.current);
       sidebarLongPress.current = null;
     }
+  }
+
+  // Desktop: hover to show popover
+  function handleChatMouseEnter(e: React.MouseEvent, chat: ActiveChat, projectId: string, projectPath: string) {
+    if (isMobile || ideMenu) return;
+    if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
+    if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    hoverShowRef.current = setTimeout(() => {
+      setSidebarCtx({ chat, projectId, projectPath, x: rect.right + 4, y: rect.top, trigger: 'hover' });
+      hoverShowRef.current = null;
+    }, 150);
+  }
+
+  function handleChatMouseLeave() {
+    if (isMobile) return;
+    if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
+    hoverHideRef.current = setTimeout(() => {
+      setSidebarCtx(prev => prev?.trigger === 'hover' ? null : prev);
+      hoverHideRef.current = null;
+    }, 500);
+  }
+
+  function handlePopoverMouseEnter() {
+    if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
+  }
+
+  function handlePopoverMouseLeave() {
+    hoverHideRef.current = setTimeout(() => {
+      setSidebarCtx(prev => prev?.trigger === 'hover' ? null : prev);
+      hoverHideRef.current = null;
+    }, 500);
+  }
+
+  // Desktop app: right-click to open in IDE/Finder
+  function handleChatContextMenu(e: React.MouseEvent, projectPath: string) {
+    if (!isDesktop || isMobile) return;
+    e.preventDefault();
+    setSidebarCtx(null);
+    if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
+    if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
+    setIdeMenu({ projectPath, x: e.clientX, y: e.clientY });
   }
 
   // Quick New Chat for a project
@@ -393,9 +452,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                                   setOpenMobile(false);
                                   navigate(`/project/${project.id}/chats/${chat.chatId}`);
                                 }}
-                                onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id)}
+                                onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
                                 onTouchEnd={handleSidebarChatTouchEndCancel}
                                 onTouchMove={handleSidebarChatTouchEndCancel}
+                                onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
+                                onMouseLeave={handleChatMouseLeave}
+                                onContextMenu={(e) => handleChatContextMenu(e, project.path)}
                                 className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors hover:bg-bg-hover ${
                                   location.pathname.includes(chat.chatId) ? 'bg-bg-hover text-text' : 'text-text-dim'
                                 }`}
@@ -538,11 +600,27 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         </div>
       </SidebarFooter>
 
-      {/* Sidebar chat long-press context menu */}
+      {/* Sidebar chat long-press / hover context menu */}
       <ContextMenu
         open={!!sidebarCtx}
         onClose={() => setSidebarCtx(null)}
         position={{ x: sidebarCtx?.x || 0, y: sidebarCtx?.y || 0 }}
+        showBackdrop={sidebarCtx?.trigger !== 'hover'}
+        onMouseEnter={sidebarCtx?.trigger === 'hover' ? handlePopoverMouseEnter : undefined}
+        onMouseLeave={sidebarCtx?.trigger === 'hover' ? handlePopoverMouseLeave : undefined}
+        header={sidebarCtx ? (
+          <div className="flex items-start gap-2">
+            <svg className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-text break-words">{sidebarCtx.chat.label}</p>
+              {statusLabel(sidebarCtx.chat.status) && (
+                <p className="text-xs text-text-muted mt-0.5">{statusLabel(sidebarCtx.chat.status)}</p>
+              )}
+            </div>
+          </div>
+        ) : undefined}
         items={sidebarCtx ? [
           ...(sidebarCtx.chat.status === 'unread' ? [] : [{
             label: 'Set as unread',
@@ -596,6 +674,42 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Desktop right-click: open in IDE / Finder */}
+      {isDesktop && (
+        <ContextMenu
+          open={!!ideMenu}
+          onClose={() => setIdeMenu(null)}
+          position={{ x: ideMenu?.x || 0, y: ideMenu?.y || 0 }}
+          items={ideMenu ? [
+            {
+              label: 'Open Folder',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: ideMenu.projectPath, editor: 'finder' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in VS Code',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: ideMenu.projectPath, editor: 'vscode' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in Cursor',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: ideMenu.projectPath, editor: 'cursor' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in Zed',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: ideMenu.projectPath, editor: 'zed' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in Windsurf',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: ideMenu.projectPath, editor: 'windsurf' }).catch(() => {}); },
+            },
+          ] : []}
+        />
+      )}
 
     </Sidebar>
   );

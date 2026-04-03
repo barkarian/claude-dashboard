@@ -44,6 +44,40 @@ router.post('/open-external', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// POST /api/open-path — open a project folder in Finder/Explorer or in an IDE (desktop mode only).
+router.post('/open-path', (req: Request, res: Response) => {
+  if (process.env.CLAW_DESKTOP !== '1') {
+    return res.status(403).json({ error: 'Only available in desktop mode' });
+  }
+
+  const { path, editor } = req.body;
+  if (!path || typeof path !== 'string') {
+    return res.status(400).json({ error: 'path is required' });
+  }
+  if (!editor || typeof editor !== 'string') {
+    return res.status(400).json({ error: 'editor is required' });
+  }
+
+  const editors: Record<string, string> = {
+    finder: process.platform === 'win32' ? 'explorer' : 'open',
+    vscode: 'code',
+    cursor: 'cursor',
+    zed: 'zed',
+    windsurf: 'windsurf',
+  };
+
+  const cmd = editors[editor];
+  if (!cmd) {
+    return res.status(400).json({ error: 'Unknown editor' });
+  }
+
+  execFile(cmd, [path], (err) => {
+    if (err) console.error(`[settings] Failed to open in ${editor}:`, err);
+  });
+
+  res.json({ success: true });
+});
+
 // --- Dashboard self-update state ---
 let updating = false;
 let updateError: string | null = null;
