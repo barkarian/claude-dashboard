@@ -10,9 +10,13 @@ export function useSessionStatuses(projectId: string | undefined): Record<string
   useEffect(() => {
     if (!socket || !projectId) return;
 
-    socket.emit('project:join', { projectId }, (initial: Record<string, SessionStatus>) => {
-      setStatuses(initial || {});
-    });
+    function joinAndSync() {
+      socket!.emit('project:join', { projectId }, (initial: Record<string, SessionStatus>) => {
+        setStatuses(initial || {});
+      });
+    }
+
+    joinAndSync();
 
     function handleSessionStatus({ chatId, status }: { chatId: string; status: SessionStatus }) {
       setStatuses((prev) => {
@@ -26,10 +30,13 @@ export function useSessionStatuses(projectId: string | undefined): Record<string
     }
 
     socket.on('claude:session-status', handleSessionStatus);
+    // Re-join room after reconnect (server drops room membership on disconnect)
+    socket.io.on('reconnect', joinAndSync);
 
     return () => {
       socket.emit('project:leave', { projectId });
       socket.off('claude:session-status', handleSessionStatus);
+      socket.io.off('reconnect', joinAndSync);
     };
   }, [socket, projectId]);
 
@@ -47,15 +54,19 @@ export function useSessionStates(projectId: string | undefined): Record<string, 
   useEffect(() => {
     if (!socket || !projectId) return;
 
-    // project:join callback now includes session states as second arg
-    socket.emit('project:join', { projectId }, (
-      _statuses: Record<string, string>,
-      initialStates?: Record<string, SessionStateContext>,
-    ) => {
-      if (initialStates) {
-        setStates(initialStates);
-      }
-    });
+    function joinAndSync() {
+      // project:join callback includes session states as second arg
+      socket!.emit('project:join', { projectId }, (
+        _statuses: Record<string, string>,
+        initialStates?: Record<string, SessionStateContext>,
+      ) => {
+        if (initialStates) {
+          setStates(initialStates);
+        }
+      });
+    }
+
+    joinAndSync();
 
     function handleSessionState({ chatId, state }: { chatId: string; state: SessionStateContext }) {
       setStates((prev) => {
@@ -69,9 +80,12 @@ export function useSessionStates(projectId: string | undefined): Record<string, 
     }
 
     socket.on('claude:session-state', handleSessionState);
+    // Re-join room after reconnect (server drops room membership on disconnect)
+    socket.io.on('reconnect', joinAndSync);
 
     return () => {
       socket.off('claude:session-state', handleSessionState);
+      socket.io.off('reconnect', joinAndSync);
     };
   }, [socket, projectId]);
 
