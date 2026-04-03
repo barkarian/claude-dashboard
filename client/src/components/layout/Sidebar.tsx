@@ -102,6 +102,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { openDrawer } = useNewProjectDrawer();
   const activeChats = useGlobalActiveChats();
 
+  const [accountPopoverOpen, setAccountPopoverOpen] = useState(false);
+
   // Context menu and delete confirmation state for sidebar chat long-press
   const [sidebarCtx, setSidebarCtx] = useState<{ chat: ActiveChat; projectId: string; projectPath: string; x: number; y: number; trigger: 'longpress' | 'hover' } | null>(null);
   const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: ActiveChat; projectId: string } | null>(null);
@@ -228,12 +230,18 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     loadInitial();
   }, []);
 
-  // Auto-close mobile drawer on navigation + clear search
+  // Auto-close mobile drawer on navigation + clear search + close popover
   useEffect(() => {
     setOpenMobile(false);
     setSidebarSearch('');
     setSearchResults(null);
+    setAccountPopoverOpen(false);
   }, [location.pathname]);
+
+  // Close popover when mobile sidebar is dismissed
+  useEffect(() => {
+    if (!openMobile) setAccountPopoverOpen(false);
+  }, [openMobile]);
 
   async function loadInitial() {
     try {
@@ -415,7 +423,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       )}
 
                       {/* Project link */}
-                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0">
+                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-base h-10 md:text-[15px] md:h-9">
                         <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
                           <span className="truncate">{project.name}</span>
                           {count > 0 && (
@@ -429,7 +437,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       {/* Quick New Chat button */}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleQuickNewChat(project.id); }}
-                        className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
+                        className="flex-shrink-0 w-7 h-7 md:w-5 md:h-5 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
                         aria-label="New chat"
                         title="New chat"
                       >
@@ -458,7 +466,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                                 onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
                                 onMouseLeave={handleChatMouseLeave}
                                 onContextMenu={(e) => handleChatContextMenu(e, project.path)}
-                                className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-xs transition-colors hover:bg-bg-hover ${
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 md:py-1 rounded-md text-sm md:text-[13px] transition-colors hover:bg-bg-hover ${
                                   location.pathname.includes(chat.chatId) ? 'bg-bg-hover text-text' : 'text-text-dim'
                                 }`}
                               >
@@ -515,89 +523,107 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Settings */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Settings</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <a
-                    href={accountSettingsUrl}
-                    onClick={openAccountSettings}
-                    className="flex items-center gap-3"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    <span>Account Settings</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={location.pathname === '/settings'}>
-                  <NavLink to="/settings" className="flex items-center gap-3">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    <span>Settings</span>
-                    {updateAvailable && (
-                      <span className="ml-auto flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                        <span className="text-[10px] font-medium text-primary">Update</span>
-                      </span>
-                    )}
-                  </NavLink>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
         {user && (
-          <div className="px-1 py-1">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
-              <span className="text-xs font-medium text-text truncate">
-                {user.username}
-              </span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                user.plan === 'pro'
-                  ? 'bg-primary/15 text-primary'
-                  : 'bg-border text-text-dim'
-              }`}>
-                {user.plan === 'pro' ? 'PRO' : 'FREE'}
-              </span>
-            </div>
-            {user.plan !== 'pro' && (
+          <Popover open={accountPopoverOpen} onOpenChange={setAccountPopoverOpen}>
+            <PopoverTrigger asChild>
+              <button className="w-full px-2 py-2 flex items-center gap-2 rounded-lg hover:bg-bg-hover transition-colors cursor-pointer text-left">
+                <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+                <span className="text-xs font-medium text-text truncate">
+                  {user.username}
+                </span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  user.plan === 'pro'
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-border text-text-dim'
+                }`}>
+                  {user.plan === 'pro' ? 'PRO' : 'FREE'}
+                </span>
+                <svg className="w-3.5 h-3.5 ml-auto text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" />
+                </svg>
+              </button>
+            </PopoverTrigger>
+
+            <PopoverContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              className="p-2 rounded-xl"
+              style={{ width: isMobile ? SIDEBAR_WIDTH_MOBILE : SIDEBAR_WIDTH }}
+            >
+              {/* Account Settings */}
               <a
                 href={accountSettingsUrl}
-                onClick={openAccountSettings}
-                className="text-[11px] text-primary hover:underline mt-1 ml-4 block"
+                onClick={(e) => {
+                  openAccountSettings(e);
+                  setAccountPopoverOpen(false);
+                }}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text hover:bg-bg-hover transition-colors"
               >
-                Upgrade to Pro &rarr;
+                <svg className="w-4 h-4 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Account Settings
               </a>
-            )}
-          </div>
-        )}
 
-        <div className="px-1">
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-3 text-danger"
-            onClick={logout}
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-            </svg>
-            {isDesktop ? 'Logout & Close Tunnel' : 'Logout'}
-          </Button>
-        </div>
+              {/* Settings */}
+              <NavLink
+                to="/settings"
+                onClick={() => setAccountPopoverOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text hover:bg-bg-hover transition-colors"
+              >
+                <svg className="w-4 h-4 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.11v1.093c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="flex-1">Settings</span>
+                {updateAvailable && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    <span className="text-[10px] font-medium text-primary">Update</span>
+                  </span>
+                )}
+              </NavLink>
+
+              <Separator className="my-1" />
+
+              {/* Upgrade link for free users */}
+              {user.plan !== 'pro' && (
+                <a
+                  href={accountSettingsUrl}
+                  onClick={(e) => {
+                    openAccountSettings(e);
+                    setAccountPopoverOpen(false);
+                  }}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-primary hover:bg-bg-hover transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                  </svg>
+                  Upgrade to Pro
+                </a>
+              )}
+
+              {/* Logout */}
+              <button
+                onClick={() => {
+                  setAccountPopoverOpen(false);
+                  logout();
+                }}
+                className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-danger hover:bg-bg-hover transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                </svg>
+                {isDesktop ? 'Logout & Close Tunnel' : 'Logout'}
+              </button>
+            </PopoverContent>
+          </Popover>
+        )}
       </SidebarFooter>
 
       {/* Sidebar chat long-press / hover context menu */}
