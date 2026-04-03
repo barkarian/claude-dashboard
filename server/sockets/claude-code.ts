@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
@@ -70,6 +73,38 @@ const sessions = new Map<string, CCSession>();
 // Throttle map for touchChatActivity: chatId -> last touch timestamp
 const lastActivityTouch = new Map<string, number>();
 
+const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
+
+/**
+ * After spawning a Claude PTY, poll `~/.claude/sessions/{pid}.json` to discover the
+ * actual session ID.  When `--resume` is used but Claude can't resume (session too old,
+ * JSONL missing, etc.) it silently creates a new session with a different ID.  Without
+ * this check the dashboard keeps watching the old (empty) JSONL file and status never
+ * updates.
+ */
+function detectActualSessionId(
+  pid: number,
+  expectedSessionId: string,
+  onMismatch: (actualSessionId: string) => void,
+): void {
+  const sessionFile = path.join(CLAUDE_SESSIONS_DIR, `${pid}.json`);
+  let attempts = 0;
+  const maxAttempts = 25; // 25 × 200ms = 5s max
+
+  const timer = setInterval(() => {
+    attempts++;
+    try {
+      const data = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      clearInterval(timer);
+      if (data.sessionId && data.sessionId !== expectedSessionId) {
+        onMismatch(data.sessionId);
+      }
+    } catch {
+      if (attempts >= maxAttempts) clearInterval(timer);
+    }
+  }, 200);
+}
+
 export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOServer): void {
 
   socket.on('cc:start', ({ projectId, chatId, conversationId, cols, rows }: CCStartPayload) => {
@@ -134,9 +169,12 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         jsonlWatcher.watchSession(sessionId, projectPath);
         session.jsonlSessionId = sessionId;
 
-        // Subscribe to state changes from JSONL watcher
+        // Subscribe to state changes from JSONL watcher.
+        // Uses session.jsonlSessionId (not the closure var) so that if the
+        // actual session ID changes after resume detection, the handler
+        // automatically tracks the new ID.
         const stateHandler = (sid: string, newState: SessionStateContext, prevState: SessionStateContext) => {
-          if (sid !== sessionId) return;
+          if (sid !== session.jsonlSessionId) return;
           // Emit the unified state event
           io.to(`project:${projectId}`).emit('claude:session-state', { chatId, state: newState });
           // Also emit legacy status for backward compat
@@ -158,8 +196,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
           } else if (newState.status === 'working' && prevState.status === 'starting') {
             // Auto-title: rename "New Chat" as soon as the agent starts working on the first prompt
             const chat = projectManager.getChat(chatId);
-            if (chat && chat.label === 'New Chat' && sessionId) {
-              const firstPrompt = readFirstUserPrompt(sessionId, projectPath);
+            if (chat && chat.label === 'New Chat' && session.jsonlSessionId) {
+              const firstPrompt = readFirstUserPrompt(session.jsonlSessionId, projectPath);
               if (firstPrompt) {
                 const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
                 projectManager.updateChat(chatId, { label: newLabel });
@@ -178,8 +216,8 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
             // Auto-title fallback: rename "New Chat" on first completion if not yet renamed
             const chat = projectManager.getChat(chatId);
-            if (chat && chat.label === 'New Chat' && sessionId) {
-              const firstPrompt = readFirstUserPrompt(sessionId, projectPath);
+            if (chat && chat.label === 'New Chat' && session.jsonlSessionId) {
+              const firstPrompt = readFirstUserPrompt(session.jsonlSessionId, projectPath);
               if (firstPrompt) {
                 const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
                 projectManager.updateChat(chatId, { label: newLabel });
@@ -192,6 +230,22 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
         jsonlWatcher.on('state-change', stateHandler);
         session.jsonlStateHandler = stateHandler;
+
+        // Detect if Claude assigned a different session ID (e.g. --resume failed
+        // and Claude started a fresh session). Re-bind the JSONL watcher to track
+        // the actual session so status updates flow correctly.
+        if (conversationId) {
+          detectActualSessionId(ptyProcess.pid, sessionId, (actualId) => {
+            // Check session is still alive (user might have closed the chat)
+            const current = sessions.get(chatId);
+            if (!current || current.pty !== ptyProcess) return;
+
+            jsonlWatcher.unwatchSession(sessionId);
+            jsonlWatcher.watchSession(actualId, projectPath);
+            session.jsonlSessionId = actualId;
+            projectManager.updateChat(chatId, { ccConversationId: actualId, sessionId: actualId });
+          });
+        }
       }
 
       // Stream PTY output to clients (no spinner analysis — JSONL watcher handles status)
