@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
 import { haptics } from '../../utils/haptics.ts';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
+import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
+import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 
 interface MobileNavProps {
   projectId?: string;
@@ -13,13 +15,29 @@ interface MobileNavProps {
   processesWithPorts?: RunningProcess[];
 }
 
+function isAwaitingStatus(status: ActiveChat['status']): boolean {
+  return status === 'question-awaiting' || status === 'questions-awaiting' ||
+    status === 'plan-awaiting' || status === 'permission-awaiting';
+}
+
 export default function MobileNav({ projectId, currentTab, scriptCount = 0, changeCount = 0, processesWithPorts = [] }: MobileNavProps) {
   const navigate = useNavigate();
   const { isDesktop } = useAuth();
   const [showPortsPopover, setShowPortsPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const globalActive = useGlobalActiveChats();
 
   const hasPorts = processesWithPorts.length > 0;
+
+  // Compute chats badge: count of new replies + awaiting, color yellow if any thinking, green otherwise
+  const { chatsBadgeCount, chatsBadgeColor } = useMemo(() => {
+    if (!projectId) return { chatsBadgeCount: 0, chatsBadgeColor: '' };
+    const projectChats = globalActive.byProject[projectId]?.chats || [];
+    const count = projectChats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status)).length;
+    const hasThinking = projectChats.some(c => c.status === 'working');
+    const color = hasThinking ? 'bg-[#eab308]' : 'bg-success'; // yellow if thinking, green otherwise
+    return { chatsBadgeCount: count, chatsBadgeColor: color };
+  }, [projectId, globalActive]);
 
   // Close popover on outside click
   useEffect(() => {
@@ -79,7 +97,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
           <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
         </svg>
       ),
-      count: 0,
+      count: chatsBadgeCount,
     },
     {
       key: 'scripts',
@@ -109,7 +127,8 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
         {tabs.map((tab) => {
           const isActive = currentTab === tab.key;
           const isScripts = tab.key === 'scripts';
-          const badgeColor = isScripts && hasPorts ? 'bg-success' : 'bg-primary';
+          const isChats = tab.key === 'chats';
+          const badgeColor = isChats ? chatsBadgeColor : (isScripts && hasPorts ? 'bg-success' : 'bg-primary');
 
           return (
             <div key={tab.key} className="relative">
