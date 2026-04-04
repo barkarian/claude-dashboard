@@ -150,6 +150,10 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       sessions.set(chatId, session);
 
+      // Ensure chat appears in sidebar tracker immediately (covers both new and resumed chats)
+      const chatInfo = projectManager.getChat(chatId);
+      activeChatsTracker.onChatCreated(chatId, projectId, chatInfo?.label || 'Chat');
+
       // Register with processManager for port detection
       processManager.registerExternalProcess({
         projectId,
@@ -410,7 +414,7 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
   });
 }
 
-function killSession(chatId: string): void {
+export function killSession(chatId: string): void {
   const session = sessions.get(chatId);
   if (!session || session.status !== 'running') return;
 
