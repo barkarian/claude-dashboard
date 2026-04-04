@@ -289,11 +289,17 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
   socket.on('cc:input', ({ chatId, data }: CCInputPayload) => {
     const session = sessions.get(chatId);
     if (session && session.status === 'running') {
-      // Wrap multi-line input in bracketed paste sequences so the shell
-      // accepts the block instead of showing "[pasted N lines]" and stalling.
+      // Wrap multi-line input in bracketed paste sequences so the CLI
+      // accepts the block as a single prompt instead of stalling.
+      // Two key fixes: (1) convert \n → \r inside paste content (terminals
+      // expect \r for line breaks), (2) send the final \r (submit) in a
+      // separate write via setImmediate so the CLI finishes processing the
+      // paste-end sequence before the Enter arrives.
       if (data.includes('\n')) {
         const stripped = data.endsWith('\r') ? data.slice(0, -1) : data;
-        session.pty.write(`\x1b[200~${stripped}\x1b[201~\r`);
+        const pasteContent = stripped.replace(/\n/g, '\r');
+        session.pty.write(`\x1b[200~${pasteContent}\x1b[201~`);
+        setImmediate(() => session.pty.write('\r'));
       } else {
         session.pty.write(data);
       }

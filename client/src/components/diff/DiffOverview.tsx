@@ -161,13 +161,39 @@ export default function DiffOverview({ projectId, repoPath, onRepoRefresh }: Dif
   const files = diff?.files || [];
 
   if (files.length === 0) {
+    const showPushEmpty = hasRemotes && unpushedCount > 0;
     return (
-      <div className="flex-1 text-center pt-12">
-        <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+      <div className="flex-1 flex flex-col items-center pt-12 px-4">
+        <svg className="w-12 h-12 text-text-dim mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <h3 className="text-text font-medium mb-1">No changes</h3>
         <p className="text-text-muted text-sm">Working directory is clean</p>
+        {showPushEmpty && (
+          <div className="w-full max-w-xs mt-6">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePush}
+              disabled={pushing}
+              className="w-full"
+            >
+              {pushing ? (
+                <>
+                  <div className="animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full mr-1.5" />
+                  Pushing...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  Push {unpushedCount} commit{unpushedCount !== 1 ? 's' : ''}
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
