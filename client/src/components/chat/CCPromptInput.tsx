@@ -181,7 +181,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   // Send disabled: when prompt is empty and not in selection mode
   const sendDisabled = disabled || (!value.trim() && !isSelectionMode);
 
-  const keyBtnClass = 'h-7 px-2 rounded text-[11px] font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 flex items-center justify-center gap-1';
+  const keyBtnClass = 'h-9 px-3 rounded text-xs font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 flex items-center justify-center gap-1';
 
   return (
     <div className="flex-shrink-0 border-t border-border relative">
@@ -233,7 +233,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
       )}
 
       {/* Navigation bar — all buttons same height (h-7) */}
-      <div className="flex items-center px-2 py-1.5 bg-bg-surface/50 gap-1">
+      <div className="flex items-center px-2 py-2 bg-bg-surface/50 gap-1.5">
         {/* Esc */}
         <button type="button" onClick={() => btn(ESC)} disabled={disabled} className={keyBtnClass}>
           Esc
@@ -313,7 +313,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
       </div>
 
       {/* Prompt input area */}
-      <div className="px-3 pb-3 pt-1.5">
+      <div className="px-3 pb-3 pt-2">
         {/* Badge bar for recording tokens */}
         <RecordingBadgeBar
           value={value}
@@ -321,16 +321,16 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
           onBadgeClick={(id) => setPreviewRecordingId(id)}
         />
 
-        <div className="flex items-end gap-1.5">
+        <div className="flex items-end gap-2">
           {/* Previous message picker — compact icon button */}
           <button
             type="button"
             onClick={() => setShowHistory(true)}
             disabled={disabled}
-            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
+            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
             title="Previous messages"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </button>
@@ -350,7 +350,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
             }}
             onKeyDown={handleKeyDown}
             autoFocus={autoFocus}
-            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[36px] max-h-[200px] py-2 flex-1 text-sm"
+            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[44px] max-h-[200px] py-2.5 flex-1 text-base"
             placeholder={
               disabled
                 ? 'Session not active'
@@ -366,10 +366,10 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               type="button"
               onClick={() => { haptics.impactMedium(); onInterrupt(); }}
               disabled={disabled}
-              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-danger text-white active:bg-danger/80 transition-colors disabled:opacity-30"
+              className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-danger text-white active:bg-danger/80 transition-colors disabled:opacity-30"
               title="Stop"
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>
@@ -380,7 +380,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
                 type="button"
                 onClick={handleSend}
                 disabled={sendDisabled}
-                className={`flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
+                className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
                   sendDisabled
                     ? 'bg-bg-surface border border-border text-text-dim'
                     : 'bg-primary text-white active:bg-primary-hover'
@@ -389,12 +389,12 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               >
                 {showSelect ? (
                   /* Checkmark circle for select */
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
                 ) : (
                   /* Up arrow for send */
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
                   </svg>
                 )}

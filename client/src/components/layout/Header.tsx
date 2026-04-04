@@ -96,14 +96,14 @@ export default function Header({
   if (!projectName) {
     return (
       <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
-        <div className="flex items-center justify-between h-12 px-4">
+        <div className="flex items-center justify-between h-14 md:h-12 px-4">
           <div className="flex items-center gap-2">
             <button
               onClick={toggleSidebar}
-              className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
+              className="md:hidden p-2 -ml-1 rounded-lg hover:bg-bg-hover transition-colors"
               aria-label="Open menu"
             >
-              <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-6 h-6 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
               </svg>
             </button>
@@ -129,14 +129,14 @@ export default function Header({
   return (
     <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
       {/* Row 1: Back to projects | Project Name | New Chat */}
-      <div className="flex items-center justify-between h-12 px-4">
+      <div className="flex items-center justify-between h-14 md:h-12 px-4">
         <div className="flex items-center gap-1 min-w-0 flex-1">
           <button
             onClick={toggleSidebar}
-            className="md:hidden p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors flex-shrink-0"
+            className="md:hidden p-2 -ml-1 rounded-lg hover:bg-bg-hover transition-colors flex-shrink-0"
             aria-label="Open menu"
           >
-            <svg className="w-5 h-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-6 h-6 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
@@ -156,10 +156,10 @@ export default function Header({
           {onNewChat ? (
             <button
               onClick={onNewChat}
-              className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
+              className="flex items-center justify-center w-10 h-10 md:w-8 md:h-8 rounded-lg hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
               aria-label="New chat"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-6 h-6 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </button>
@@ -171,14 +171,14 @@ export default function Header({
 
       {/* Row 2: Chat name + edit | power-off | status (only when in a chat) */}
       {chatName && (
-        <div className="flex items-center justify-between h-10 px-4 border-t border-border/50">
+        <div className="flex items-center justify-between h-12 md:h-10 px-4 border-t border-border/50">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             {projectId && (
               <button
                 onClick={() => navigate(`/project/${projectId}/chats`)}
-                className="p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors flex-shrink-0"
+                className="p-2 md:p-1 -ml-1 rounded-lg hover:bg-bg-hover transition-colors flex-shrink-0"
               >
-                <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="w-5 h-5 md:w-4 md:h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
                 </svg>
               </button>
@@ -199,11 +199,11 @@ export default function Header({
                 {chatDescription && (
                   <button
                     onClick={() => setShowInfo(true)}
-                    className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-all"
+                    className="flex-shrink-0 w-9 h-9 md:w-7 md:h-7 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-all"
                     aria-label="Chat summary"
                     title="View summary"
                   >
-                    <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-5 h-5 md:w-[18px] md:h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                     </svg>
                   </button>
@@ -225,10 +225,10 @@ export default function Header({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
-                    className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded text-text-dim hover:text-text-muted hover:bg-bg-hover transition-all"
+                    className="flex-shrink-0 w-9 h-9 md:w-7 md:h-7 flex items-center justify-center rounded text-text-dim hover:text-text-muted hover:bg-bg-hover transition-all"
                     aria-label="Chat actions"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
                     </svg>
                   </button>
