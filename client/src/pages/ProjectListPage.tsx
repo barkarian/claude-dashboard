@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api.ts';
 import { Button } from '../components/ui/button.tsx';
@@ -9,6 +9,7 @@ import ProjectCard from '../components/projects/ProjectCard.tsx';
 import PullToRefresh from '../components/ui/PullToRefresh.tsx';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll.ts';
 import { useIsMobile } from '../hooks/use-mobile.tsx';
+import { useGlobalActiveChats } from '../hooks/useGlobalActiveChats.ts';
 import type { ProjectSummary } from '../../../shared/types/models.ts';
 
 const PAGE_SIZE = 5;
@@ -18,6 +19,16 @@ export default function ProjectListPage() {
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const { openDrawer } = useNewProjectDrawer();
   const isMobile = useIsMobile();
+  const globalActive = useGlobalActiveChats();
+
+  // Active sessions bubble: count all open sessions, color by thinking state
+  const { sessionCount, sessionBubbleColor } = useMemo(() => {
+    const allChats = Object.values(globalActive.byProject).flatMap(p => p.chats);
+    const count = allChats.length;
+    const hasThinking = allChats.some(c => c.status === 'working');
+    const color = hasThinking ? 'bg-[#eab308]' : 'bg-success';
+    return { sessionCount: count, sessionBubbleColor: color };
+  }, [globalActive]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,6 +132,11 @@ export default function ProjectListPage() {
             >
               Claw Dev
             </h2>
+            {sessionCount > 0 && (
+              <span className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center ${sessionBubbleColor} text-white`}>
+                {sessionCount}
+              </span>
+            )}
           </div>
         </div>
       </header>
