@@ -5,7 +5,6 @@ import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import { Separator } from '../ui/separator.tsx';
 import {
-  SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_MOBILE,
   Sidebar,
   SidebarContent,
@@ -96,7 +95,7 @@ function badgeCount(chats: ActiveChat[]): number {
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
   const { updateAvailable } = useDesktopUpdate();
-  const { setOpenMobile, openMobile, isMobile } = useSidebar();
+  const { setOpenMobile, openMobile, isMobile, sidebarWidth } = useSidebar();
   const location = useLocation();
   const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
@@ -401,7 +400,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
                 return (
                   <SidebarMenuItem key={project.id}>
-                    <div className="flex items-center w-full">
+                    <div className="flex items-center w-full" onContextMenu={(e) => handleChatContextMenu(e, project.path)}>
                       {/* Expand/collapse toggle (only if has active chats) */}
                       {count > 0 ? (
                         <button
@@ -525,7 +524,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border">
+      <SidebarFooter className="border-t border-sidebar-border" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))' }}>
         {user && (
           <Popover open={accountPopoverOpen} onOpenChange={setAccountPopoverOpen}>
             <PopoverTrigger asChild>
@@ -552,7 +551,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               align="start"
               sideOffset={8}
               className="p-2 rounded-xl"
-              style={{ width: isMobile ? SIDEBAR_WIDTH_MOBILE : SIDEBAR_WIDTH }}
+              style={{ width: isMobile ? SIDEBAR_WIDTH_MOBILE : `${sidebarWidth}px` }}
             >
               {/* Account Settings */}
               <a

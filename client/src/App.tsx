@@ -170,12 +170,14 @@ function SwipeHandler() {
         }
 
         const MIN_DIST = 40;
+        let consumed = false;
         if (absDx > absDy && absDx > MIN_DIST) {
           // Natural scroll: swipe right = arrow left, swipe left = arrow right
           const dir = dx > 0 ? 'left' as const : 'right' as const;
           if (ccSwipeOverride.allowedDirections.has(dir)) {
             haptics.impactLight();
             ccSwipeOverride.current(dir);
+            consumed = true;
           }
         } else if (absDy > absDx && absDy > MIN_DIST) {
           // Natural scroll: swipe up = arrow down, swipe down = arrow up
@@ -183,9 +185,12 @@ function SwipeHandler() {
           if (ccSwipeOverride.allowedDirections.has(dir)) {
             haptics.impactLight();
             ccSwipeOverride.current(dir);
+            consumed = true;
           }
         }
-        return;
+        // If the swipe was consumed as an arrow key, stop here.
+        // Otherwise fall through to normal swipe handling (sidebar, etc.)
+        if (consumed) return;
       }
 
       // Require 60px horizontal, mostly horizontal (dx > 2*dy)

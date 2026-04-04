@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
 import { useTheme } from '../context/ThemeContext.tsx';
 import { detectTerminalUIMode, type TerminalUIMode } from '../utils/claudeTerminalRegexDetection.ts';
+import { isTauriDesktop } from '../utils/platform.ts';
 
 // Width in px that the container is stretched to before CSS-scaling back down.
 // Lower = larger apparent font on mobile. Higher = smaller text, more content visible.
@@ -103,6 +104,20 @@ export function useClaudeCode(
         textarea.setAttribute('inputmode', 'none');
         textarea.readOnly = true;
       }
+    }
+
+    // In Tauri desktop, block held-space from reaching the terminal to prevent
+    // Claude Code's voice mode from activating (Tauri webview has no mic access).
+    // Repeated keydown events (event.repeat) indicate a held key — blocking these
+    // stops the stream of space characters that triggers voice mode while still
+    // allowing single space taps to work normally.
+    if (isTauriDesktop() && !isMobile) {
+      term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+        if (event.code === 'Space' && event.type === 'keydown' && event.repeat) {
+          return false;
+        }
+        return true;
+      });
     }
 
     // --- Scroll position guard ---
