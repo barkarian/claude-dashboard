@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
-import processManager from '../services/processManager.ts';
+import processManager, { killProcessTree } from '../services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
@@ -437,20 +437,7 @@ export function killSession(chatId: string): void {
   // Unregister from processManager before killing
   processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
 
-  try {
-    session.pty.kill('SIGTERM');
-    setTimeout(() => {
-      try {
-        if (session.status === 'running') {
-          session.pty.kill('SIGKILL');
-        }
-      } catch {
-        // Process already dead
-      }
-    }, 3000);
-  } catch {
-    // Process already dead
-  }
+  killProcessTree(session.pty);
 
   session.status = 'exited';
 }

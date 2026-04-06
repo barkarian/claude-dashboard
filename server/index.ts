@@ -18,6 +18,7 @@ import billingRoutes from './routes/billing.ts';
 import migrateRoutes from './routes/migrate.ts';
 import devicesRoutes from './routes/devices.ts';
 import filesystemRoutes from './routes/filesystem.ts';
+import systemRoutes from './routes/system.ts';
 import updatesRoutes from './routes/updates.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import { killAllCCSessions } from './sockets/claude-code.ts';
@@ -161,6 +162,7 @@ apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/migrate', migrateRoutes);
 apiRouter.use('/devices', devicesRoutes);
 apiRouter.use('/filesystem', filesystemRoutes);
+apiRouter.use('/system', systemRoutes);
 apiRouter.use('/tools', toolsRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)

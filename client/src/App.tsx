@@ -11,6 +11,7 @@ import SettingsPage from './pages/SettingsPage.tsx';
 import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
 import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
+import MyComputerPage from './pages/MyComputerPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
 import { DesktopUpdateProvider } from './context/DesktopUpdateContext.tsx';
@@ -265,6 +266,7 @@ export default function App() {
                       <Routes>
                         <Route path="/" element={<ProjectListPage />} />
                         <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/my-computer" element={<MyComputerPage />} />
                         <Route path="/billing/success" element={<BillingSuccessPage />} />
                         <Route path="/billing/cancel" element={<BillingCancelPage />} />
                         <Route path="/migrate" element={<MigrationPage />} />

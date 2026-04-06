@@ -1,7 +1,7 @@
 import pty, { type IPty } from 'node-pty';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { ProcessStatus, RunningProcess } from '../../shared/types/models.ts';
-import { detectPortsByPid } from './pidPortDetector.ts';
+import { detectPortsByPid, getDescendantPids } from './pidPortDetector.ts';
 import { hasPortHint } from './portDetector.ts';
 import tunnelManager from './tunnelManager.ts';
 import projectManager from './projectManager.ts';
@@ -490,6 +490,41 @@ function unregisterExternalProcess(projectId: string, scriptId: string): void {
   broadcastProcesses(projectId);
 }
 
+/**
+ * Kill a PTY and its entire descendant process tree.
+ * Sends SIGTERM to all descendants first, then SIGKILL after 3s for stragglers.
+ */
+export function killProcessTree(ptyProcess: IPty): void {
+  const pid = ptyProcess.pid;
+
+  // Fire-and-forget: walk process tree and kill all descendants
+  getDescendantPids(pid).then((pids) => {
+    // Kill descendants in reverse order (deepest children first), skip the root pty pid
+    const descendants = pids.filter(p => p !== pid).reverse();
+
+    for (const childPid of descendants) {
+      try { process.kill(childPid, 'SIGTERM'); } catch { /* already dead */ }
+    }
+
+    // Kill the pty itself
+    try { ptyProcess.kill('SIGTERM'); } catch { /* already dead */ }
+
+    // Force-kill anything still alive after 3s
+    setTimeout(() => {
+      for (const childPid of descendants) {
+        try { process.kill(childPid, 'SIGKILL'); } catch { /* already dead */ }
+      }
+      try { ptyProcess.kill('SIGKILL'); } catch { /* already dead */ }
+    }, 3000);
+  }).catch(() => {
+    // Fallback: just kill the pty if tree walk failed
+    try { ptyProcess.kill('SIGTERM'); } catch { /* already dead */ }
+    setTimeout(() => {
+      try { ptyProcess.kill('SIGKILL'); } catch { /* already dead */ }
+    }, 3000);
+  });
+}
+
 function killProcess(projectId: string, scriptId: string): ProcessEntry | undefined {
   const entry = getProcess(projectId, scriptId);
   if (!entry || entry.status !== 'running') return;
@@ -497,20 +532,7 @@ function killProcess(projectId: string, scriptId: string): ProcessEntry | undefi
   const key = getKey(projectId, scriptId);
   cleanupProcessTimers(key);
 
-  try {
-    entry.pty.kill('SIGTERM');
-    setTimeout(() => {
-      try {
-        if (entry.status === 'running') {
-          entry.pty.kill('SIGKILL');
-        }
-      } catch {
-        // Process already dead
-      }
-    }, 3000);
-  } catch {
-    // Process already dead
-  }
+  killProcessTree(entry.pty);
 
   entry.status = 'exited';
   return entry;
