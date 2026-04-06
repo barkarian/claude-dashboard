@@ -537,10 +537,12 @@ router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId
 
 router.put('/:id/chats/:chatId/dismiss', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
-    // Kill the terminal session first, then remove from tracker
-    killSession(req.params.chatId);
-    projectManager.markChatDismissed(req.params.chatId);
-    activeChatsTracker.onChatDismiss(req.params.chatId);
+    const { chatId } = req.params;
+    // Kill both CC (PTY) and SDK sessions, then remove from tracker
+    killSession(chatId);
+    sdkSessionManager.endSession(chatId);
+    projectManager.markChatDismissed(chatId);
+    activeChatsTracker.onChatDismiss(chatId);
     res.json({ success: true });
   } catch (err) {
     console.error('Error dismissing chat:', err);

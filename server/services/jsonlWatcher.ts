@@ -9,8 +9,10 @@ import type { SDKChatMessage, ContentBlock, TextBlock, ToolUseBlock, ToolResultB
 // --- Constants ---
 
 const DEBOUNCE_MS = 200;
-const STALE_TIMEOUT_MS = 15_000;
+const STALE_TIMEOUT_MS = 30_000;
 const STALE_CHECK_INTERVAL_MS = 10_000;
+const IDLE_GRACE_MS = 500;
+const WORKING_SIGNAL_STALE_MS = 120_000;
 const SIGNALS_DIR = path.join(os.homedir(), '.claude', 'session-signals');
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
@@ -538,6 +540,7 @@ export class JsonlWatcher extends EventEmitter {
   private projectsWatcher: FSWatcher | null = null;
   private signalWatcher: FSWatcher | null = null;
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private idleGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   // Signal maps — authoritative overrides from hook scripts
@@ -650,6 +653,13 @@ export class JsonlWatcher extends EventEmitter {
       this.debounceTimers.delete(watched.filePath);
     }
 
+    // Clear any pending idle grace
+    const graceTimer = this.idleGraceTimers.get(sessionId);
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      this.idleGraceTimers.delete(sessionId);
+    }
+
     this.sessions.delete(sessionId);
   }
 
@@ -694,8 +704,58 @@ export class JsonlWatcher extends EventEmitter {
       newState.lastTextPreview !== prevState.lastTextPreview ||
       newState.lastEntryTimestamp !== prevState.lastEntryTimestamp
     ) {
+      this.updateAndEmitState(watched, newState);
+    }
+  }
+
+  /**
+   * Update session state and emit state-change, with an idle grace period.
+   *
+   * When transitioning from an active state (working/starting) to idle, the
+   * emission is delayed by IDLE_GRACE_MS. If a non-idle state arrives within
+   * that window (e.g. the next turn starts), the idle emission is cancelled.
+   * This prevents brief idle flashes when Claude transitions between turns
+   * (stop signal → working signal race) and avoids spurious "New reply"
+   * notifications.
+   */
+  private updateAndEmitState(watched: WatchedSession, newState: SessionStateContext): void {
+    const prevState = watched.state;
+    const sessionId = watched.sessionId;
+
+    const isActiveToIdle = newState.status === 'idle' &&
+      (prevState.status === 'working' || prevState.status === 'starting');
+
+    if (isActiveToIdle) {
+      // Delay the idle transition to let the next turn's working signal arrive
+      const existing = this.idleGraceTimers.get(sessionId);
+      if (existing) clearTimeout(existing);
+
+      const timer = setTimeout(() => {
+        this.idleGraceTimers.delete(sessionId);
+        // Re-derive to get the current state (entries may have changed during grace)
+        let currentState = deriveStateFromEntries(watched.entries);
+        currentState = this.applySignalOverrides(sessionId, currentState);
+
+        if (currentState.status === 'idle') {
+          // Still idle after grace period — commit the transition
+          const actualPrev = watched.state;
+          watched.state = currentState;
+          this.emit('state-change', sessionId, currentState, actualPrev);
+        }
+        // If no longer idle (new turn started), processFile already emitted that state
+      }, IDLE_GRACE_MS);
+
+      this.idleGraceTimers.set(sessionId, timer);
+    } else {
+      // Non-idle transition — emit immediately and cancel any pending idle grace
+      const existing = this.idleGraceTimers.get(sessionId);
+      if (existing) {
+        clearTimeout(existing);
+        this.idleGraceTimers.delete(sessionId);
+      }
+
       watched.state = newState;
-      this.emit('state-change', watched.sessionId, newState, prevState);
+      this.emit('state-change', sessionId, newState, prevState);
     }
   }
 
@@ -790,7 +850,7 @@ export class JsonlWatcher extends EventEmitter {
     const workingTs = this.workingSignals.get(sessionId);
     if (workingTs !== undefined) {
       const signalAge = Date.now() - workingTs;
-      if (signalAge > STALE_TIMEOUT_MS) {
+      if (signalAge > WORKING_SIGNAL_STALE_MS) {
         // Orphaned signal — stop hook failed or process crashed. Self-heal.
         this.workingSignals.delete(sessionId);
         try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
@@ -904,11 +964,7 @@ export class JsonlWatcher extends EventEmitter {
     if (watched) {
       let newState = deriveStateFromEntries(watched.entries);
       newState = this.applySignalOverrides(sessionId, newState);
-      const prevState = watched.state;
-      if (newState.status !== prevState.status || newState.lastTextPreview !== prevState.lastTextPreview) {
-        watched.state = newState;
-        this.emit('state-change', sessionId, newState, prevState);
-      }
+      this.updateAndEmitState(watched, newState);
     }
   }
 
@@ -931,11 +987,7 @@ export class JsonlWatcher extends EventEmitter {
     if (watched) {
       let newState = deriveStateFromEntries(watched.entries);
       newState = this.applySignalOverrides(sessionId, newState);
-      const prevState = watched.state;
-      if (newState.status !== prevState.status) {
-        watched.state = newState;
-        this.emit('state-change', sessionId, newState, prevState);
-      }
+      this.updateAndEmitState(watched, newState);
     }
   }
 
@@ -978,12 +1030,7 @@ export class JsonlWatcher extends EventEmitter {
       }
 
       const newState = this.applySignalOverrides(watched.sessionId, jsonlState);
-
-      if (newState.status !== watched.state.status) {
-        const prev = watched.state;
-        watched.state = newState;
-        this.emit('state-change', watched.sessionId, newState, prev);
-      }
+      this.updateAndEmitState(watched, newState);
     }
   }
 
@@ -1002,11 +1049,7 @@ export class JsonlWatcher extends EventEmitter {
     if (watched) {
       let newState = deriveStateFromEntries(watched.entries);
       newState = this.applySignalOverrides(sessionId, newState);
-      if (newState.status !== watched.state.status) {
-        const prev = watched.state;
-        watched.state = newState;
-        this.emit('state-change', sessionId, newState, prev);
-      }
+      this.updateAndEmitState(watched, newState);
     }
   }
 
@@ -1030,6 +1073,10 @@ export class JsonlWatcher extends EventEmitter {
       clearTimeout(timer);
     }
     this.debounceTimers.clear();
+    for (const timer of this.idleGraceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.idleGraceTimers.clear();
     this.sessions.clear();
   }
 }

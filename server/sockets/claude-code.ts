@@ -116,9 +116,28 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       // Build claude command args
       const args = ['--dangerously-skip-permissions'];
+      // If client didn't provide a conversationId, look it up from the database.
+      // The server always has the latest sessionId (it's the one that sets it),
+      // but the client may have a stale project context if refreshProject() hasn't
+      // fired since the session was created.
       let sessionId = conversationId;
+      if (!sessionId) {
+        const chat = projectManager.getChat(chatId);
+        sessionId = chat?.sessionId || chat?.ccConversationId || undefined;
+      }
       if (sessionId) {
-        args.push('--resume', sessionId);
+        // Verify the JSONL session file still exists on disk before trying --resume.
+        // Claude CLI will error with "No conversation found" if the file is gone.
+        const encodedPath = projectPath.replace(/\//g, '-');
+        const jsonlFile = path.join(os.homedir(), '.claude', 'projects', encodedPath, `${sessionId}.jsonl`);
+        if (fs.existsSync(jsonlFile)) {
+          args.push('--resume', sessionId);
+        } else {
+          // Session file is gone — start fresh and clear stale IDs
+          sessionId = randomUUID();
+          args.push('--session-id', sessionId);
+          projectManager.updateChat(chatId, { ccConversationId: sessionId, sessionId });
+        }
       } else {
         // Generate a new session ID so we can resume later
         sessionId = randomUUID();
@@ -254,6 +273,10 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       // Stream PTY output to clients (no spinner analysis — JSONL watcher handles status)
       ptyProcess.onData((data: string) => {
+        // Guard: if a newer session replaced us, discard stale output
+        const current = sessions.get(chatId);
+        if (current && current !== session) return;
+
         buffer.push(data);
         if (buffer.length > MAX_BUFFER_LINES) {
           buffer.splice(0, buffer.length - MAX_BUFFER_LINES);
@@ -261,8 +284,15 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         io.to(room).emit('cc:output', { chatId, data });
       });
 
-      // Handle process exit
+      // Handle process exit — guard against stale onExit from a replaced session.
+      // When the user clicks Restart, cc:stop kills the old PTY and cc:start creates
+      // a new one.  If the old PTY dies *after* the new session is in the Map, the old
+      // onExit would emit cc:status:'exited' and override the new session's 'running'.
       ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+        // Only emit events if this session is still the active one for this chatId.
+        const current = sessions.get(chatId);
+        if (current && current !== session) return; // stale — a newer session replaced us
+
         session.status = 'exited';
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
