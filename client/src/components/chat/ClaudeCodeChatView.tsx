@@ -31,7 +31,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
-  const { project, setProject, setActiveChatStatus, refreshProject } = useProject();
+  const { project, setProject, refreshProject } = useProject();
   const { registerHandler, unregisterHandler } = useSearch();
   const containerRef = useRef<HTMLDivElement>(null);
   const writeRef = useRef<(data: string) => void>(() => {});
@@ -149,21 +149,6 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     registerHandler(searchHandler);
     return () => unregisterHandler(searchHandler);
   }, [searchHandler, registerHandler, unregisterHandler]);
-
-  // Publish status to ProjectContext for the header badge
-  // JSONL watcher now handles detailed status; CC just reports running/exited
-  useEffect(() => {
-    if (status === 'running') {
-      setActiveChatStatus('idle');
-    } else if (status === 'exited') {
-      setActiveChatStatus('exited');
-    } else {
-      setActiveChatStatus(null);
-    }
-    return () => {
-      setActiveChatStatus(null);
-    };
-  }, [status, setActiveChatStatus]);
 
   const handleSend = useCallback((data: string) => {
     write(data);

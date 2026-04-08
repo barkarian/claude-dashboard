@@ -11,7 +11,6 @@ import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
-import { mapToLegacyStatus } from '../../shared/types/session.ts';
 import type {
   CCStartPayload,
   CCInputPayload,
@@ -205,8 +204,6 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
           if (sid !== session.jsonlSessionId) return;
           // Emit the unified state event
           io.to(`project:${projectId}`).emit('claude:session-state', { chatId, state: newState });
-          // Also emit legacy status for backward compat
-          io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: mapToLegacyStatus(newState.status) });
 
           // Notify global active chats tracker
           activeChatsTracker.onSessionStateChange(chatId, projectId, newState);
@@ -323,7 +320,6 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         session.exitCode = exitCode;
         io.to(room).emit('cc:exit', { chatId, exitCode });
         io.to(room).emit('cc:status', { chatId, status: 'exited' });
-        io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'exited' });
         io.to(`project:${projectId}`).emit('claude:session-state', {
           chatId,
           state: { status: 'exited' } as SessionStateContext,
@@ -333,12 +329,18 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
       // Emit running status to chat room and project room
       io.to(room).emit('cc:status', { chatId, status: 'running' });
-      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'idle' });
+      io.to(`project:${projectId}`).emit('claude:session-state', {
+        chatId,
+        state: { status: 'starting' } as SessionStateContext,
+      });
     } catch (err: any) {
       console.error('cc:start error:', err);
       socket.emit('cc:status', { chatId, status: 'error' });
       socket.emit('cc:error', { chatId, error: err.message });
-      io.to(`project:${projectId}`).emit('claude:session-status', { chatId, status: 'exited' });
+      io.to(`project:${projectId}`).emit('claude:session-state', {
+        chatId,
+        state: { status: 'error' } as SessionStateContext,
+      });
     }
   });
 
@@ -510,18 +512,6 @@ export function killAllCCSessions(): void {
     killSession(chatId);
   }
   sessions.clear();
-}
-
-/** Return active CC session statuses for a project (for project:join initial payload) */
-export function getProjectCCSessions(projectId: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [chatId, session] of sessions) {
-    if (session.projectId === projectId && session.status === 'running') {
-      const jsonlState = session.jsonlSessionId ? jsonlWatcher.getState(session.jsonlSessionId) : null;
-      result[chatId] = jsonlState ? mapToLegacyStatus(jsonlState.status) : 'idle';
-    }
-  }
-  return result;
 }
 
 /** Return active CC session JSONL states for a project (unified states) */

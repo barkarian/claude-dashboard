@@ -55,22 +55,3 @@ export interface SessionStateContext {
   contextUsage?: ContextUsage;         // Token usage from last assistant turn
 }
 
-// === Legacy compat ===
-
-type LegacyStatus = 'starting' | 'idle' | 'thinking' | 'waiting-input' | 'exited';
-
-/** Map UnifiedStatus to legacy SessionStatus for gradual UI migration */
-export function mapToLegacyStatus(status: UnifiedStatus): LegacyStatus {
-  switch (status) {
-    case 'starting': return 'starting';
-    case 'idle': return 'idle';
-    case 'working': return 'thinking';
-    case 'question-awaiting':
-    case 'questions-awaiting':
-    case 'plan-awaiting':
-    case 'permission-awaiting': return 'waiting-input';
-    case 'exited': return 'exited';
-    case 'error': return 'exited';
-    default: return 'idle';
-  }
-}

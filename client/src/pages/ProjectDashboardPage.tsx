@@ -3,7 +3,8 @@ import { useParams, Routes, Route, Navigate, useNavigate, useLocation } from 're
 import { toast } from 'sonner';
 import { useProject } from '../context/ProjectContext.tsx';
 import { useSocket } from '../context/SocketContext.tsx';
-import { useSessionStatuses, useSessionStates } from '../hooks/useSessionStatuses.ts';
+import { useSessionStates } from '../hooks/useSessionStatuses.ts';
+import type { SessionStateContext } from '../../../shared/types/session.ts';
 import { useProcessStatus } from '../hooks/useProcessStatus.ts';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible.ts';
 import { Toaster } from '../components/ui/sonner.tsx';
@@ -40,11 +41,10 @@ export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { project, loading, loadProject, refreshProject, activeChatStatus } = useProject();
+  const { project, loading, loadProject, refreshProject } = useProject();
   const { socket } = useSocket();
-  const sessionStatuses = useSessionStatuses(id);
   const sessionStates = useSessionStates(id);
-  const prevStatusesRef = useRef<Record<string, string>>({});
+  const prevStatesRef = useRef<Record<string, SessionStateContext>>({});
   const { repos, selectedRepo, setSelectedRepo, totalChangeCount, refresh: refreshRepos } = useRepoChanges(id!);
   const { runningCount, processesWithPorts } = useProcessStatus(id);
   const keyboard = useKeyboardVisible();
@@ -101,68 +101,54 @@ export default function ProjectDashboardPage() {
     return () => { socket.off('claude:chat-renamed', handleChatRenamed); };
   }, [socket, refreshProject]);
 
-  // Compute status display — prefer unified JSONL state, fall back to SDK activeChatStatus
+  // Compute status display from unified session state
   const activeSessionState = activeChatId ? sessionStates[activeChatId] : undefined;
 
   const statusLabel = (() => {
-    if (activeSessionState) {
-      switch (activeSessionState.status) {
-        case 'working': return 'thinking';
-        case 'question-awaiting': return 'question';
-        case 'questions-awaiting': return 'questions';
-        case 'plan-awaiting': return 'plan ready';
-        case 'permission-awaiting': return activeSessionState.pendingTool?.toolName || 'permission';
-        default: return activeSessionState.status;
-      }
-    }
-    if (!activeChatStatus) return undefined;
-    switch (activeChatStatus) {
-      case 'streaming': return 'thinking';
-      case 'tool-use': return 'working';
-      case 'waiting-permission': return 'permission';
-      default: return activeChatStatus;
+    if (!activeSessionState) return undefined;
+    switch (activeSessionState.status) {
+      case 'working': return 'thinking';
+      case 'question-awaiting': return 'question';
+      case 'questions-awaiting': return 'questions';
+      case 'plan-awaiting': return 'plan ready';
+      case 'permission-awaiting': return activeSessionState.pendingTool?.toolName || 'permission';
+      default: return activeSessionState.status;
     }
   })();
 
   const statusDotClass = (() => {
-    if (activeSessionState) {
-      switch (activeSessionState.status) {
-        case 'idle': return 'bg-success';
-        case 'working': return 'bg-warning animate-pulse';
-        case 'question-awaiting':
-        case 'questions-awaiting': return 'bg-primary animate-pulse';
-        case 'plan-awaiting': return 'bg-[#a855f7] animate-pulse';
-        case 'permission-awaiting': return 'bg-warning animate-pulse';
-        case 'starting': return 'bg-primary animate-pulse';
-        default: return 'bg-text-dim';
-      }
-    }
-    if (!activeChatStatus) return undefined;
-    switch (activeChatStatus) {
+    if (!activeSessionState) return undefined;
+    switch (activeSessionState.status) {
       case 'idle': return 'bg-success';
-      case 'streaming':
-      case 'tool-use': return 'bg-warning animate-pulse';
-      case 'waiting-permission': return 'bg-primary animate-pulse';
+      case 'working': return 'bg-warning animate-pulse';
+      case 'question-awaiting':
+      case 'questions-awaiting': return 'bg-primary animate-pulse';
+      case 'plan-awaiting': return 'bg-[#a855f7] animate-pulse';
+      case 'permission-awaiting': return 'bg-warning animate-pulse';
       case 'starting': return 'bg-primary animate-pulse';
       default: return 'bg-text-dim';
     }
   })();
 
-  // Toast notifications for background session changes
+  // Toast notifications for background session changes (unified source)
+  const isAwaitingInput = (s: SessionStateContext['status']) =>
+    s === 'question-awaiting' || s === 'questions-awaiting' ||
+    s === 'plan-awaiting' || s === 'permission-awaiting';
+
   useEffect(() => {
-    const prev = prevStatusesRef.current;
+    const prev = prevStatesRef.current;
     const chats = project?.chats || [];
     const viewedChatId = activeChatId;
 
-    for (const [chatId, status] of Object.entries(sessionStatuses)) {
+    for (const [chatId, state] of Object.entries(sessionStates)) {
       if (chatId === viewedChatId) continue;
 
-      const prevStatus = prev[chatId];
-      if (!prevStatus) continue;
+      const prevState = prev[chatId];
+      if (!prevState) continue;
 
       const chatLabel = chats.find((c) => c.id === chatId)?.label || 'Chat';
 
-      if (prevStatus === 'thinking' && status === 'idle') {
+      if (prevState.status === 'working' && state.status === 'idle') {
         haptics.notificationSuccess();
         toast(`${chatLabel} finished`, {
           action: {
@@ -170,7 +156,7 @@ export default function ProjectDashboardPage() {
             onClick: () => navigate(`/project/${id}/chats/${chatId}`),
           },
         });
-      } else if (status === 'waiting-input' && prevStatus !== 'waiting-input') {
+      } else if (isAwaitingInput(state.status) && !isAwaitingInput(prevState.status)) {
         haptics.notificationWarning();
         toast(`${chatLabel} needs input`, {
           action: {
@@ -181,8 +167,8 @@ export default function ProjectDashboardPage() {
       }
     }
 
-    prevStatusesRef.current = { ...sessionStatuses };
-  }, [sessionStatuses, project, activeChatId, id, navigate]);
+    prevStatesRef.current = { ...sessionStates };
+  }, [sessionStates, project, activeChatId, id, navigate]);
 
   async function handleNewChat() {
     try {
@@ -212,7 +198,7 @@ export default function ProjectDashboardPage() {
         const chatToDelete = (project?.chats || []).find(c => c.id === activeChatId);
         if (chatToDelete?.adapter === 'claude-code') {
           socket.emit('cc:stop', { chatId: activeChatId });
-        } else if (sessionStatuses[activeChatId]) {
+        } else if (sessionStates[activeChatId]) {
           socket.emit('sdk:end', { chatId: activeChatId });
         }
       }
@@ -318,7 +304,7 @@ export default function ProjectDashboardPage() {
           <Route path="scripts/:scriptId" element={<ScriptTerminal projectId={id!} />} />
           <Route path="chats" element={
             <div className="flex-1 overflow-y-auto">
-              <ChatList projectId={id!} project={project} sessionStatuses={sessionStatuses} sessionStates={sessionStates} />
+              <ChatList projectId={id!} project={project} sessionStates={sessionStates} />
             </div>
           } />
           <Route path="chats/:chatId" element={<ChatViewRouter projectId={id!} />} />

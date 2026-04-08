@@ -92,33 +92,13 @@ function StatusBadge({ state }: { state: SessionStateContext }) {
   );
 }
 
-/** Fallback status badge from legacy sessionStatuses */
-function LegacyStatusBadge({ status }: { status: string }) {
-  return (
-    <>
-      <span className="text-border">&middot;</span>
-      <span className="flex items-center gap-1">
-        <span className="w-1.5 h-1.5 rounded-full bg-success" />
-        {status === 'thinking'
-          ? 'Thinking...'
-          : status === 'waiting-input'
-            ? 'Waiting input'
-            : status === 'starting'
-              ? 'Starting...'
-              : 'Active'}
-      </span>
-    </>
-  );
-}
-
 interface ChatListProps {
   projectId: string;
   project: Project;
-  sessionStatuses?: Record<string, string>;
   sessionStates?: Record<string, SessionStateContext>;
 }
 
-export default function ChatList({ projectId, project, sessionStatuses = {}, sessionStates = {} }: ChatListProps) {
+export default function ChatList({ projectId, project, sessionStates = {} }: ChatListProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { socket } = useSocket();
@@ -265,7 +245,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
       if (socket) {
         if (deleteTarget.adapter === 'claude-code') {
           socket.emit('cc:stop', { chatId: deleteTarget.id });
-        } else if (sessionStatuses[deleteTarget.id]) {
+        } else if (sessionStates[deleteTarget.id]) {
           socket.emit('sdk:end', { chatId: deleteTarget.id });
         }
       }
@@ -476,9 +456,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                 <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
                 {sessionStates[chat.id]
                   ? <StatusBadge state={sessionStates[chat.id]} />
-                  : sessionStatuses[chat.id]
-                    ? <LegacyStatusBadge status={sessionStatuses[chat.id]} />
-                    : null}
+                  : null}
                 {chat.draftMessage && (
                   <>
                     <span className="text-border">&middot;</span>
@@ -559,9 +537,7 @@ export default function ChatList({ projectId, project, sessionStatuses = {}, ses
                     <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
                     {sessionStates[chat.id]
                       ? <StatusBadge state={sessionStates[chat.id]} />
-                      : sessionStatuses[chat.id]
-                        ? <LegacyStatusBadge status={sessionStatuses[chat.id]} />
-                        : null}
+                      : null}
                     {chat.draftMessage && (
                       <>
                         <span className="text-border">&middot;</span>

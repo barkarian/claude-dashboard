@@ -20,7 +20,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
-  const { project, setProject, refreshProject, setActiveChatStatus } = useProject();
+  const { project, setProject, refreshProject } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
 
@@ -46,14 +46,6 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
 
   // Determine autoFocus from navigation state (only set when explicitly creating a new chat)
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
-
-  // Publish status to ProjectContext for the header
-  useEffect(() => {
-    setActiveChatStatus(status);
-    return () => {
-      setActiveChatStatus(null);
-    };
-  }, [status, setActiveChatStatus]);
 
   // Start or attach to SDK session on mount
   useEffect(() => {

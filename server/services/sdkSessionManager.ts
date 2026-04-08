@@ -70,28 +70,36 @@ const sessions = new Map<string, SDKSession>();
 const SDK_UNREAD_CONFIRM_MS = 2500;
 const sdkIdleUnreadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** Map SDK status → UnifiedStatus for session-state emission */
+function sdkToUnifiedStatus(status: SDKSessionStatus): SessionStateContext['status'] {
+  switch (status) {
+    case 'starting': return 'starting';
+    case 'idle': return 'idle';
+    case 'streaming': return 'working';
+    case 'tool-use': return 'working';
+    case 'waiting-permission': return 'permission-awaiting';
+    case 'exited': return 'exited';
+    case 'error': return 'error';
+    default: return 'idle';
+  }
+}
+
 function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
   if (session.status === status) return;
   const prev = session.status;
   session.status = status;
   console.log(`[sdk:${session.chatId}] status: ${prev} -> ${status}`);
 
+  const state: SessionStateContext = { status: sdkToUnifiedStatus(status) };
+
   const room = `claude:${session.chatId}`;
   session.io.to(room).emit('sdk:status', { chatId: session.chatId, status });
-  session.io.to(`project:${session.projectId}`).emit('claude:session-status', {
+  session.io.to(`project:${session.projectId}`).emit('claude:session-state', {
     chatId: session.chatId,
-    status: mapToLegacyStatus(status),
+    state,
   });
 
-  // Notify global active chats tracker
-  const sdkToUnifiedStatus: Record<string, string> = {
-    starting: 'starting', idle: 'idle', streaming: 'working',
-    'tool-use': 'working', 'waiting-permission': 'permission-awaiting',
-    exited: 'exited', error: 'error',
-  };
-  activeChatsTracker.onSessionStateChange(session.chatId, session.projectId, {
-    status: (sdkToUnifiedStatus[status] || 'idle') as SessionStateContext['status'],
-  });
+  activeChatsTracker.onSessionStateChange(session.chatId, session.projectId, state);
 
   // Cancel any pending unread timer when status returns to an active state
   if (status !== 'idle') {
@@ -132,19 +140,6 @@ function touchActivity(session: SDKSession): void {
   session.lastActivityAt = Date.now();
 }
 
-/** Map SDK status to legacy SessionStatus for useSessionStatuses compatibility */
-function mapToLegacyStatus(status: SDKSessionStatus): string {
-  switch (status) {
-    case 'starting': return 'starting';
-    case 'idle': return 'idle';
-    case 'streaming': return 'thinking';
-    case 'tool-use': return 'thinking';
-    case 'waiting-permission': return 'waiting-input';
-    case 'exited': return 'exited';
-    case 'error': return 'exited';
-    default: return 'idle';
-  }
-}
 
 function initSession(
   chatId: string,
@@ -696,14 +691,35 @@ function getMessageHistory(chatId: string): SDKChatMessage[] {
   return session ? session.messages : [];
 }
 
-function getProjectSessions(projectId: string): Record<string, string> {
-  const result: Record<string, string> = {};
+function getProjectSessionStates(projectId: string): Record<string, SessionStateContext> {
+  const result: Record<string, SessionStateContext> = {};
   for (const [chatId, session] of sessions) {
     if (session.projectId === projectId) {
-      result[chatId] = mapToLegacyStatus(session.status);
+      result[chatId] = { status: sdkToUnifiedStatus(session.status) };
     }
   }
   return result;
+}
+
+/** Return chatId → sdkSessionId mapping for active SDK sessions in a project */
+function getProjectSDKSessionIds(projectId: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [chatId, session] of sessions) {
+    if (session.projectId === projectId && session.sdkSessionId) {
+      result[chatId] = session.sdkSessionId;
+    }
+  }
+  return result;
+}
+
+/** Reverse lookup: sdkSessionId → { chatId, projectId } */
+function findChatBySDKSessionId(sdkSessionId: string): { chatId: string; projectId: string } | null {
+  for (const [chatId, session] of sessions) {
+    if (session.sdkSessionId === sdkSessionId) {
+      return { chatId, projectId: session.projectId };
+    }
+  }
+  return null;
 }
 
 function endAllSessions(): void {
@@ -749,7 +765,9 @@ export default {
   endSession,
   getSession,
   getMessageHistory,
-  getProjectSessions,
+  getProjectSessionStates,
+  getProjectSDKSessionIds,
+  findChatBySDKSessionId,
   endAllSessions,
   migrateHistoryMessage,
   startIdleCleanup,

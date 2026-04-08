@@ -4,7 +4,7 @@ import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts
 import { emitSidecarEvent } from '../services/sidecarEmitter.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import jsonlWatcher, { readSessionHistory } from '../services/jsonlWatcher.ts';
-import { getProjectCCSessions, getProjectCCSessionStates } from './claude-code.ts';
+import { getProjectCCSessionStates } from './claude-code.ts';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 import type {
@@ -19,7 +19,25 @@ import type {
   SDKChatMessage,
 } from '../../shared/types/sdk.ts';
 
+// Global JSONL state-change listener for SDK sessions.
+// Maps sdkSessionId back to chatId/projectId and emits claude:session-state.
+let sdkJsonlListenerBound = false;
+
+function bindSDKJsonlListener(io: SocketIOServer): void {
+  if (sdkJsonlListenerBound) return;
+  sdkJsonlListenerBound = true;
+
+  jsonlWatcher.on('state-change', (sdkSessionId: string, newState: SessionStateContext) => {
+    const match = sdkSessionManager.findChatBySDKSessionId(sdkSessionId);
+    if (match) {
+      io.to(`project:${match.projectId}`).emit('claude:session-state', { chatId: match.chatId, state: newState });
+    }
+  });
+}
+
 export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServer): void {
+  bindSDKJsonlListener(io);
+
   socket.on('sdk:start', async ({ projectId, chatId }: SDKStartPayload) => {
     try {
       const projectPath = projectManager.getProjectPath(projectId);
@@ -185,16 +203,18 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
   socket.on('project:join', ({ projectId }: { projectId: string }, callback?: Function) => {
     socket.join(`project:${projectId}`);
-    // Merge SDK and CC session statuses so the chat list shows all active sessions
-    const statuses = {
-      ...sdkSessionManager.getProjectSessions(projectId),
-      ...getProjectCCSessions(projectId),
-    };
-    // Also send unified session states
+    // Merge SDK and CC unified session states
     const sessionStates: Record<string, SessionStateContext> = {
+      ...sdkSessionManager.getProjectSessionStates(projectId),
       ...getProjectCCSessionStates(projectId),
     };
-    callback?.(statuses, sessionStates);
+    // Overlay JSONL-derived states for SDK sessions (richer data when available)
+    const sdkSessionIds = sdkSessionManager.getProjectSDKSessionIds(projectId);
+    for (const [chatId, sdkSessionId] of Object.entries(sdkSessionIds)) {
+      const state = jsonlWatcher.getState(sdkSessionId);
+      if (state) sessionStates[chatId] = state;
+    }
+    callback?.(sessionStates);
   });
 
   socket.on('project:leave', ({ projectId }: { projectId: string }) => {
