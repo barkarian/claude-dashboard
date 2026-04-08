@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { watch, type FSWatcher } from 'chokidar';
-import type { SessionStateContext, UnifiedStatus, QuestionPayload, PlanPayload, ToolPermissionPayload } from '../../shared/types/session.ts';
+import type { SessionStateContext, UnifiedStatus, QuestionPayload, PlanPayload, ToolPermissionPayload, ContextUsage } from '../../shared/types/session.ts';
 import type { SDKChatMessage, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock } from '../../shared/types/sdk.ts';
 
 // --- Constants ---
@@ -12,7 +12,7 @@ const DEBOUNCE_MS = 200;
 const STALE_TIMEOUT_MS = 30_000;
 const STALE_CHECK_INTERVAL_MS = 10_000;
 const IDLE_GRACE_MS = 500;
-const WORKING_SIGNAL_STALE_MS = 120_000;
+// Working signal staleness is no longer time-based — see applySignalOverrides.
 const SIGNALS_DIR = path.join(os.homedir(), '.claude', 'session-signals');
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
@@ -468,6 +468,47 @@ function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
   return { status: 'working', hasBackgroundTasks: hasBg, lastEntryTimestamp: timestamp };
 }
 
+// --- Context window token extraction ---
+
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-4-6': 200_000,
+  'claude-opus-4-5-20251101': 200_000,
+  'claude-sonnet-4-5-20250929': 200_000,
+  'claude-haiku-4-5-20251001': 200_000,
+};
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+function extractContextUsage(entries: ParsedEntry[]): ContextUsage | undefined {
+  // Walk backwards to find the last assistant message with usage data
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type !== 'assistant' || !entry.message?.usage) continue;
+
+    const usage = entry.message.usage;
+    const model: string = entry.message.model || 'unknown';
+    const inputTokens: number = usage.input_tokens || 0;
+    const cacheCreationTokens: number = usage.cache_creation_input_tokens || 0;
+    const cacheReadTokens: number = usage.cache_read_input_tokens || 0;
+    const outputTokens: number = usage.output_tokens || 0;
+    const effectiveContext = inputTokens + cacheCreationTokens + cacheReadTokens;
+    const contextWindowMax = MODEL_CONTEXT_WINDOWS[model] || DEFAULT_CONTEXT_WINDOW;
+    const percentage = contextWindowMax > 0 ? (effectiveContext / contextWindowMax) * 100 : 0;
+
+    return {
+      model,
+      inputTokens,
+      cacheCreationTokens,
+      cacheReadTokens,
+      outputTokens,
+      contextWindowMax,
+      effectiveContext,
+      percentage,
+    };
+  }
+  return undefined;
+}
+
 /**
  * Derive SessionStateContext by running all entries through the state machine.
  */
@@ -500,7 +541,12 @@ function deriveStateFromEntries(entries: ParsedEntry[]): SessionStateContext {
     }
   }
 
-  return mapMachineToSessionState(machine);
+  const state = mapMachineToSessionState(machine);
+  const contextUsage = extractContextUsage(entries);
+  if (contextUsage) {
+    state.contextUsage = contextUsage;
+  }
+  return state;
 }
 
 function buildToolDescription(toolName: string, toolInput: Record<string, unknown>): string {
@@ -659,6 +705,14 @@ export class JsonlWatcher extends EventEmitter {
       clearTimeout(graceTimer);
       this.idleGraceTimers.delete(sessionId);
     }
+
+    // Clean up any lingering signals for this session (handles orphaned signals
+    // when the Stop hook didn't fire, e.g. process crash)
+    this.workingSignals.delete(sessionId);
+    this.stopSignals.delete(sessionId);
+    this.pendingPermissions.delete(sessionId);
+    this.endedSignals.delete(sessionId);
+    try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
 
     this.sessions.delete(sessionId);
   }
@@ -849,19 +903,15 @@ export class JsonlWatcher extends EventEmitter {
     }
     const workingTs = this.workingSignals.get(sessionId);
     if (workingTs !== undefined) {
-      const signalAge = Date.now() - workingTs;
-      if (signalAge > WORKING_SIGNAL_STALE_MS) {
-        // Orphaned signal — stop hook failed or process crashed. Self-heal.
-        this.workingSignals.delete(sessionId);
-        try { fs.unlinkSync(path.join(SIGNALS_DIR, `${sessionId}.working.json`)); } catch {}
-        // Fall through to JSONL-derived state (no override)
-      } else {
-        // Fresh signal — apply the override
-        if (isRichWaitingState) {
-          return state;
-        }
-        return { ...state, status: 'working' };
+      // Working signal is authoritative — it was set by the UserPromptSubmit hook
+      // and will be cleared by the Stop hook when the turn ends. Don't use age-based
+      // staleness: extended thinking and long tool executions can last many minutes.
+      // Orphaned signals (process crash without Stop hook) are cleaned up by
+      // unwatchSession() and clearWorkingSignal() when the session exits.
+      if (isRichWaitingState) {
+        return state;
       }
+      return { ...state, status: 'working' };
     }
 
     // JSONL-derived 'permission-awaiting' without a corresponding permission signal
@@ -1022,12 +1072,12 @@ export class JsonlWatcher extends EventEmitter {
       // Derive from JSONL (stale timeout is built into deriveStateFromEntries).
       const jsonlState = deriveStateFromEntries(watched.entries);
 
-      // If JSONL says idle but a working signal persists, the signal is stale.
-      // Clean it up so applySignalOverrides won't force "working" back on.
-      if (jsonlState.status === 'idle' && this.workingSignals.has(watched.sessionId)) {
-        this.workingSignals.delete(watched.sessionId);
-        try { fs.unlinkSync(path.join(SIGNALS_DIR, `${watched.sessionId}.working.json`)); } catch {}
-      }
+      // Do NOT delete the working signal here just because JSONL's 30s stale
+      // timeout triggered idle. The working signal is authoritative (from hooks)
+      // and may persist legitimately during extended thinking, slow streaming,
+      // or long tool executions where no JSONL entries are written.
+      // Truly orphaned working signals are cleaned up by unwatchSession() and
+      // clearWorkingSignal() when the session exits.
 
       const newState = this.applySignalOverrides(watched.sessionId, jsonlState);
       this.updateAndEmitState(watched, newState);

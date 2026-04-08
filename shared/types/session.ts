@@ -33,6 +33,17 @@ export interface ToolPermissionPayload {
   description: string;
 }
 
+export interface ContextUsage {
+  model: string;
+  inputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  contextWindowMax: number;            // Model's max context window
+  effectiveContext: number;            // input + cacheCreation + cacheRead
+  percentage: number;                  // effectiveContext / contextWindowMax * 100
+}
+
 export interface SessionStateContext {
   status: UnifiedStatus;
   questions?: QuestionPayload[];       // Stored in full for future interactive UI
@@ -41,6 +52,7 @@ export interface SessionStateContext {
   hasBackgroundTasks?: boolean;        // True when run_in_background Bash tasks are active
   lastTextPreview?: string;            // For notifications
   lastEntryTimestamp?: number;
+  contextUsage?: ContextUsage;         // Token usage from last assistant turn
 }
 
 // === Legacy compat ===

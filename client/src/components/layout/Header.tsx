@@ -13,6 +13,8 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '../ui/dropdown-menu.tsx';
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
+import type { ContextUsage } from '../../../../shared/types/session.ts';
 
 interface HeaderProps {
   // Simple mode
@@ -30,12 +32,92 @@ interface HeaderProps {
   onGenerateTitle?: () => Promise<void>;
   generatingTitle?: boolean;
   onDeleteChat?: () => Promise<void>;
+  contextUsage?: ContextUsage;
   statusDot?: string;
   statusLabel?: string;
   onNewChat?: () => void;
   onProjectSettings?: () => void;
   chatActions?: ReactNode;
   projectActions?: ReactNode;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatModel(model: string): string {
+  return model
+    .replace('claude-', '')
+    .replace(/-\d{8}$/, '');
+}
+
+function ContextUsageBadge({ usage }: { usage: ContextUsage }) {
+  const pct = usage.percentage;
+  const windowLabel = usage.contextWindowMax >= 1_000_000
+    ? `${(usage.contextWindowMax / 1_000_000).toFixed(0)}M`
+    : `${(usage.contextWindowMax / 1_000).toFixed(0)}k`;
+
+  // Color based on usage level
+  const colorClass = pct > 80 ? 'text-danger' : pct > 50 ? 'text-warning' : 'text-text-dim';
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono ${colorClass} hover:bg-bg-hover transition-all`}
+          aria-label="Context window usage"
+          title="Context window usage"
+        >
+          {pct.toFixed(1)}%
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-3">
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-text">Context Window</span>
+            <span className="text-[10px] font-mono text-text-dim">{formatModel(usage.model)}</span>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-bg-hover rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                pct > 80 ? 'bg-danger' : pct > 50 ? 'bg-warning' : 'bg-primary'
+              }`}
+              style={{ width: `${Math.min(pct, 100)}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-text-dim">
+            <span>{formatTokens(usage.effectiveContext)}</span>
+            <span>{windowLabel} window</span>
+          </div>
+
+          {/* Detailed breakdown */}
+          <div className="border-t border-border pt-2 space-y-1">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-text-dim">Input tokens</span>
+              <span className="text-text font-mono">{formatTokens(usage.inputTokens)}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-text-dim">Cache creation</span>
+              <span className="text-text font-mono">{formatTokens(usage.cacheCreationTokens)}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-text-dim">Cache read</span>
+              <span className="text-text font-mono">{formatTokens(usage.cacheReadTokens)}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-text-dim">Output tokens</span>
+              <span className="text-text font-mono">{formatTokens(usage.outputTokens)}</span>
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function Header({
@@ -52,6 +134,7 @@ export default function Header({
   onGenerateTitle,
   generatingTitle,
   onDeleteChat,
+  contextUsage,
   statusDot,
   statusLabel,
   onNewChat,
@@ -221,6 +304,7 @@ export default function Header({
                     </svg>
                   </button>
                 )}
+                {contextUsage && <ContextUsageBadge usage={contextUsage} />}
               </>
             )}
           </div>

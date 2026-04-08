@@ -73,6 +73,11 @@ const sessions = new Map<string, CCSession>();
 // Throttle map for touchChatActivity: chatId -> last touch timestamp
 const lastActivityTouch = new Map<string, number>();
 
+// Deferred unread timers: chatId -> timer.
+// Prevents "New Reply" flash when Claude briefly transitions to idle between turns.
+const UNREAD_CONFIRM_MS = 2500;
+const idleUnreadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 
 /**
@@ -206,6 +211,16 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
           // Notify global active chats tracker
           activeChatsTracker.onSessionStateChange(chatId, projectId, newState);
 
+          // Cancel any pending unread timer when status returns to an active state.
+          // This prevents "New Reply" flash when Claude briefly idles between turns.
+          if (newState.status !== 'idle') {
+            const pendingTimer = idleUnreadTimers.get(chatId);
+            if (pendingTimer) {
+              clearTimeout(pendingTimer);
+              idleUnreadTimers.delete(chatId);
+            }
+          }
+
           // Push notifications for CC chats
           if (newState.status === 'question-awaiting' && newState.questions?.[0]) {
             const preview = `Claude asks: ${newState.questions[0].question.slice(0, 80)}`;
@@ -229,25 +244,36 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
               }
             }
           } else if (newState.status === 'idle' && (prevState.status === 'working' || prevState.status === 'starting')) {
-            const preview = newState.lastTextPreview || 'Response ready';
-            sendPushEvent('chat-reply', { preview, chatId });
-            // Mark unread when agent transitions to idle
-            projectManager.markChatUnread(chatId);
-            io.to(`project:${projectId}`).emit('chat:unread', { chatId });
-            const unreadChat = projectManager.getChat(chatId);
-            activeChatsTracker.onChatUnread(chatId, projectId, unreadChat?.label || 'Chat');
+            // Defer unread marking: wait UNREAD_CONFIRM_MS to confirm Claude is truly idle.
+            // If Claude starts working again within that window, the timer is cancelled above.
+            const existingTimer = idleUnreadTimers.get(chatId);
+            if (existingTimer) clearTimeout(existingTimer);
 
-            // Auto-title fallback: rename "New Chat" on first completion if not yet renamed
-            const chat = projectManager.getChat(chatId);
-            if (chat && chat.label === 'New Chat' && session.jsonlSessionId) {
-              const firstPrompt = readFirstUserPrompt(session.jsonlSessionId, projectPath);
-              if (firstPrompt) {
-                const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
-                projectManager.updateChat(chatId, { label: newLabel });
-                io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
-                tryAiTitle(chatId, projectId, firstPrompt, io);
+            const timer = setTimeout(() => {
+              idleUnreadTimers.delete(chatId);
+
+              const preview = newState.lastTextPreview || 'Response ready';
+              sendPushEvent('chat-reply', { preview, chatId });
+              // Mark unread when agent is confirmed idle
+              projectManager.markChatUnread(chatId);
+              io.to(`project:${projectId}`).emit('chat:unread', { chatId });
+              const unreadChat = projectManager.getChat(chatId);
+              activeChatsTracker.onChatUnread(chatId, projectId, unreadChat?.label || 'Chat');
+
+              // Auto-title fallback: rename "New Chat" on first completion if not yet renamed
+              const chat = projectManager.getChat(chatId);
+              if (chat && chat.label === 'New Chat' && session.jsonlSessionId) {
+                const firstPrompt = readFirstUserPrompt(session.jsonlSessionId, projectPath);
+                if (firstPrompt) {
+                  const newLabel = firstPrompt.slice(0, 50) + (firstPrompt.length > 50 ? '...' : '');
+                  projectManager.updateChat(chatId, { label: newLabel });
+                  io.to(`project:${projectId}`).emit('claude:chat-renamed', { chatId, label: newLabel });
+                  tryAiTitle(chatId, projectId, firstPrompt, io);
+                }
               }
-            }
+            }, UNREAD_CONFIRM_MS);
+
+            idleUnreadTimers.set(chatId, timer);
           }
         };
 
@@ -455,6 +481,13 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 export function killSession(chatId: string): void {
   const session = sessions.get(chatId);
   if (!session || session.status !== 'running') return;
+
+  // Clean up deferred unread timer
+  const pendingUnread = idleUnreadTimers.get(chatId);
+  if (pendingUnread) {
+    clearTimeout(pendingUnread);
+    idleUnreadTimers.delete(chatId);
+  }
 
   // Clean up JSONL watcher
   if (session.jsonlSessionId) {

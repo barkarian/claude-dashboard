@@ -263,6 +263,7 @@ export default function ProjectDashboardPage() {
         onGenerateTitle={activeChatId ? handleGenerateTitle : undefined}
         generatingTitle={generatingTitle}
         onDeleteChat={activeChatId ? handleDeleteChat : undefined}
+        contextUsage={activeSessionState?.contextUsage}
         statusDot={statusDotClass}
         statusLabel={statusLabel}
         onProjectSettings={() => setShowProjectSettings(true)}

@@ -66,6 +66,10 @@ interface SDKSession {
 
 const sessions = new Map<string, SDKSession>();
 
+// Deferred unread timers for SDK sessions (same pattern as CC sessions)
+const SDK_UNREAD_CONFIRM_MS = 2500;
+const sdkIdleUnreadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
   if (session.status === status) return;
   const prev = session.status;
@@ -89,12 +93,34 @@ function emitStatus(session: SDKSession, status: SDKSessionStatus): void {
     status: (sdkToUnifiedStatus[status] || 'idle') as SessionStateContext['status'],
   });
 
-  // Mark chat as unread when agent finishes (thinking/tool-use → idle)
+  // Cancel any pending unread timer when status returns to an active state
+  if (status !== 'idle') {
+    const pendingTimer = sdkIdleUnreadTimers.get(session.chatId);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      sdkIdleUnreadTimers.delete(session.chatId);
+    }
+  }
+
+  // Defer unread marking when agent finishes (thinking/tool-use → idle).
+  // If Claude starts working again within SDK_UNREAD_CONFIRM_MS, the timer
+  // is cancelled above — preventing "New Reply" flash between turns.
   if (status === 'idle' && (prev === 'streaming' || prev === 'tool-use')) {
-    projectManager.markChatUnread(session.chatId);
-    session.io.to(`project:${session.projectId}`).emit('chat:unread', { chatId: session.chatId });
-    const chat = projectManager.getChat(session.chatId);
-    activeChatsTracker.onChatUnread(session.chatId, session.projectId, chat?.label || 'Chat');
+    const existing = sdkIdleUnreadTimers.get(session.chatId);
+    if (existing) clearTimeout(existing);
+
+    const chatId = session.chatId;
+    const projectId = session.projectId;
+    const ioRef = session.io;
+    const timer = setTimeout(() => {
+      sdkIdleUnreadTimers.delete(chatId);
+      projectManager.markChatUnread(chatId);
+      ioRef.to(`project:${projectId}`).emit('chat:unread', { chatId });
+      const chat = projectManager.getChat(chatId);
+      activeChatsTracker.onChatUnread(chatId, projectId, chat?.label || 'Chat');
+    }, SDK_UNREAD_CONFIRM_MS);
+
+    sdkIdleUnreadTimers.set(chatId, timer);
   }
 
   if (status === 'exited') {
