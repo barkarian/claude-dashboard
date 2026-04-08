@@ -73,6 +73,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
         return dirs; // no arrows, just action button
       case 'multi-choice':
       case 'plan-review':
+      case 'session-search':
         dirs.add('up');
         dirs.add('down');
         return dirs;
@@ -199,6 +200,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const arrowLabel = terminalUIMode.mode === 'multi-choice' ? 'Select'
     : terminalUIMode.mode === 'multi-choice-tabs' ? 'Navigate'
     : terminalUIMode.mode === 'plan-review' ? 'Plan'
+    : terminalUIMode.mode === 'session-search' ? 'Sessions'
     : sessionState?.status === 'permission-awaiting' ? 'Permission'
     : hasArrows ? 'Tasks'
     : '';

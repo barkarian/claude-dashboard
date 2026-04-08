@@ -40,7 +40,9 @@ const ARROW_RIGHT = '\x1b[C';
 export default function CCPromptInput({ projectId, status, terminalUIMode, unifiedStatus, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
   const isSelectionMode = terminalUIMode?.mode === 'multi-choice'
     || terminalUIMode?.mode === 'multi-choice-tabs'
-    || terminalUIMode?.mode === 'plan-review';
+    || terminalUIMode?.mode === 'plan-review'
+    || terminalUIMode?.mode === 'session-search';
+  const isSessionSearch = terminalUIMode?.mode === 'session-search';
   const [value, setValue] = useState(initialDraft || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -89,6 +91,12 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
       return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [autoFocus]);
+
+  // Track whether the terminal search box has content (from us)
+  const searchHasContentRef = useRef(false);
+  useEffect(() => {
+    if (!isSessionSearch) searchHasContentRef.current = false;
+  }, [isSessionSearch]);
 
   const isRunning = status === 'running';
   const disabled = !isRunning;
@@ -145,6 +153,22 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   function handleSend() {
     if (disabled) return;
     haptics.impactMedium();
+
+    // Session search mode: type text into terminal search box (no Enter)
+    if (isSessionSearch && value.trim()) {
+      // If search box already has content, send Escape to clear it first
+      if (searchHasContentRef.current) {
+        onArrow(ESC);
+        // Small delay so the Escape clears the box before we type
+        setTimeout(() => onArrow(value), 100);
+      } else {
+        onArrow(value);
+      }
+      searchHasContentRef.current = true;
+      setValue('');
+      onDraftChange?.('');
+      return;
+    }
 
     let text = value;
     // Expand #rec:ID tokens into formatted terminal output

@@ -38,6 +38,12 @@ const RE_DISMISS_B = /press.*to\s+dismiss/i;
 const RE_GO_BACK = /go\s*back/i;
 const RE_CLOSE = /close/i;
 
+/** Session search footer: "Type to Search · Enter to select · Esc to clear" */
+const RE_SESSION_SEARCH_FOOTER = /Type to Search.*Enter to select/i;
+
+/** Search icon in the search box: "⌕ Search" */
+const RE_SEARCH_ICON = /⌕\s*Search/;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -54,6 +60,7 @@ const RE_CLOSE = /close/i;
  * - `free-prompt`      – Bare ❯ prompt; user types freely.
  * - `dismiss`          – "Press Space/Enter/Escape to dismiss" overlay.
  * - `detail-view`      – "← to go back" overlay.
+ * - `session-search`   – /resume session picker; show up/down + search sync.
  */
 export type TerminalUIMode =
   | { mode: 'none' }
@@ -63,7 +70,8 @@ export type TerminalUIMode =
   | { mode: 'plan-review' }
   | { mode: 'free-prompt' }
   | { mode: 'dismiss' }
-  | { mode: 'detail-view' };
+  | { mode: 'detail-view' }
+  | { mode: 'session-search' };
 
 // ---------------------------------------------------------------------------
 // Detection function
@@ -86,6 +94,7 @@ export function detectTerminalUIMode(lines: string[]): TerminalUIMode {
   let hasCtrlGVim = false;
   let hasShiftTabApprove = false;
   let hasTabBar = false;
+  let hasSessionSearch = false;
 
   for (const line of lines) {
     if (RE_GO_BACK.test(line) && RE_CLOSE.test(line)) hasDetailView = true;
@@ -96,6 +105,7 @@ export function detectTerminalUIMode(lines: string[]): TerminalUIMode {
     if (RE_CTRL_G_VIM.test(line)) hasCtrlGVim = true;
     if (RE_SHIFT_TAB_APPROVE.test(line)) hasShiftTabApprove = true;
     if (RE_TAB_BAR.test(line)) hasTabBar = true;
+    if (RE_SESSION_SEARCH_FOOTER.test(line) || RE_SEARCH_ICON.test(line)) hasSessionSearch = true;
   }
 
   // Priority evaluation — first match wins
@@ -103,6 +113,9 @@ export function detectTerminalUIMode(lines: string[]): TerminalUIMode {
   // 1. Full-screen overlays take absolute priority
   if (hasDetailView) return { mode: 'detail-view' };
   if (hasDismiss) return { mode: 'dismiss' };
+
+  // 1b. Session search picker (/resume, etc.): up/down + search sync
+  if (hasSessionSearch) return { mode: 'session-search' };
 
   // 2. Free prompt: bare ❯ between horizontal rules
   if (hasCursorEmpty && hasHorizontalRule) return { mode: 'free-prompt' };
