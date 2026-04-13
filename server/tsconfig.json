@@ -12,5 +12,5 @@
     "rootDir": "..",
     "paths": { "shared/*": ["../shared/*"] }
   },
-  "include": ["**/*.ts", "../shared/**/*.ts"]
+  "include": ["**/*.ts", "../shared/**/*.ts", "../adapters/*/server.ts", "../adapters/*/manifest.ts", "../adapters/*/shared/**/*.ts"]
 }

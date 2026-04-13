@@ -20,6 +20,7 @@ import devicesRoutes from './routes/devices.ts';
 import filesystemRoutes from './routes/filesystem.ts';
 import systemRoutes from './routes/system.ts';
 import updatesRoutes from './routes/updates.ts';
+import adaptersRoutes from './routes/adapters.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import { killAllCCSessions } from './sockets/claude-code.ts';
 import processManager from './services/processManager.ts';
@@ -164,6 +165,7 @@ apiRouter.use('/devices', devicesRoutes);
 apiRouter.use('/filesystem', filesystemRoutes);
 apiRouter.use('/system', systemRoutes);
 apiRouter.use('/tools', toolsRoutes);
+apiRouter.use('/adapters', adaptersRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);
@@ -190,8 +192,8 @@ io.use(socketAuthMiddleware);
 // Pass io to tunnelClient for browser monitor log emission
 setTunnelClientIO(io);
 
-// Register socket handlers
-registerSocketHandlers(io);
+// Register socket handlers (async: loads adapters from adapters/ directory)
+await registerSocketHandlers(io);
 
 // Start JSONL watcher (chokidar + signal file watching + stale checker)
 jsonlWatcher.startGlobalWatch();

@@ -9,7 +9,8 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "paths": { "@/*": ["./src/*"], "shared/*": ["../shared/*"] }
+    "types": ["vite/client"],
+    "paths": { "@/*": ["./src/*"], "shared/*": ["../shared/*"], "adapters/*": ["../adapters/*"] }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../shared/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../shared/**/*.ts", "../adapters/*/client/**/*.ts", "../adapters/*/client/**/*.tsx", "../adapters/*/manifest.ts"]
 }

@@ -1,4 +1,6 @@
 // === Unified Session Status (JSONL-derived, replaces SessionStatus + SDKSessionStatus) ===
+// These are the base statuses used by shared chrome (sidebar badges, header dots).
+// Adapters must map their internal state to one of these.
 
 export type UnifiedStatus =
   | 'starting'            // Process launching, no JSONL yet
@@ -53,5 +55,15 @@ export interface SessionStateContext {
   lastTextPreview?: string;            // For notifications
   lastEntryTimestamp?: number;
   contextUsage?: ContextUsage;         // Token usage from last assistant turn
+
+  // === Adapter extension fields ===
+
+  /** Adapter-specific status label (e.g. "Indexing codebase...", "Applying edits").
+   *  Shared chrome uses `status` for badge color; the header can prefer this for label text. */
+  adapterStatus?: string;
+  /** Adapter-specific structured metadata (e.g. { progress: 42 }) */
+  adapterStatusMeta?: Record<string, unknown>;
+  /** Adapter-provided badges for the header area (e.g. model name, cost) */
+  headerBadges?: Array<{ label: string; icon?: string; tooltip?: string }>;
 }
 

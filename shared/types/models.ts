@@ -1,6 +1,12 @@
 // === Core Data Models ===
 
-export type ChatAdapter = 'claude-agent-sdk' | 'claude-code';
+/**
+ * Chat adapter identifier. Open string type so new adapters can be registered
+ * without modifying this file. Known built-in values:
+ * - 'claude-code'      — Claude Code terminal (PTY + JSONL watcher)
+ * - 'claude-agent-sdk' — Claude Agent SDK (message-based API)
+ */
+export type ChatAdapter = string;
 
 export interface Script {
   id: string;

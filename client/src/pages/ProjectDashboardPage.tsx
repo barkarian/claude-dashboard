@@ -15,6 +15,8 @@ import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import SDKChatView from '../components/chat/SDKChatView.tsx';
 import ClaudeCodeChatView from '../components/chat/ClaudeCodeChatView.tsx';
+import ChatViewShell from '../components/chat/ChatViewShell.tsx';
+import { getClientAdapter } from '../adapters/registry.ts';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
@@ -26,12 +28,15 @@ import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
   const { project } = useProject();
+  const adapterId = project?.defaultAdapter || 'claude-agent-sdk';
 
-  // Route by current project AI mode, not by which mode created the chat.
-  // This allows any chat to be opened in either CC or SDK mode.
-  const aiMode = project?.defaultAdapter || 'claude-agent-sdk';
+  // Use adapter registry if the adapter is registered (new plugin system)
+  if (getClientAdapter(adapterId)) {
+    return <ChatViewShell projectId={projectId} />;
+  }
 
-  if (aiMode === 'claude-code') {
+  // Legacy fallback for unregistered adapters
+  if (adapterId === 'claude-code') {
     return <ClaudeCodeChatView projectId={projectId} />;
   }
   return <SDKChatView projectId={projectId} />;

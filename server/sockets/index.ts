@@ -5,11 +5,20 @@ import registerClaudeCodeEvents from './claude-code.ts';
 import registerFileEvents from './files.ts';
 import registerAIGenerateEvents from './ai-generate.ts';
 import registerToolEvents from './tools.ts';
+import registerAdapterOrchestrator from './adapter-orchestrator.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
+import { loadAdapters } from '../adapters/loader.ts';
+import { wireAdapterEvents } from '../adapters/wire-events.ts';
 
-export default function registerSocketHandlers(io: SocketIOServer): void {
+export default async function registerSocketHandlers(io: SocketIOServer): Promise<void> {
   // Initialize global active chats tracker
   activeChatsTracker.init(io);
+
+  // Auto-discover and register all adapters from adapters/ directory
+  await loadAdapters();
+
+  // Wire adapter events to shared services (push, unread, titling, etc.)
+  wireAdapterEvents(io);
 
   io.on('connection', (socket: Socket) => {
     console.log(`Client connected: ${socket.id}`);
@@ -22,6 +31,10 @@ export default function registerSocketHandlers(io: SocketIOServer): void {
       callback?.(activeChatsTracker.getSnapshot());
     });
 
+    // Unified adapter orchestrator (chat:* events)
+    registerAdapterOrchestrator(socket, io);
+
+    // Legacy handlers (cc:* and sdk:* events) — kept for backward compat
     registerTerminalEvents(socket, io);
     registerSDKClaudeEvents(socket, io);
     registerClaudeCodeEvents(socket, io);

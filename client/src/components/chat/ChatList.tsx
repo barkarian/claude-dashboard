@@ -27,6 +27,7 @@ import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 import type { SessionStateContext } from '../../../../shared/types/session.ts';
+import { getClientAdapter } from '../../adapters/registry.ts';
 
 const PAGE_SIZE = 20;
 
@@ -243,6 +244,8 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     haptics.notificationError();
     try {
       if (socket) {
+        // Stop session via unified adapter event, with legacy fallback
+        socket.emit('chat:stop', { chatId: deleteTarget.id });
         if (deleteTarget.adapter === 'claude-code') {
           socket.emit('cc:stop', { chatId: deleteTarget.id });
         } else if (sessionStates[deleteTarget.id]) {
@@ -448,9 +451,12 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm text-text truncate">{chat.label || 'Untitled Chat'}</span>
-                {chat.adapter === 'claude-code' && (
-                  <span className="flex-shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-primary/10 text-primary">CC</span>
-                )}
+                {(() => {
+                  const adapterMeta = getClientAdapter(chat.adapter)?.metadata;
+                  return adapterMeta?.shortLabel ? (
+                    <span className={`flex-shrink-0 text-[10px] font-medium px-1 py-0.5 rounded ${adapterMeta.badgeColor || 'bg-primary/10 text-primary'}`}>{adapterMeta.shortLabel}</span>
+                  ) : null;
+                })()}
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-muted">
                 <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
@@ -527,11 +533,14 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                         </span>
                       ) : chat.label}
                     </h4>
-                    {chat.adapter === 'claude-code' && (
-                      <span className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                        CC
-                      </span>
-                    )}
+                    {(() => {
+                      const adapterMeta = getClientAdapter(chat.adapter)?.metadata;
+                      return adapterMeta?.shortLabel ? (
+                        <span className={`flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${adapterMeta.badgeColor || 'bg-primary/10 text-primary'}`}>
+                          {adapterMeta.shortLabel}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
                     <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
@@ -740,7 +749,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             {infoChat?.description}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-dim mt-2">
-            <span>{infoChat?.adapter === 'claude-code' ? 'Claude Code' : 'Agent SDK'}</span>
+            <span>{getClientAdapter(infoChat?.adapter || '')?.metadata.displayName || infoChat?.adapter || 'Unknown'}</span>
             <span className="text-border">&middot;</span>
             <span>{infoChat && formatChatTime(infoChat.lastActivityAt || infoChat.createdAt)}</span>
           </div>

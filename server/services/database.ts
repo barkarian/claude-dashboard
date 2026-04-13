@@ -207,6 +207,20 @@ try {
   // Column already exists — ignore
 }
 
+// Add adapter_config column to chats (per-chat adapter configuration, JSON)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN adapter_config TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Add adapter_configs column to projects (per-project adapter settings, JSON map)
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN adapter_configs TEXT DEFAULT '{}'`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

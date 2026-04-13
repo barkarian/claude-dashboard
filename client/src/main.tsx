@@ -8,6 +8,9 @@ import { SocketProvider } from './context/SocketContext.tsx';
 import { TerminalRecordingProvider } from './context/TerminalRecordingContext.tsx';
 import './index.css';
 
+// Auto-discover and register all client-side chat adapters
+import './adapters/loader.ts';
+
 const envMatch = window.location.pathname.match(/^\/(local|vps)/);
 const basename = envMatch ? envMatch[0] : '';
 
