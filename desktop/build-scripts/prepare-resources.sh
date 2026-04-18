@@ -24,7 +24,7 @@ cp "$DASHBOARD_DIR/server/package.json" "$RESOURCES_DIR/server/"
 cp "$DASHBOARD_DIR/server/tsconfig.json" "$RESOURCES_DIR/server/" 2>/dev/null || true
 
 # Copy subdirectories
-for dir in routes services sockets data public; do
+for dir in routes services sockets data public adapters; do
   if [ -d "$DASHBOARD_DIR/server/$dir" ]; then
     cp -R "$DASHBOARD_DIR/server/$dir" "$RESOURCES_DIR/server/"
   fi
