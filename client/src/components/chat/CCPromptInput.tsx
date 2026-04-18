@@ -54,6 +54,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
   const isMobile = useIsMobile();
   const [showSavedRecordings, setShowSavedRecordings] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Mobile auto-insert: prepend saved recordings into prompt on chat open
   useEffect(() => {
@@ -268,8 +269,9 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
           Switch Mode
         </button>
 
-        {/* Keys popover — Tab, Ctrl+C, /resume, /btw, Rec */}
-        <Popover>
+        {/* Keys popover — arrows | keys | commands + big Record button below.
+            Full viewport width so three columns + tall Record fit comfortably on mobile. */}
+        <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
             <button type="button" disabled={disabled} className={keyBtnClass}>
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -278,59 +280,134 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               More
             </button>
           </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="p-1.5 min-w-[170px]">
+          <PopoverContent
+            side="top"
+            align="center"
+            sideOffset={8}
+            collisionPadding={8}
+            className="w-[calc(100vw-1rem)] max-w-md p-3"
+          >
+            <div className="grid grid-cols-3 gap-2 items-start">
+              {/* Left: arrow d-pad — always available, even when regex hasn't surfaced arrows */}
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[9px] font-semibold text-text-dim uppercase tracking-wider">Arrows</span>
+                <button
+                  type="button"
+                  onClick={() => btn(ARROW_UP)}
+                  disabled={disabled}
+                  className="w-9 h-8 flex items-center justify-center rounded-md bg-bg-surface border border-border text-text-muted hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                  aria-label="Arrow up"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                  </svg>
+                </button>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => btn(ARROW_LEFT)}
+                    disabled={disabled}
+                    className="w-9 h-8 flex items-center justify-center rounded-md bg-bg-surface border border-border text-text-muted hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                    aria-label="Arrow left"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => btn(ARROW_DOWN)}
+                    disabled={disabled}
+                    className="w-9 h-8 flex items-center justify-center rounded-md bg-bg-surface border border-border text-text-muted hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                    aria-label="Arrow down"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => btn(ARROW_RIGHT)}
+                    disabled={disabled}
+                    className="w-9 h-8 flex items-center justify-center rounded-md bg-bg-surface border border-border text-text-muted hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                    aria-label="Arrow right"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Middle: Tab + Ctrl+C */}
+              <div className="flex flex-col items-stretch gap-1">
+                <span className="text-[9px] font-semibold text-text-dim uppercase tracking-wider text-center">Keys</span>
+                <button
+                  type="button"
+                  onClick={() => { btn(TAB); setMoreOpen(false); }}
+                  disabled={disabled}
+                  className="h-8 px-2 rounded-md text-xs font-medium text-text-muted bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                >
+                  Tab
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { haptics.impactMedium(); onInterrupt(); setMoreOpen(false); }}
+                  disabled={disabled}
+                  className="h-8 px-2 rounded-md text-xs font-medium text-danger bg-bg-surface border border-danger/40 hover:bg-danger/10 active:bg-danger/10 transition-colors disabled:opacity-30 touch-manipulation"
+                >
+                  Ctrl+C
+                </button>
+              </div>
+
+              {/* Right: /resume + /btw */}
+              <div className="flex flex-col items-stretch gap-1">
+                <span className="text-[9px] font-semibold text-text-dim uppercase tracking-wider text-center">Commands</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptics.impactMedium();
+                    onSend('/resume\r');
+                    setMoreOpen(false);
+                  }}
+                  disabled={disabled}
+                  className="h-8 px-2 rounded-md font-mono text-xs text-primary bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                >
+                  /resume
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptics.impactLight();
+                    setValue('/btw ');
+                    onDraftChange?.('/btw ');
+                    setMoreOpen(false);
+                    setTimeout(() => textareaRef.current?.focus(), 50);
+                  }}
+                  disabled={disabled}
+                  className="h-8 px-2 rounded-md font-mono text-xs text-primary bg-bg-surface border border-border hover:bg-bg-hover active:bg-bg-hover transition-colors disabled:opacity-30 touch-manipulation"
+                >
+                  /btw
+                </button>
+              </div>
+            </div>
+
+            {/* Big Record button below. Closes this popover and hands off to the
+                chat-level SavedRecordingsPanel instead of stacking another popover here. */}
             <button
-              onClick={() => btn(TAB)}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30"
-            >
-              Tab
-            </button>
-            <button
-              onClick={() => { haptics.impactMedium(); onInterrupt(); }}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors text-danger disabled:opacity-30"
-            >
-              Ctrl+C
-            </button>
-            <div className="my-1 border-t border-border" />
-            <button
-              onClick={() => {
-                haptics.impactMedium();
-                onSend('/resume\r');
-              }}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30 flex items-center gap-2"
-            >
-              <span className="font-mono text-primary text-xs">/resume</span>
-              <span className="text-text-dim text-xs">Resume</span>
-            </button>
-            <button
+              type="button"
               onClick={() => {
                 haptics.impactLight();
-                setValue('/btw ');
-                onDraftChange?.('/btw ');
-                setTimeout(() => textareaRef.current?.focus(), 50);
-              }}
-              disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30 flex items-center gap-2"
-            >
-              <span className="font-mono text-primary text-xs">/btw</span>
-              <span className="text-text-dim text-xs">Context</span>
-            </button>
-            <div className="my-1 border-t border-border" />
-            <button
-              onClick={() => {
-                haptics.impactLight();
+                setMoreOpen(false);
                 setShowSavedRecordings(true);
               }}
               disabled={disabled}
-              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors disabled:opacity-30 flex items-center gap-2"
+              className="mt-3 w-full h-12 rounded-lg bg-danger/10 border border-danger/40 hover:bg-danger/20 active:bg-danger/20 transition-colors flex items-center justify-center gap-2 disabled:opacity-30 touch-manipulation"
             >
-              <svg className="w-3.5 h-3.5 text-danger" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="12" r="5" />
+              <svg className="w-5 h-5 text-danger" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="12" r="6" />
               </svg>
-              <span className="text-xs">Record</span>
+              <span className="text-sm font-medium text-text">Record</span>
             </button>
           </PopoverContent>
         </Popover>
