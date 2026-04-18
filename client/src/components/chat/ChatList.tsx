@@ -223,7 +223,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const activeChatId = activeChatMatch ? activeChatMatch[1] : null;
   const [creating, setCreating] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { enabledIds, adapters: adapterInfos } = useAdapterSettings();
+  const { enabledIds, adapters: adapterInfos, loading: adaptersLoading } = useAdapterSettings();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -604,18 +604,24 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   return (
     <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3" disabled={isChatDragActive}>
       <div className="flex gap-1">
-        <Button onClick={handleNewChat} disabled={creating} variant="outline" className="flex-1">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          {creating ? 'Creating...' : 'New Chat'}
-        </Button>
-        {enabledIds.length > 1 && (
-          <Button onClick={handleForcePickerOpen} disabled={creating} variant="outline" size="sm" className="px-2">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-            </svg>
-          </Button>
+        {adaptersLoading ? (
+          <div className="h-9 w-full rounded-md border border-border bg-transparent" />
+        ) : (
+          <>
+            <Button onClick={handleNewChat} disabled={creating} variant="outline" className="flex-1">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              {creating ? 'Creating...' : 'New Chat'}
+            </Button>
+            {enabledIds.length > 1 && (
+              <Button onClick={handleForcePickerOpen} disabled={creating} variant="outline" className="px-2">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </Button>
+            )}
+          </>
         )}
       </div>
 
