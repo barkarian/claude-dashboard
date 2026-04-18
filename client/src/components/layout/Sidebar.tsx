@@ -152,7 +152,7 @@ function SortableChatRow({
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         onContextMenu={onContextMenuNative}
-        className={`w-full flex items-center gap-2 px-2 py-1.5 md:py-1 rounded-md text-sm md:text-[13px] transition-colors hover:bg-bg-hover ${
+        className={`w-full flex items-center gap-2 px-2 py-2 md:py-1 rounded-md text-base md:text-[13px] transition-colors hover:bg-bg-hover ${
           isActive ? 'bg-bg-hover text-text' : 'text-text-dim'
         }`}
       >
@@ -455,8 +455,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     <Sidebar collapsible="offcanvas">
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-text flex items-center gap-2">
-            <span className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white text-sm font-bold">C</span>
+          <h1 className="text-xl md:text-lg font-bold text-text flex items-center gap-2">
+            <span className="w-9 h-9 md:w-8 md:h-8 bg-primary rounded-lg flex items-center justify-center text-white text-sm font-bold">C</span>
             Claude Dashboard
           </h1>
           <EnvironmentToggle />
@@ -468,7 +468,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={location.pathname === '/'}>
+              <SidebarMenuButton asChild isActive={location.pathname === '/'} className="text-base h-10 md:text-sm md:h-8">
                 <NavLink to="/" end className="flex items-center gap-3">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
@@ -478,7 +478,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={location.pathname === '/my-computer'}>
+              <SidebarMenuButton asChild isActive={location.pathname === '/my-computer'} className="text-base h-10 md:text-sm md:h-8">
                 <NavLink to="/my-computer" className="flex items-center gap-3">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
@@ -502,7 +502,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 value={sidebarSearch}
                 onChange={(e) => handleSidebarSearch(e.target.value)}
                 placeholder="Search projects..."
-                className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-1.5 pr-7 text-xs text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-2 pr-7 text-sm md:text-xs md:py-1.5 text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
               />
               {sidebarSearch && (
                 <button
@@ -552,7 +552,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       )}
 
                       {/* Project link */}
-                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-base h-10 md:text-[15px] md:h-9">
+                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-lg h-12 md:text-[15px] md:h-9">
                         <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
                           <span className="truncate">{project.name}</span>
                           {count > 0 && (
@@ -636,7 +636,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               )}
 
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted">
+                <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted text-lg h-12 md:text-sm md:h-8">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
@@ -654,19 +654,19 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         {user && (
           <Popover open={accountPopoverOpen} onOpenChange={setAccountPopoverOpen}>
             <PopoverTrigger asChild>
-              <button className="w-full px-2 py-2 flex items-center gap-2 rounded-lg hover:bg-bg-hover transition-colors cursor-pointer text-left">
+              <button className="w-full px-2 py-2.5 md:py-2 flex items-center gap-2 rounded-lg hover:bg-bg-hover transition-colors cursor-pointer text-left">
                 <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
-                <span className="text-xs font-medium text-text truncate">
+                <span className="text-sm md:text-xs font-medium text-text truncate">
                   {user.username}
                 </span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                <span className={`text-[11px] md:text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                   user.plan === 'pro'
                     ? 'bg-primary/15 text-primary'
                     : 'bg-border text-text-dim'
                 }`}>
                   {user.plan === 'pro' ? 'PRO' : 'FREE'}
                 </span>
-                <svg className="w-3.5 h-3.5 ml-auto text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 md:w-3.5 md:h-3.5 ml-auto text-text-dim flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" />
                 </svg>
               </button>
