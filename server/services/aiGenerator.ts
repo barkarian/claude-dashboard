@@ -36,9 +36,9 @@ STEPS:
 
 RULES:
 - Suggest 3-8 of the most useful scripts
-- Each script needs: label (human-friendly name), command (shell command), autostart (boolean — true only for dev servers)
+- Each script needs: label (human-friendly name), command (shell command)
 - Respond with ONLY a JSON array, no other text
-- Format: [{"label": "Dev Server", "command": "npm run dev", "autostart": true}]
+- Format: [{"label": "Dev Server", "command": "npm run dev"}]
 - Do NOT wrap in markdown code blocks`;
 
 const DESCRIBE_SCRIPTS_SYSTEM_PROMPT = `You are a DevOps expert helping create project scripts based on the user's description.
@@ -49,9 +49,9 @@ STEPS:
 
 RULES:
 - Generate appropriate scripts for the request
-- Each script needs: label (human-friendly name), command (shell command), autostart (boolean)
+- Each script needs: label (human-friendly name), command (shell command)
 - Respond with ONLY a JSON array, no other text
-- Format: [{"label": "...", "command": "...", "autostart": false}]
+- Format: [{"label": "...", "command": "..."}]
 - Do NOT wrap in markdown code blocks`;
 
 const COMMIT_MESSAGE_SYSTEM_PROMPT = `You are a git commit message expert. Analyze the current changes in the repository and write a concise, meaningful commit message.

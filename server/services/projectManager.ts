@@ -261,30 +261,27 @@ function listScripts(projectId: string): Script[] {
     id: r.id,
     label: r.label,
     command: r.command,
-    autostart: r.autostart === 1,
   }));
 }
 
-function createScript(projectId: string, label: string, command: string, autostart?: boolean): Script {
+function createScript(projectId: string, label: string, command: string): Script {
   const id = uuidv4();
-  db.prepare('INSERT INTO scripts (id, project_id, label, command, autostart) VALUES (?, ?, ?, ?, ?)').run(id, projectId, label, command, autostart ? 1 : 0);
-  return { id, label, command, autostart: autostart || false };
+  db.prepare('INSERT INTO scripts (id, project_id, label, command) VALUES (?, ?, ?, ?)').run(id, projectId, label, command);
+  return { id, label, command };
 }
 
-function updateScript(scriptId: string, updates: { label?: string; command?: string; autostart?: boolean }): Script | null {
+function updateScript(scriptId: string, updates: { label?: string; command?: string }): Script | null {
   const row = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
   if (!row) return null;
 
   if (updates.label !== undefined) db.prepare('UPDATE scripts SET label = ? WHERE id = ?').run(updates.label, scriptId);
   if (updates.command !== undefined) db.prepare('UPDATE scripts SET command = ? WHERE id = ?').run(updates.command, scriptId);
-  if (updates.autostart !== undefined) db.prepare('UPDATE scripts SET autostart = ? WHERE id = ?').run(updates.autostart ? 1 : 0, scriptId);
 
   const updated = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
   return {
     id: updated.id,
     label: updated.label,
     command: updated.command,
-    autostart: updated.autostart === 1,
   };
 }
 
@@ -295,7 +292,7 @@ function deleteScript(scriptId: string): void {
 function getScript(scriptId: string): Script | null {
   const row = db.prepare('SELECT * FROM scripts WHERE id = ?').get(scriptId) as any;
   if (!row) return null;
-  return { id: row.id, label: row.label, command: row.command, autostart: row.autostart === 1 };
+  return { id: row.id, label: row.label, command: row.command };
 }
 
 // === Chat Methods ===

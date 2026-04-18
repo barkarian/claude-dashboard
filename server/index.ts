@@ -231,26 +231,6 @@ if (fs.existsSync(indexPath)) {
   });
 }
 
-// Auto-start scripts marked with autostart
-async function autostartScripts(): Promise<void> {
-  try {
-    const projects = await projectManager.listProjects();
-    for (const proj of projects) {
-      const project = await projectManager.getProject(proj.id);
-      if (!project) continue;
-      for (const script of (project.scripts || [])) {
-        if (script.autostart) {
-          const cwd = projectManager.getProjectPath(proj.id);
-          console.log(`Auto-starting: ${proj.name} / ${script.label}`);
-          processManager.spawnProcess(proj.id, script.id, script.command, cwd, io);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Error auto-starting scripts:', err);
-  }
-}
-
 // Graceful shutdown
 let isShuttingDown = false;
 async function shutdown(): Promise<void> {
@@ -355,7 +335,6 @@ server.listen(config.port, async () => {
   } else if (config.tunnelMode === 'tunnel-service') {
     console.log('[tunnel] TUNNEL_API_KEY not set. Tunnel activates after first user OAuth.');
   }
-  autostartScripts();
 
   // Auto-activate sleep prevention if user previously opted in (desktop only)
   if (process.env.CLAW_DESKTOP === '1') {

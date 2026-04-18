@@ -108,16 +108,43 @@ async function getFileContent(projectPath: string, relativePath: string): Promis
 const eventBatches = new Map<string, Array<{ event: string; path: string }>>();
 const batchTimers = new Map<string, NodeJS.Timeout>();
 
-function queueFileEvent(projectId: string, projectPath: string, io: SocketIOServer, event: string, filePath: string): void {
-  if (event === 'add' || event === 'unlink') {
-    fileCache.delete(projectPath);
-  }
+// Allowlist of .git/ entries that indicate a repo-state change we care about
+// (commit, checkout, fetch, reset, branch/tag updates). Other files under .git/
+// (objects/, logs/, hooks/, lock files, etc.) are ignored to avoid noise.
+const GIT_META_FILES = new Set(['HEAD', 'index', 'MERGE_HEAD', 'FETCH_HEAD', 'ORIG_HEAD', 'packed-refs']);
 
-  const relativePath = path.relative(projectPath, filePath);
-  if (!eventBatches.has(projectId)) {
-    eventBatches.set(projectId, []);
+function isInsideGitDir(filePath: string): boolean {
+  return filePath.includes(`${path.sep}.git${path.sep}`) || filePath.endsWith(`${path.sep}.git`);
+}
+
+function shouldIgnore(filePath: string): boolean {
+  if (filePath.includes(`${path.sep}node_modules${path.sep}`)) return true;
+  if (filePath.includes(`${path.sep}.claude-dashboard${path.sep}`)) return true;
+  if (filePath.endsWith(`${path.sep}.DS_Store`)) return true;
+
+  const gitSegment = `${path.sep}.git${path.sep}`;
+  const idx = filePath.lastIndexOf(gitSegment);
+  if (idx === -1) return false; // not under .git/, allow
+  const inside = filePath.substring(idx + gitSegment.length);
+  // Allow HEAD, index, etc., and anything under refs/
+  if (GIT_META_FILES.has(inside)) return false;
+  if (inside === 'refs' || inside.startsWith(`refs${path.sep}`)) return false;
+  return true;
+}
+
+function queueFileEvent(projectId: string, projectPath: string, io: SocketIOServer, event: string, filePath: string): void {
+  const isGitMeta = isInsideGitDir(filePath);
+
+  if (!isGitMeta) {
+    if (event === 'add' || event === 'unlink') {
+      fileCache.delete(projectPath);
+    }
+    const relativePath = path.relative(projectPath, filePath);
+    if (!eventBatches.has(projectId)) {
+      eventBatches.set(projectId, []);
+    }
+    eventBatches.get(projectId)!.push({ event, path: relativePath });
   }
-  eventBatches.get(projectId)!.push({ event, path: relativePath });
 
   // Reset debounce timer (500ms quiet period)
   if (batchTimers.has(projectId)) {
@@ -130,13 +157,16 @@ function queueFileEvent(projectId: string, projectPath: string, io: SocketIOServ
     batchTimers.delete(projectId);
 
     const room = `project:${projectId}`;
-    if (batch.length > 20) {
-      io.to(room).emit('files:refresh', { projectId });
-    } else {
-      io.to(room).emit('files:changed-batch', { projectId, changes: batch });
+    if (batch.length > 0) {
+      if (batch.length > 20) {
+        io.to(room).emit('files:refresh', { projectId });
+      } else {
+        io.to(room).emit('files:changed-batch', { projectId, changes: batch });
+      }
     }
 
-    // Emit updated repo change counts for badge
+    // Always recompute repo change counts — covers both working-tree edits
+    // and .git/ metadata changes (external commits, pushes, checkouts).
     gitService.discoverRepos(projectPath).then(repos => {
       const totalChangeCount = repos.reduce((sum, r) => sum + r.changeCount, 0);
       io.to(room).emit('repos:change-counts', { projectId, repos, totalChangeCount });
@@ -148,12 +178,7 @@ function startWatching(projectPath: string, projectId: string, io: SocketIOServe
   if (watchers.has(projectId)) return;
 
   const watcher = chokidar.watch(projectPath, {
-    ignored: [
-      /node_modules/,
-      /\.git\//,
-      /\.claude-dashboard/,
-      /\.DS_Store/,
-    ],
+    ignored: (p: string) => shouldIgnore(p),
     persistent: true,
     ignoreInitial: true,
     awaitWriteFinish: {

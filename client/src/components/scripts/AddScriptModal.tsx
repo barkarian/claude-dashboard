@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog.tsx';
 import { Input } from '../ui/input.tsx';
 import { Label } from '../ui/label.tsx';
-import { Checkbox } from '../ui/checkbox.tsx';
 import { Button } from '../ui/button.tsx';
 import { Alert } from '../ui/alert.tsx';
 import api from '../../utils/api.ts';
@@ -16,7 +15,6 @@ interface AddScriptModalProps {
 export default function AddScriptModal({ projectId, onClose, onCreated }: AddScriptModalProps) {
   const [label, setLabel] = useState('');
   const [command, setCommand] = useState('');
-  const [autostart, setAutostart] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,7 +28,6 @@ export default function AddScriptModal({ projectId, onClose, onCreated }: AddScr
       await api.post(`/api/projects/${projectId}/scripts`, {
         label: label.trim(),
         command: command.trim(),
-        autostart,
       });
       onCreated();
     } catch (err: any) {
@@ -70,17 +67,6 @@ export default function AddScriptModal({ projectId, onClose, onCreated }: AddScr
               className="font-mono text-sm"
               placeholder="npm run dev"
             />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="script-autostart"
-              checked={autostart}
-              onCheckedChange={(checked) => setAutostart(checked === true)}
-            />
-            <label htmlFor="script-autostart" className="text-sm text-text-muted cursor-pointer">
-              Auto-start on server boot
-            </label>
           </div>
 
           {error && (

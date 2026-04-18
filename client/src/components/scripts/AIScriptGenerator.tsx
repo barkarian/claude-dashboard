@@ -14,7 +14,6 @@ interface AIScriptGeneratorProps {
 interface GeneratedScript {
   label: string;
   command: string;
-  autostart: boolean;
   selected: boolean;
 }
 
@@ -32,7 +31,6 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
       setScripts(result.map((s: any) => ({
         label: s.label || '',
         command: s.command || '',
-        autostart: s.autostart || false,
         selected: true,
       })));
     }
@@ -71,7 +69,6 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
         await api.post(`/api/projects/${projectId}/scripts`, {
           label: s.label,
           command: s.command,
-          autostart: s.autostart,
         });
       }
       onScriptsAdded();
@@ -277,9 +274,6 @@ export default function AIScriptGenerator({ projectId, onClose, onScriptsAdded }
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-text">{script.label}</span>
-                  {script.autostart && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">autostart</span>
-                  )}
                 </div>
                 <div className="text-xs text-text-dim font-mono mt-0.5 truncate">{script.command}</div>
               </div>

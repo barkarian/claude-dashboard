@@ -41,7 +41,7 @@ router.get('/', async (req: Request<{ id: string }>, res: Response) => {
 
 router.post('/', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const { label, command, autostart } = req.body;
+    const { label, command } = req.body;
     if (!label || !command) {
       return res.status(400).json({ error: 'Label and command are required' });
     }
@@ -49,7 +49,7 @@ router.post('/', async (req: Request<{ id: string }>, res: Response) => {
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
-    const script = projectManager.createScript(req.params.id, label, command, autostart);
+    const script = projectManager.createScript(req.params.id, label, command);
     res.status(201).json({ script });
   } catch (err) {
     console.error('Error adding script:', err);
@@ -59,8 +59,8 @@ router.post('/', async (req: Request<{ id: string }>, res: Response) => {
 
 router.patch('/:scriptId', async (req: Request<{ id: string; scriptId: string }>, res: Response) => {
   try {
-    const { label, command, autostart } = req.body;
-    const script = projectManager.updateScript(req.params.scriptId, { label, command, autostart });
+    const { label, command } = req.body;
+    const script = projectManager.updateScript(req.params.scriptId, { label, command });
     if (!script) {
       return res.status(404).json({ error: 'Script not found' });
     }

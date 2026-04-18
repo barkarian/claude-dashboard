@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
 import type { SwipeAction } from '../ui/SwipeableRow.tsx';
+import ContextMenu from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
@@ -121,17 +122,25 @@ interface SortableChatCardProps {
   chat: Chat;
   children: ReactNode;
   onClick: () => void;
+  onMouseEnter?: (e: React.MouseEvent) => void;
+  onMouseLeave?: () => void;
 }
 
-function SortableChatCard({ chat, children, onClick }: SortableChatCardProps) {
+function SortableChatCard({ chat, children, onClick, onMouseEnter, onMouseLeave }: SortableChatCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
+  // Suppress iOS Safari's long-press text-selection / callout. Without this, iOS hijacks
+  // the ~500ms hold for its own gesture and dnd-kit's TouchSensor never activates.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    WebkitUserSelect: 'none' as const,
+    userSelect: 'none' as const,
+    WebkitTouchCallout: 'none' as const,
+    touchAction: 'manipulation' as const,
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <Card
         className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
         onClick={onClick}
@@ -163,6 +172,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const [editMenuTarget, setEditMenuTarget] = useState<Chat | null>(null);
   const [generatingTitle, setGeneratingTitle] = useState<string | null>(null);
   const [infoChat, setInfoChat] = useState<Chat | null>(null);
+  const [hoverCtx, setHoverCtx] = useState<{ chat: Chat; x: number; y: number } | null>(null);
+  const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which chats have unread completions
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => {
@@ -396,6 +408,46 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   function handleDismiss(chat: Chat) {
     api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
+  }
+
+  // Desktop hover popover: show extra actions (favorite, unread, dismiss, view summary)
+  // after a short hover delay, mirroring the sidebar hover pattern.
+  useEffect(() => () => {
+    if (hoverShowRef.current) clearTimeout(hoverShowRef.current);
+    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
+  }, []);
+
+  function handleRowMouseEnter(e: React.MouseEvent, chat: Chat) {
+    if (isMobile) return;
+    if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
+    if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = rect.right - 24;
+    const y = rect.bottom + 4;
+    hoverShowRef.current = setTimeout(() => {
+      setHoverCtx({ chat, x, y });
+      hoverShowRef.current = null;
+    }, 350);
+  }
+
+  function handleRowMouseLeave() {
+    if (isMobile) return;
+    if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
+    hoverHideRef.current = setTimeout(() => {
+      setHoverCtx(null);
+      hoverHideRef.current = null;
+    }, 300);
+  }
+
+  function handleHoverPopoverMouseEnter() {
+    if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
+  }
+
+  function handleHoverPopoverMouseLeave() {
+    hoverHideRef.current = setTimeout(() => {
+      setHoverCtx(null);
+      hoverHideRef.current = null;
+    }, 300);
   }
 
   function handleToggleFavorite(chat: Chat) {
@@ -689,6 +741,8 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             <SortableChatCard
               chat={chat}
               onClick={() => goToChat(chat.id)}
+              onMouseEnter={(e) => handleRowMouseEnter(e, chat)}
+              onMouseLeave={handleRowMouseLeave}
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -733,63 +787,15 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  {/* Favorite toggle — desktop only */}
-                  {!isMobile && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggleFavorite(chat); }}
-                      className={`w-7 h-7 flex items-center justify-center rounded hover-hover:bg-bg-hover transition-all ${chat.favorite ? 'text-warning' : 'text-text-dim hover-hover:text-warning'}`}
-                      aria-label={chat.favorite ? 'Unfavorite' : 'Set as favorite'}
-                      title={chat.favorite ? 'Unfavorite' : 'Set as favorite'}
-                    >
-                      {chat.favorite ? (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.32-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                  {/* Mark as unread — desktop only */}
-                  {!isMobile && !unreadIds.has(chat.id) && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleSetUnread(chat); }}
-                      className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all"
-                      aria-label="Mark as unread"
-                      title="Mark as unread"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                      </svg>
-                    </button>
-                  )}
-                  {/* Dismiss button — desktop only */}
-                  {!isMobile && isSeen && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDismiss(chat);
-                      }}
-                      className="w-7 h-7 flex items-center justify-center rounded text-text-dim hover-hover:text-text hover-hover:bg-bg-hover transition-all"
-                      aria-label="Dismiss from tracker"
-                      title="Dismiss from sidebar"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                  {/* Info icon — bigger on mobile */}
-                  {chat.description && (
+                  {/* Info icon — mobile only (desktop exposes "View summary" via hover popover) */}
+                  {isMobile && chat.description && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setInfoChat(chat); }}
-                      className={`flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all ${isMobile ? 'w-8 h-8' : 'w-7 h-7'}`}
+                      className="w-8 h-8 flex items-center justify-center rounded text-text-dim hover-hover:text-primary hover-hover:bg-bg-hover transition-all"
                       aria-label="Chat summary"
                       title="View summary"
                     >
-                      <svg className={isMobile ? 'w-5 h-5' : 'w-4 h-4'} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                       </svg>
                     </button>
@@ -967,6 +973,41 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         </DialogContent>
       </Dialog>
 
+      {/* Desktop hover popover — extra per-chat actions (favorite, unread, dismiss, view summary). */}
+      <ContextMenu
+        open={!!hoverCtx}
+        onClose={() => setHoverCtx(null)}
+        position={{ x: hoverCtx?.x || 0, y: hoverCtx?.y || 0 }}
+        showBackdrop={false}
+        onMouseEnter={handleHoverPopoverMouseEnter}
+        onMouseLeave={handleHoverPopoverMouseLeave}
+        items={hoverCtx ? [
+          ...(hoverCtx.chat.description ? [{
+            label: 'View summary',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>,
+            onAction: () => setInfoChat(hoverCtx.chat),
+          }] : []),
+          {
+            label: hoverCtx.chat.favorite ? 'Unfavorite' : 'Set as favorite',
+            icon: hoverCtx.chat.favorite ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.32-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
+            ) : (
+              <svg className="w-4 h-4 text-warning" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" /></svg>
+            ),
+            onAction: () => handleToggleFavorite(hoverCtx.chat),
+          },
+          ...(!unreadIds.has(hoverCtx.chat.id) ? [{
+            label: 'Set as unread',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
+            onAction: () => handleSetUnread(hoverCtx.chat),
+          }] : []),
+          ...(seenChatIds.has(hoverCtx.chat.id) ? [{
+            label: 'Dismiss',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            onAction: () => handleDismiss(hoverCtx.chat),
+          }] : []),
+        ] : []}
+      />
     </PullToRefresh>
   );
 }

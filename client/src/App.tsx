@@ -122,7 +122,14 @@ function SwipeHandler() {
   const { setOpenMobile } = useSidebar();
   const navigate = useNavigate();
   const location = useLocation();
-  const touchRef = useRef<{ startX: number; startY: number } | null>(null);
+  const touchRef = useRef<{
+    startX: number;
+    startY: number;
+    lastY: number;
+    twoFinger: boolean;
+    inTerminal: boolean;
+    scrolling: boolean;
+  } | null>(null);
   const pathnameRef = useRef(location.pathname);
   pathnameRef.current = location.pathname;
 
@@ -132,25 +139,62 @@ function SwipeHandler() {
     const EDGE_ZONE = 30; // px from left edge for back-navigation gesture
 
     function handleTouchStart(e: TouchEvent) {
+      // Second finger added to an in-progress gesture → upgrade to two-finger mode
+      if (touchRef.current && e.touches.length >= 2) {
+        touchRef.current.twoFinger = true;
+        return;
+      }
+      // Taps on buttons/links are owned by those elements — don't let the
+      // global gesture layer compete with them (and potentially mis-fire).
+      const targetEl = e.target as Element | null;
+      if (targetEl?.closest?.('button, a, [role="button"]')) return;
+
       const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const twoFinger = e.touches.length >= 2;
       // CC override: only track swipes that start inside the terminal area.
       // Swipes on the prompt/keys area are ignored so they don't interfere
       // with text selection. Edge swipes still navigate back.
       if (ccSwipeOverride.current) {
         const container = ccSwipeOverride.containerEl;
-        if (container && container.contains(e.target as Node)) {
-          touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        const inTerminal = !!(container && container.contains(e.target as Node));
+        if (inTerminal) {
+          touchRef.current = { startX: x, startY: y, lastY: y, twoFinger, inTerminal: true, scrolling: false };
         } else if (native && x < EDGE_ZONE) {
           // Allow edge swipe back even from outside terminal
-          touchRef.current = { startX: x, startY: e.touches[0].clientY };
+          touchRef.current = { startX: x, startY: y, lastY: y, twoFinger: false, inTerminal: false, scrolling: false };
         }
         return;
       }
       // Native: track all swipes (edge for back, rest for sidebar)
       // Browser: only left edge zone 20-80px (0-20 reserved for iOS system gesture)
       if (native || (x >= 20 && x <= 80)) {
-        touchRef.current = { startX: x, startY: e.touches[0].clientY };
+        touchRef.current = { startX: x, startY: y, lastY: y, twoFinger, inTerminal: false, scrolling: false };
       }
+    }
+
+    function handleTouchMove(e: TouchEvent) {
+      const t = touchRef.current;
+      if (!t || !t.inTerminal) return;
+      if (!ccSwipeOverride.current || !ccSwipeOverride.scroll) return;
+
+      const currentY = e.touches[0].clientY;
+      const delta = currentY - t.lastY;
+      if (delta === 0) return;
+
+      // Two-finger vertical = always scroll.
+      // Single-finger = scroll only when no up/down arrows are bound (so we don't
+      // steal gestures that should map to arrow keys).
+      const noUpDown =
+        !ccSwipeOverride.allowedDirections.has('up') &&
+        !ccSwipeOverride.allowedDirections.has('down');
+      if (!t.twoFinger && !noUpDown) return;
+
+      // Natural scroll: finger moves down → content moves down with finger,
+      // revealing older lines above (scrollTop decreases).
+      ccSwipeOverride.scroll(-delta);
+      t.lastY = currentY;
+      t.scrolling = true;
     }
 
     function handleTouchEnd(e: TouchEvent) {
@@ -162,6 +206,7 @@ function SwipeHandler() {
       }
       const startX = touchRef.current.startX;
       const startY = touchRef.current.startY;
+      const scrolling = touchRef.current.scrolling;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;
       const dx = endX - startX;
@@ -169,6 +214,10 @@ function SwipeHandler() {
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
       touchRef.current = null;
+
+      // If touchmove already scrolled the terminal for this gesture, the swipe
+      // is spent — don't also fire arrow keys or sidebar/nav on release.
+      if (scrolling) return;
 
       // Claude Code chat override: map swipes to arrow directions,
       // BUT edge swipes (from left edge) still navigate back
@@ -236,9 +285,11 @@ function SwipeHandler() {
     }
 
     document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
     return () => {
       document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
       document.removeEventListener('touchend', handleTouchEnd);
     };
   }, [setOpenMobile, navigate]);

@@ -128,9 +128,20 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       writeRef.current(ARROW_MAP[direction]);
       setTimeout(() => terminal.current?.scrollToBottom(), 50);
     };
+    ccSwipeOverride.scroll = (deltaY: number) => {
+      // Manipulate the xterm viewport scrollTop directly for pixel-smooth scrolling
+      // that follows the finger. scrollLines() jumps by whole rows and feels jerky.
+      const viewport = terminal.current?.element?.querySelector<HTMLElement>('.xterm-viewport');
+      if (viewport) {
+        viewport.scrollTop += deltaY;
+      } else {
+        terminal.current?.scrollLines(Math.round(deltaY / 20));
+      }
+    };
     return () => {
       ccSwipeOverride.current = null;
       ccSwipeOverride.containerEl = null;
+      ccSwipeOverride.scroll = null;
     };
   }, [terminal]);
 
@@ -188,6 +199,8 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
 
   const native = isCapacitorNative();
   const [showSwipeInfo, setShowSwipeInfo] = useState(false);
+  const autoPeekedRef = useRef(false);
+  const autoPeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Arrow overlay computed values
   const showUp = allowedDirections.has('up');
@@ -196,6 +209,33 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const showRight = allowedDirections.has('right');
   const hasArrows = showUp || showDown || showLeft || showRight;
   const hasOverlayContent = hasArrows || terminalUIMode.mode === 'dismiss' || terminalUIMode.mode === 'detail-view';
+
+  // Auto-peek the gesture tooltip the first time the arrow overlay appears in a session.
+  // Collapses itself after 3s. Resets per mount so occasional users see it again.
+  useEffect(() => {
+    if (!native || !hasOverlayContent || autoPeekedRef.current) return;
+    autoPeekedRef.current = true;
+    setShowSwipeInfo(true);
+    autoPeekTimerRef.current = setTimeout(() => {
+      setShowSwipeInfo(false);
+      autoPeekTimerRef.current = null;
+    }, 3000);
+    return () => {
+      if (autoPeekTimerRef.current) {
+        clearTimeout(autoPeekTimerRef.current);
+        autoPeekTimerRef.current = null;
+      }
+    };
+  }, [native, hasOverlayContent]);
+
+  // Manual toggle: cancel any pending auto-close so the user's tap isn't overwritten.
+  const toggleSwipeInfo = useCallback(() => {
+    if (autoPeekTimerRef.current) {
+      clearTimeout(autoPeekTimerRef.current);
+      autoPeekTimerRef.current = null;
+    }
+    setShowSwipeInfo(prev => !prev);
+  }, []);
 
   const arrowLabel = terminalUIMode.mode === 'multi-choice' ? 'Select'
     : terminalUIMode.mode === 'multi-choice-tabs' ? 'Navigate'
@@ -292,29 +332,38 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
               </div>
             )}
 
-            {/* Swipe info icon — center of overlay */}
+            {/* Gesture info icon + tooltip — tooltip expands horizontally to the right,
+                keeping the arrow buttons above unobstructed and easy to tap. */}
             {native && (
-              <button
-                type="button"
-                onClick={() => setShowSwipeInfo(prev => !prev)}
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-bg-surface/60 backdrop-blur-sm text-text-dim hover:text-primary transition-colors"
-                title="Swipe gesture info"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                </svg>
-              </button>
-            )}
-
-            {/* Swipe info tooltip */}
-            {native && showSwipeInfo && (
-              <div className="bg-bg-surface/90 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg text-[10px] text-text-muted w-36">
-                <div className="space-y-0.5">
-                  <div>Swipe up = Arrow Down</div>
-                  <div>Swipe down = Arrow Up</div>
-                  <div>Swipe left = Arrow Right</div>
-                  <div>Swipe right = Arrow Left</div>
-                </div>
+              <div className="flex flex-row items-center gap-1.5 self-start">
+                <button
+                  type="button"
+                  onClick={toggleSwipeInfo}
+                  className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full bg-bg-surface/60 backdrop-blur-sm text-text-dim hover:text-primary transition-colors"
+                  title="Gesture info"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.05 4.575a1.575 1.575 0 1 0-3.15 0v3m3.15-3v-1.5a1.575 1.575 0 0 1 3.15 0v1.5m-3.15 0 .075 5.925m3.075.75V4.575m0 0a1.575 1.575 0 0 1 3.15 0V15M6.9 7.575a1.575 1.575 0 1 0-3.15 0v8.175a6.75 6.75 0 0 0 6.75 6.75h2.018a5.25 5.25 0 0 0 3.712-1.538l1.732-1.732a5.25 5.25 0 0 0 1.538-3.712l.003-2.024a.668.668 0 0 1 .198-.471 1.575 1.575 0 1 0-2.228-2.228 3.818 3.818 0 0 0-1.12 2.7v.75" />
+                  </svg>
+                </button>
+                {showSwipeInfo && (
+                  <div className="bg-bg-surface/95 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg text-[10px] text-text-muted w-40">
+                    <div className="text-[8px] font-semibold text-primary/80 uppercase tracking-wider mb-0.5">
+                      Swipe · 1 finger
+                    </div>
+                    <div className="space-y-0.5">
+                      <div>Up = Arrow Down</div>
+                      <div>Down = Arrow Up</div>
+                      <div>Left = Arrow Right</div>
+                      <div>Right = Arrow Left</div>
+                    </div>
+                    <div className="border-t border-border/60 my-1.5" />
+                    <div className="text-[8px] font-semibold text-primary/80 uppercase tracking-wider mb-0.5">
+                      Scroll · 2 fingers
+                    </div>
+                    <div>Swipe up/down to scroll terminal history</div>
+                  </div>
+                )}
               </div>
             )}
           </div>

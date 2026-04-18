@@ -187,8 +187,8 @@ router.post('/import', async (req: Request, res: Response) => {
     // Insert scripts
     for (const script of (scripts || [])) {
       const scriptId = uuidv4();
-      db.prepare('INSERT INTO scripts (id, project_id, label, command, autostart) VALUES (?, ?, ?, ?, ?)')
-        .run(scriptId, projectId, script.label, script.command, script.autostart ? 1 : 0);
+      db.prepare('INSERT INTO scripts (id, project_id, label, command) VALUES (?, ?, ?, ?)')
+        .run(scriptId, projectId, script.label, script.command);
     }
 
     // Insert chats and messages

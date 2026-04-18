@@ -42,7 +42,6 @@ db.exec(`
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     label TEXT NOT NULL,
     command TEXT NOT NULL,
-    autostart INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -111,6 +110,14 @@ db.exec(`
 `);
 
 // --- Migrations ---
+// Drop legacy autostart column from scripts (feature removed).
+// Requires SQLite 3.35+ (shipped with recent better-sqlite3 builds).
+try {
+  db.exec(`ALTER TABLE scripts DROP COLUMN autostart`);
+} catch {
+  // Column already gone (or never existed) — ignore
+}
+
 // Add shell_override column to projects (safe to re-run)
 try {
   db.exec(`ALTER TABLE projects ADD COLUMN shell_override TEXT`);

@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog.tsx';
 import { Input } from '../ui/input.tsx';
 import { Label } from '../ui/label.tsx';
-import { Checkbox } from '../ui/checkbox.tsx';
 import { Button } from '../ui/button.tsx';
 import { Alert } from '../ui/alert.tsx';
 import api from '../../utils/api.ts';
@@ -18,7 +17,6 @@ interface EditScriptModalProps {
 export default function EditScriptModal({ projectId, script, onClose, onUpdated }: EditScriptModalProps) {
   const [label, setLabel] = useState(script.label);
   const [command, setCommand] = useState(script.command);
-  const [autostart, setAutostart] = useState(script.autostart);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -32,7 +30,6 @@ export default function EditScriptModal({ projectId, script, onClose, onUpdated 
       await api.patch(`/api/projects/${projectId}/scripts/${script.id}`, {
         label: label.trim(),
         command: command.trim(),
-        autostart,
       });
       onUpdated();
     } catch (err: any) {
@@ -72,17 +69,6 @@ export default function EditScriptModal({ projectId, script, onClose, onUpdated 
               className="font-mono text-sm"
               placeholder="npm run dev"
             />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="edit-script-autostart"
-              checked={autostart}
-              onCheckedChange={(checked) => setAutostart(checked === true)}
-            />
-            <label htmlFor="edit-script-autostart" className="text-sm text-text-muted cursor-pointer">
-              Auto-start on server boot
-            </label>
           </div>
 
           {error && (

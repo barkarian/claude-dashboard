@@ -42,6 +42,20 @@ export function useRepoChanges(projectId: string): UseRepoChangesReturn {
     refresh();
   }, [refresh]);
 
+  // Re-sync when the tab becomes visible/focused again — catches commits/pushes
+  // made in another view (external terminal, etc.) while the page was backgrounded.
+  useEffect(() => {
+    function handleVisible() {
+      if (document.visibilityState === 'visible') refresh();
+    }
+    document.addEventListener('visibilitychange', handleVisible);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [refresh]);
+
   // Listen for real-time change count updates
   useEffect(() => {
     if (!socket) return;

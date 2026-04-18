@@ -12,7 +12,6 @@ export interface Script {
   id: string;
   label: string;
   command: string;
-  autostart: boolean;
 }
 
 export interface ChatHistoryEntry {
