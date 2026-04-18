@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import { isCapacitorNative } from './platform.ts';
+import { getPlugin } from './capacitorBridge.ts';
 
 function getApiBase(): string {
   const envMatch = window.location.pathname.match(/^\/(local|vps)/);
@@ -10,89 +11,98 @@ function basename(filePath: string): string {
   return filePath.split('/').pop() || 'download';
 }
 
-function guessMime(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    md: 'text/markdown', txt: 'text/plain', json: 'application/json',
-    js: 'text/javascript', ts: 'text/plain', tsx: 'text/plain', jsx: 'text/plain',
-    html: 'text/html', css: 'text/css', xml: 'application/xml',
-    yaml: 'text/yaml', yml: 'text/yaml', toml: 'text/plain',
-    pdf: 'application/pdf', zip: 'application/zip',
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-  };
-  return map[ext] || 'application/octet-stream';
-}
-
 export function buildDownloadUrl(projectId: string, filePath: string): string {
   return `${getApiBase()}/api/projects/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('FileReader returned non-string'));
+        return;
+      }
+      // result is "data:<mime>;base64,<payload>" — strip the prefix
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**
  * Download a project file.
  *
- * Capacitor iOS WKWebView does NOT honour <a download>, and navigating to an
- * application/octet-stream response shows iOS's "Open in..." sheet (with Notes,
- * etc.) — and because the WebView navigates, swiping back afterwards triggers
- * our global swipe-to-open-sidebar handler. So on native we go through the
- * Web Share API only. If that fails we surface a toast instead of falling back
- * to a navigation, so we never trigger the sidebar as a side-effect.
+ * Native (Capacitor): fetch the bytes, write to the app cache directory via
+ * @capacitor/filesystem, then invoke @capacitor/share — this path bypasses the
+ * Web Share API entirely, so it has no user-activation or size limits.
+ *
+ * Web fallback: <a download>.
  */
 export async function downloadProjectFile(projectId: string, filePath: string): Promise<void> {
   const url = buildDownloadUrl(projectId, filePath);
   const name = basename(filePath);
   const native = isCapacitorNative();
-  const toastId = `download-${filePath}`;
 
   if (native) {
-    toast.loading(`Preparing ${name}…`, { id: toastId });
+    const Filesystem = getPlugin('Filesystem');
+    const Share = getPlugin('Share');
+    const toastId = `download-${filePath}`;
 
-    const canShareFiles =
-      typeof navigator !== 'undefined' &&
-      typeof navigator.share === 'function' &&
-      typeof navigator.canShare === 'function';
-
-    if (!canShareFiles) {
-      toast.error('Downloads require iOS 15+ or an updated Android. Use desktop for now.', { id: toastId });
+    if (!Filesystem || !Share) {
+      // Plugin missing → the mobile app hasn't been rebuilt with the new
+      // plugins yet. Surface this clearly instead of silently failing.
+      toast.error('Download plugins not available. Reinstall the mobile app from the latest build.');
       return;
     }
 
-    let blob: Blob;
+    toast.loading(`Preparing ${name}…`, { id: toastId });
+
+    let base64: string;
     try {
       const resp = await fetch(url, { credentials: 'include' });
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
-      }
-      blob = await resp.blob();
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      base64 = await blobToBase64(blob);
     } catch (err: any) {
       toast.error(`Download failed: ${err?.message || 'network error'}`, { id: toastId });
       return;
     }
 
-    const mime = blob.type && blob.type !== 'application/octet-stream' ? blob.type : guessMime(name);
-    const file = new File([blob], name, { type: mime });
+    // Sanitise the filename for the cache path (strip path separators, keep extension).
+    const safeName = name.replace(/[/\\]/g, '_');
+    const cachePath = `downloads/${Date.now()}-${safeName}`;
 
-    if (!navigator.canShare({ files: [file] })) {
-      toast.error('This device does not allow sharing files from the app.', { id: toastId });
+    let fileUri: string;
+    try {
+      const result = await Filesystem.writeFile({
+        path: cachePath,
+        data: base64,
+        directory: 'CACHE',
+        recursive: true,
+      });
+      fileUri = result.uri;
+    } catch (err: any) {
+      toast.error(`Couldn't save file: ${err?.message || 'filesystem error'}`, { id: toastId });
       return;
     }
 
+    toast.dismiss(toastId);
+
     try {
-      toast.dismiss(toastId);
-      await navigator.share({ files: [file], title: name });
+      await Share.share({
+        title: name,
+        files: [fileUri],
+        dialogTitle: name,
+      });
     } catch (err: any) {
-      if (err?.name === 'AbortError') return; // user cancelled the share sheet
-      // NotAllowedError is what iOS throws when user activation has been lost
-      // (common on large files whose fetch took longer than a few seconds) or
-      // when the payload exceeds the WKWebView share-sheet limit.
-      if (err?.name === 'NotAllowedError') {
-        const sizeMb = (blob.size / (1024 * 1024)).toFixed(1);
-        toast.error(
-          `iOS won't share this ${sizeMb} MB file directly. Open it in the preview to use the native share button, or download from desktop.`,
-          { duration: 8000 },
-        );
-        return;
-      }
+      // Capacitor Share throws with "canceled" / "Share canceled" when the user
+      // dismisses the sheet — that's not an error.
+      const msg = String(err?.message || err || '').toLowerCase();
+      if (msg.includes('cancel')) return;
       toast.error(`Share failed: ${err?.message || 'unknown error'}`);
     }
     return;

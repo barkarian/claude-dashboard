@@ -30,11 +30,38 @@ interface AppPlugin {
   exitApp(): Promise<void>;
 }
 
+// @capacitor/filesystem — only the subset we actually use.
+// Directory values come from the plugin as string enums ("CACHE", "DATA", etc.).
+interface FilesystemPlugin {
+  writeFile(opts: {
+    path: string;
+    data: string; // base64 when encoding is omitted
+    directory?: 'DOCUMENTS' | 'DATA' | 'CACHE' | 'EXTERNAL' | 'EXTERNAL_STORAGE' | 'LIBRARY';
+    recursive?: boolean;
+  }): Promise<{ uri: string }>;
+  deleteFile(opts: { path: string; directory?: string }): Promise<void>;
+  getUri(opts: { path: string; directory?: string }): Promise<{ uri: string }>;
+}
+
+// @capacitor/share — native iOS/Android Share Sheet.
+interface SharePlugin {
+  share(opts: {
+    title?: string;
+    text?: string;
+    url?: string;
+    files?: string[]; // array of file URIs
+    dialogTitle?: string;
+  }): Promise<{ activityType?: string } | void>;
+  canShare(): Promise<{ value: boolean }>;
+}
+
 interface CapacitorPlugins {
   Haptics: HapticsPlugin;
   StatusBar: StatusBarPlugin;
   Keyboard: KeyboardPlugin;
   App: AppPlugin;
+  Filesystem: FilesystemPlugin;
+  Share: SharePlugin;
 }
 
 type PluginName = keyof CapacitorPlugins;
