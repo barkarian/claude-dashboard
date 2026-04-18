@@ -296,6 +296,7 @@ export default function ProjectDashboardPage() {
           projectPath={project.path}
           shellOverride={project.shellOverride}
           defaultAdapter={project.defaultAdapter || 'claude-agent-sdk'}
+          adapterOrder={project.adapterOrder ?? null}
           aiNamingEnabled={project.aiNamingEnabled || 'none'}
           onShellChanged={refreshProject}
           onAdapterChanged={refreshProject}
