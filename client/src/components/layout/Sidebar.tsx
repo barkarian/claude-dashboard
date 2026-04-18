@@ -27,7 +27,8 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import { haptics } from '../../utils/haptics.ts';
-import type { ProjectSummary } from '../../../../shared/types/models.ts';
+import type { Chat, ProjectSummary } from '../../../../shared/types/models.ts';
+import { useProject } from '../../context/ProjectContext.tsx';
 import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
@@ -100,6 +101,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
   const activeChats = useGlobalActiveChats();
+  const { setProject } = useProject();
 
   const [accountPopoverOpen, setAccountPopoverOpen] = useState(false);
 
@@ -181,10 +183,16 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   // Quick New Chat for a project
   async function handleQuickNewChat(projectId: string) {
     try {
-      const data = await api.post<{ chat: { id: string; adapter: string } }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
+      const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
+      const created = data.chat;
+      setProject(prev => {
+        if (!prev || prev.id !== projectId) return prev;
+        const rest = prev.chats.filter(c => c.id !== created.id);
+        return { ...prev, chats: [created, ...rest] };
+      });
       setOpenMobile(false);
-      navigate(`/project/${projectId}/chats/${data.chat.id}`, {
-        state: { isNewChat: true, adapter: data.chat.adapter },
+      navigate(`/project/${projectId}/chats/${created.id}`, {
+        state: { isNewChat: true, adapter: created.adapter },
       });
     } catch (err) {
       console.error('Failed to create chat:', err);

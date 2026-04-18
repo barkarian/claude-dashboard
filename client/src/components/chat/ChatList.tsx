@@ -105,7 +105,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const navigate = useNavigate();
   const location = useLocation();
   const { socket } = useSocket();
-  const { refreshProject } = useProject();
+  const { refreshProject, setProject } = useProject();
   const isMobile = useIsMobile();
   const activeChats = useGlobalActiveChats();
   const activeChatMatch = location.pathname.match(/\/chats\/([^/]+)/);
@@ -227,8 +227,14 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     setCreating(true);
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat', adapter: adapterId });
-      navigate(`/project/${projectId}/chats/${data.chat.id}`, {
-        state: { isNewChat: true, adapter: data.chat.adapter },
+      const created = data.chat;
+      setProject(prev => {
+        if (!prev || prev.id !== projectId) return prev;
+        const rest = prev.chats.filter(c => c.id !== created.id);
+        return { ...prev, chats: [created, ...rest] };
+      });
+      navigate(`/project/${projectId}/chats/${created.id}`, {
+        state: { isNewChat: true, adapter: created.adapter },
       });
     } catch (err) {
       console.error('Failed to create chat:', err);

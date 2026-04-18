@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useSessionStates } from '../../hooks/useSessionStatuses.ts';
@@ -24,12 +24,14 @@ interface ChatViewShellProps {
 
 export default function ChatViewShell({ projectId }: ChatViewShellProps) {
   const { chatId } = useParams<{ chatId: string }>();
+  const location = useLocation();
   const { project } = useProject();
   const { socket } = useSocket();
   const sessionStates = useSessionStates(projectId);
   const { registerHandler, unregisterHandler } = useSearch();
-  const isNewChatRef = useRef(false);
   const currentHandlerRef = useRef<ContextSearchHandler | null>(null);
+
+  const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
   // Find the chat object
   const chat = project?.chats?.find(c => c.id === chatId);
@@ -38,7 +40,7 @@ export default function ChatViewShell({ projectId }: ChatViewShellProps) {
   // 1. The chat's own adapter field (if set and registered)
   // 2. Fall back to the project's default adapter
   const adapterId = chat?.adapter || project?.defaultAdapter || 'claude-agent-sdk';
-  const adapterEntry = getClientAdapter(adapterId);
+  const adapterEntry = chat ? getClientAdapter(adapterId) : null;
 
   // Register search handler from adapter (bridges adapter SearchHandler to context SearchHandler)
   const onSearchRegister = useCallback((handler: SearchHandler | null) => {
@@ -59,10 +61,19 @@ export default function ChatViewShell({ projectId }: ChatViewShellProps) {
     }
   }, [registerHandler, unregisterHandler]);
 
-  if (!socket || !chatId || !chat) {
+  if (!chatId || !chat) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted">
         Select a chat to start
+      </div>
+    );
+  }
+
+  if (!socket) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-text-muted gap-2">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+        <p className="text-sm">Connecting…</p>
       </div>
     );
   }
@@ -85,7 +96,7 @@ export default function ChatViewShell({ projectId }: ChatViewShellProps) {
       chat={chat}
       socket={socket}
       sessionState={sessionStates[chatId]}
-      isNewChat={isNewChatRef.current}
+      isNewChat={isNewChat}
       onSearchRegister={onSearchRegister}
     />
   );

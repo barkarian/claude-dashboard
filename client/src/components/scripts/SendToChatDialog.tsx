@@ -6,6 +6,7 @@ import { Input } from '../ui/input.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import api from '../../utils/api.ts';
+import { useProject } from '../../context/ProjectContext.tsx';
 import type { Chat } from '../../../../shared/types/models.ts';
 
 interface SendToChatDialogProps {
@@ -18,6 +19,7 @@ interface SendToChatDialogProps {
 
 export default function SendToChatDialog({ projectId, content, contentLabel, rawContent, onClose }: SendToChatDialogProps) {
   const navigate = useNavigate();
+  const { setProject } = useProject();
   const isMobile = useIsMobile();
   const [chats, setChats] = useState<Chat[]>([]);
   const [search, setSearch] = useState('');
@@ -65,7 +67,13 @@ export default function SendToChatDialog({ projectId, content, contentLabel, raw
   async function handleNewChat() {
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
-      navigateToChat(data.chat.id);
+      const created = data.chat;
+      setProject(prev => {
+        if (!prev || prev.id !== projectId) return prev;
+        const rest = prev.chats.filter(c => c.id !== created.id);
+        return { ...prev, chats: [created, ...rest] };
+      });
+      navigateToChat(created.id);
     } catch (err) {
       console.error('Failed to create chat:', err);
     }

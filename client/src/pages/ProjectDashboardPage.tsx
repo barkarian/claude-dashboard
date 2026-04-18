@@ -46,7 +46,7 @@ export default function ProjectDashboardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { project, loading, loadProject, refreshProject } = useProject();
+  const { project, loading, loadProject, refreshProject, setProject } = useProject();
   const { socket } = useSocket();
   const sessionStates = useSessionStates(id);
   const prevStatesRef = useRef<Record<string, SessionStateContext>>({});
@@ -178,8 +178,14 @@ export default function ProjectDashboardPage() {
   async function handleNewChat() {
     try {
       const data = await api.post<{ chat: Chat }>(`/api/projects/${id}/chats`, { label: 'New Chat', adapter: project?.defaultAdapter });
-      navigate(`/project/${id}/chats/${data.chat.id}`, {
-        state: { isNewChat: true, adapter: data.chat.adapter },
+      const created = data.chat;
+      setProject(prev => {
+        if (!prev || prev.id !== id) return prev;
+        const rest = prev.chats.filter(c => c.id !== created.id);
+        return { ...prev, chats: [created, ...rest] };
+      });
+      navigate(`/project/${id}/chats/${created.id}`, {
+        state: { isNewChat: true, adapter: created.adapter },
       });
     } catch (err) {
       console.error('Failed to create chat:', err);
