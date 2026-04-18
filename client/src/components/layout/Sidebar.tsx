@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardR
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   KeyboardSensor,
   useSensor,
@@ -203,9 +203,11 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
   const [isChatDragActive, setIsChatDragActive] = useState(false);
 
-  // dnd-kit sensors shared across every project's chat list.
+  // MouseSensor + TouchSensor split: mouse drag on desktop, long-press drag on
+  // mobile. PointerSensor would swallow quick finger swipes and block the
+  // global edge-swipe gesture that opens this sidebar.
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );

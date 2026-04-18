@@ -13,7 +13,7 @@
 import { useMemo } from 'react';
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   KeyboardSensor,
   useSensor,
@@ -126,7 +126,7 @@ function AdapterRow({ metadata, isDefault, onSelect }: {
 
 export default function SortableAdapterList({ adapters, adapterOrder, onReorder, onSelect }: SortableAdapterListProps) {
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );

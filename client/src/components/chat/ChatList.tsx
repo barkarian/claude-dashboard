@@ -4,7 +4,7 @@ import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   KeyboardSensor,
   useSensor,
@@ -133,8 +133,11 @@ function SortableChatCard({
   onLongPressStart, onLongPressMove, onLongPressEnd,
 }: SortableChatCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
-  // Suppress iOS Safari's long-press text-selection / callout. Without this, iOS hijacks
-  // the ~500ms hold for its own gesture and dnd-kit's TouchSensor never activates.
+  // `user-select / -webkit-touch-callout: none` keep iOS from stealing the long-press
+  // for its native text-selection popover. `touch-action` is dynamic: before drag we
+  // want `pan-y` so the list scrolls normally, but once dnd-kit is actually dragging
+  // we flip to `none` so the browser doesn't also pan the outer container — that
+  // dual-scroll is what made the list move opposite to the finger on mobile.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -142,7 +145,7 @@ function SortableChatCard({
     WebkitUserSelect: 'none' as const,
     userSelect: 'none' as const,
     WebkitTouchCallout: 'none' as const,
-    touchAction: 'manipulation' as const,
+    touchAction: isDragging ? ('none' as const) : ('pan-y' as const),
   };
   return (
     <div
@@ -512,8 +515,11 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   const [isChatDragActive, setIsChatDragActive] = useState(false);
 
+  // MouseSensor (not PointerSensor) + TouchSensor split: mouse-only on desktop,
+  // long-press only on mobile. Using PointerSensor here captured quick finger
+  // swipes on the cards and blocked the global edge-swipe that opens the sidebar.
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
@@ -728,7 +734,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         <DndContext
           sensors={dndSensors}
           collisionDetection={closestCenter}
-          autoScroll={false}
+          // Keep auto-scroll on: with touch-action locked during drag, dnd-kit is
+          // now the only thing that scrolls the container, so it can "help" when
+          // the finger reaches the top/bottom edge without the browser fighting it.
           onDragStart={() => {
             setIsChatDragActive(true);
             // Long-press popover may have just opened; drag wins, hide it.
