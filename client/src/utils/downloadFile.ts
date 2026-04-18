@@ -82,6 +82,17 @@ export async function downloadProjectFile(projectId: string, filePath: string): 
       await navigator.share({ files: [file], title: name });
     } catch (err: any) {
       if (err?.name === 'AbortError') return; // user cancelled the share sheet
+      // NotAllowedError is what iOS throws when user activation has been lost
+      // (common on large files whose fetch took longer than a few seconds) or
+      // when the payload exceeds the WKWebView share-sheet limit.
+      if (err?.name === 'NotAllowedError') {
+        const sizeMb = (blob.size / (1024 * 1024)).toFixed(1);
+        toast.error(
+          `iOS won't share this ${sizeMb} MB file directly. Open it in the preview to use the native share button, or download from desktop.`,
+          { duration: 8000 },
+        );
+        return;
+      }
       toast.error(`Share failed: ${err?.message || 'unknown error'}`);
     }
     return;

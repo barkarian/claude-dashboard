@@ -12,6 +12,10 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff', 'heic', 'avif', 'svg',
 ]);
 
+const INLINE_PREVIEW_EXTENSIONS = new Set([
+  'pdf', // iOS WKWebView has a built-in PDF viewer with its own Share button
+]);
+
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
   ...IMAGE_EXTENSIONS,
@@ -33,6 +37,10 @@ function isBinaryByExtension(filePath: string): boolean {
 
 function isImageByExtension(filePath: string): boolean {
   return IMAGE_EXTENSIONS.has(getExtension(filePath));
+}
+
+function isInlinePreviewExtension(filePath: string): boolean {
+  return INLINE_PREVIEW_EXTENSIONS.has(getExtension(filePath));
 }
 
 function looksBinary(content: string): boolean {
@@ -90,6 +98,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   const [fileSize, setFileSize] = useState<number | null>(null);
   const binaryByExt = isBinaryByExtension(filePath);
   const imageByExt = isImageByExtension(filePath);
+  const inlineByExt = isInlinePreviewExtension(filePath);
 
   const fetchContent = useCallback(() => {
     if (!socket) return;
@@ -244,6 +253,12 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
               Long-press the image to save it to Photos, or tap Download above.
             </p>
           </div>
+        ) : inlineByExt ? (
+          <iframe
+            src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+            title={filePath}
+            className="w-full h-full border-0 bg-bg-surface"
+          />
         ) : isBinary ? (
           <div className="flex flex-col items-center gap-4 pt-16 px-6 text-center">
             <svg className="w-10 h-10 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

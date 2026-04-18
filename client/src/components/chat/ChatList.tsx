@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, useContext, createContext, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -11,7 +11,9 @@ import {
   useSensors,
   closestCenter,
   type DragEndEvent,
+  type DraggableAttributes,
 } from '@dnd-kit/core';
+import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities';
 import {
   SortableContext,
   sortableKeyboardCoordinates,
@@ -119,6 +121,7 @@ interface ChatListProps {
 
 interface SortableChatCardProps {
   chat: Chat;
+  isMobile: boolean;
   children: ReactNode;
   onClick: () => void;
   onMouseEnter?: (e: React.MouseEvent) => void;
@@ -128,16 +131,27 @@ interface SortableChatCardProps {
   onLongPressEnd?: () => void;
 }
 
+/**
+ * Exposes dnd-kit sortable bindings to a descendant <MobileDragHandle />.
+ * Lets us keep `useSortable` in one component while the handle itself
+ * renders deep inside the Card alongside the rest of the row's actions.
+ */
+interface DragHandleBindings {
+  setActivatorNodeRef: ((el: HTMLElement | null) => void) | undefined;
+  attributes: DraggableAttributes;
+  listeners: SyntheticListenerMap | undefined;
+}
+const DragHandleContext = createContext<DragHandleBindings | null>(null);
+
 function SortableChatCard({
-  chat, children, onClick, onMouseEnter, onMouseLeave,
+  chat, isMobile, children, onClick, onMouseEnter, onMouseLeave,
   onLongPressStart, onLongPressMove, onLongPressEnd,
 }: SortableChatCardProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
   // `user-select / -webkit-touch-callout: none` keep iOS from stealing the long-press
-  // for its native text-selection popover. `touch-action` is dynamic: before drag we
-  // want `pan-y` so the list scrolls normally, but once dnd-kit is actually dragging
-  // we flip to `none` so the browser doesn't also pan the outer container — that
-  // dual-scroll is what made the list move opposite to the finger on mobile.
+  // for its native text-selection popover. Keep touch-action as `manipulation` on
+  // the card body so normal vertical scrolling works — the drag handle has its own
+  // touch-action: none so only that tiny target blocks native pan while dragging.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -145,33 +159,56 @@ function SortableChatCard({
     WebkitUserSelect: 'none' as const,
     userSelect: 'none' as const,
     WebkitTouchCallout: 'none' as const,
-    touchAction: isDragging ? ('none' as const) : ('pan-y' as const),
+    touchAction: 'manipulation' as const,
   };
-  // Long-press touch handlers must live on a child — not on the same element as
-  // {...listeners}. React spread semantics mean later onTouchStart props clobber
-  // earlier ones, so attaching them on the outer div silently ate dnd-kit's
-  // TouchSensor handler and the drag could never arm. Keeping them on Card lets
-  // both handlers fire on the same touch via React's normal event bubbling.
+  // On desktop: attach dnd-kit listeners to the whole card so mouse-drag works
+  // from anywhere. On mobile: listeners live ONLY on <MobileDragHandle /> (via
+  // context + setActivatorNodeRef), so card-body gestures (tap, scroll, swipe
+  // to reveal sidebar) don't arm the sortable.
+  const dragBindings: DragHandleBindings = { setActivatorNodeRef, attributes, listeners };
+  const outerProps = isMobile ? {} : { ...attributes, ...listeners };
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <Card
-        className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
-        onClick={onClick}
-        onTouchStart={onLongPressStart}
-        onTouchMove={onLongPressMove}
-        onTouchEnd={onLongPressEnd}
-        onTouchCancel={onLongPressEnd}
+    <DragHandleContext.Provider value={dragBindings}>
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...outerProps}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
-        {children}
-      </Card>
-    </div>
+        <Card
+          className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
+          onClick={onClick}
+          onTouchStart={onLongPressStart}
+          onTouchMove={onLongPressMove}
+          onTouchEnd={onLongPressEnd}
+          onTouchCancel={onLongPressEnd}
+        >
+          {children}
+        </Card>
+      </div>
+    </DragHandleContext.Provider>
+  );
+}
+
+/** Mobile-only drag handle rendered inside the card's action cluster. */
+function MobileDragHandle() {
+  const ctx = useContext(DragHandleContext);
+  if (!ctx) return null;
+  return (
+    <button
+      ref={ctx.setActivatorNodeRef}
+      {...ctx.attributes}
+      {...(ctx.listeners ?? {})}
+      onClick={(e) => e.stopPropagation()}
+      aria-label="Reorder chat"
+      className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded text-text-dim active:bg-bg-hover transition-colors cursor-grab active:cursor-grabbing"
+      style={{ touchAction: 'none' }}
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
+      </svg>
+    </button>
   );
 }
 
@@ -520,12 +557,13 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   const [isChatDragActive, setIsChatDragActive] = useState(false);
 
-  // MouseSensor (not PointerSensor) + TouchSensor split: mouse-only on desktop,
-  // long-press only on mobile. Using PointerSensor here captured quick finger
-  // swipes on the cards and blocked the global edge-swipe that opens the sidebar.
+  // Drag on mobile is initiated ONLY from the dedicated MobileDragHandle (which has
+  // touch-action: none). With an explicit handle there's no ambiguity with taps,
+  // scrolls, or edge-swipes, so a distance-only activation is enough on both
+  // platforms: any >6px movement from the handle arms the drag immediately.
   const dndSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -742,12 +780,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
           // Keep auto-scroll on: with touch-action locked during drag, dnd-kit is
           // now the only thing that scrolls the container, so it can "help" when
           // the finger reaches the top/bottom edge without the browser fighting it.
-          onDragStart={() => {
-            setIsChatDragActive(true);
-            // Long-press popover may have just opened; drag wins, hide it.
-            if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-            setHoverCtx(null);
-          }}
+          onDragStart={() => setIsChatDragActive(true)}
           onDragCancel={() => setIsChatDragActive(false)}
           onDragEnd={handleChatDragEnd}
         >
@@ -769,6 +802,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             >
             <SortableChatCard
               chat={chat}
+              isMobile={isMobile}
               onClick={() => goToChat(chat.id)}
               onMouseEnter={(e) => handleRowMouseEnter(e, chat)}
               onMouseLeave={handleRowMouseLeave}
@@ -776,7 +810,8 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               onLongPressMove={handleRowLongPressMove}
               onLongPressEnd={handleRowLongPressEnd}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
+                {isMobile && <MobileDragHandle />}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     {chat.favorite ? (

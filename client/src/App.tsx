@@ -23,6 +23,7 @@ import { isCapacitorNative } from './utils/platform.ts';
 import { haptics } from './utils/haptics.ts';
 import { useBackButton } from './hooks/useBackButton.ts';
 import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
+import { longPressActive } from './hooks/useLongPress.ts';
 import { ccSwipeOverride } from './utils/ccSwipeOverride.ts';
 import { useBadgeCount } from './hooks/useBadgeCount.ts';
 
@@ -201,6 +202,12 @@ function SwipeHandler() {
       if (!touchRef.current) return;
       // If a SwipeableRow is active (swiping/cancelling), skip sidebar/nav
       if (swipeableRowActive.current) {
+        touchRef.current = null;
+        return;
+      }
+      // If a long-press has fired (context menu is open), the touch has already
+      // been consumed — don't treat the drag-to-menu-button as a sidebar swipe.
+      if (longPressActive.current) {
         touchRef.current = null;
         return;
       }

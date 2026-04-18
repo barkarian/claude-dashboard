@@ -8,6 +8,13 @@ interface LongPressResult {
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
+// Module-level flag so the global swipe handler in App.tsx can skip its
+// sidebar/nav logic while a long-press is "live" — i.e. from the moment the
+// long-press fires (context menu opens) until the originating touch lifts.
+// Without this, dragging the finger from the file row to a menu button
+// registers as a big horizontal swipe and opens the sidebar.
+export const longPressActive = { current: false };
+
 const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE = 10;
 
@@ -32,6 +39,7 @@ export function useLongPress(onActivate: (position: { x: number; y: number }) =>
 
     timerRef.current = setTimeout(() => {
       firedRef.current = true;
+      longPressActive.current = true;
       haptics.impactLight();
       onActivate({ x: touch.clientX, y: touch.clientY });
       timerRef.current = null;
@@ -53,6 +61,7 @@ export function useLongPress(onActivate: (position: { x: number; y: number }) =>
     if (firedRef.current) {
       e.preventDefault();
     }
+    longPressActive.current = false;
     cancel();
   }, [cancel]);
 
