@@ -27,7 +27,9 @@ import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 import type { Project, Chat } from '../../../../shared/types/models.ts';
 import type { SessionStateContext } from '../../../../shared/types/session.ts';
-import { getClientAdapter } from '../../adapters/registry.ts';
+import { getClientAdapter, listClientAdapters } from '../../adapters/registry.ts';
+import { useAdapterSettings } from '../../hooks/useAdapterSettings.ts';
+import NewChatPicker from './NewChatPicker.tsx';
 
 const PAGE_SIZE = 20;
 
@@ -109,6 +111,8 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const activeChatMatch = location.pathname.match(/\/chats\/([^/]+)/);
   const activeChatId = activeChatMatch ? activeChatMatch[1] : null;
   const [creating, setCreating] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { enabledIds, adapters: adapterInfos } = useAdapterSettings();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -219,10 +223,10 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
-  async function handleNewChat() {
+  async function createChatWithAdapter(adapterId: string) {
     setCreating(true);
     try {
-      const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat' });
+      const data = await api.post<{ chat: Chat }>(`/api/projects/${projectId}/chats`, { label: 'New Chat', adapter: adapterId });
       navigate(`/project/${projectId}/chats/${data.chat.id}`, {
         state: { isNewChat: true, adapter: data.chat.adapter },
       });
@@ -231,6 +235,44 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     } finally {
       setCreating(false);
     }
+  }
+
+  function handleNewChat() {
+    if (enabledIds.length === 0) {
+      // No adapters enabled → navigate to settings
+      navigate('/settings#chat-agents');
+      return;
+    }
+    if (enabledIds.length === 1) {
+      // Only one adapter → use it directly
+      createChatWithAdapter(enabledIds[0]);
+      return;
+    }
+    // Check if project has a default adapter that is enabled
+    const defaultAdapter = project?.defaultAdapter;
+    if (defaultAdapter && enabledIds.includes(defaultAdapter)) {
+      createChatWithAdapter(defaultAdapter);
+      return;
+    }
+    // Multiple enabled, no valid default → show picker
+    setPickerOpen(true);
+  }
+
+  function handlePickerSelect(adapterId: string, setAsDefault: boolean) {
+    setPickerOpen(false);
+    if (setAsDefault) {
+      // Save as project default (fire-and-forget)
+      api.patch(`/api/projects/${projectId}`, { defaultAdapter: adapterId }).catch(() => {});
+    }
+    createChatWithAdapter(adapterId);
+  }
+
+  function handleForcePickerOpen() {
+    if (enabledIds.length === 0) {
+      navigate('/settings#chat-agents');
+      return;
+    }
+    setPickerOpen(true);
   }
 
   function promptDelete(chat: Chat, e: MouseEvent) {
@@ -370,12 +412,29 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   return (
     <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3">
-      <Button onClick={handleNewChat} disabled={creating} variant="outline" className="w-full">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-        </svg>
-        {creating ? 'Creating...' : 'New Chat'}
-      </Button>
+      <div className="flex gap-1">
+        <Button onClick={handleNewChat} disabled={creating} variant="outline" className="flex-1">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          {creating ? 'Creating...' : 'New Chat'}
+        </Button>
+        {enabledIds.length > 1 && (
+          <Button onClick={handleForcePickerOpen} disabled={creating} variant="outline" size="sm" className="px-2">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </Button>
+        )}
+      </div>
+
+      {/* Adapter picker sheet */}
+      <NewChatPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={handlePickerSelect}
+        enabledAdapters={adapterInfos.filter(a => a.enabled).map(a => ({ metadata: a.metadata }))}
+      />
 
       {/* Search input */}
       {showSearch && (
@@ -487,8 +546,35 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
           <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
           </svg>
-          <h3 className="text-text font-medium mb-1">No chats yet</h3>
-          <p className="text-text-muted text-sm mb-4">Start a conversation with Claude Code</p>
+          {enabledIds.length === 0 ? (
+            <>
+              <h3 className="text-text font-medium mb-1">Set up a chat agent</h3>
+              <p className="text-text-muted text-sm mb-4">Configure an AI agent to start coding</p>
+              <div className="space-y-2 max-w-xs mx-auto">
+                {adapterInfos.map(a => (
+                  <button
+                    key={a.metadata.id}
+                    onClick={() => navigate('/settings#chat-agents')}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-bg-hover/50 transition-colors text-left"
+                  >
+                    <span className={`flex-shrink-0 text-[10px] font-semibold px-2 py-1 rounded ${a.metadata.badgeColor}`}>
+                      {a.metadata.shortLabel}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-text">{a.metadata.displayName}</div>
+                      <div className="text-xs text-text-muted truncate">{a.metadata.description}</div>
+                    </div>
+                    <span className="text-xs text-primary font-medium flex-shrink-0">Set Up</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <h3 className="text-text font-medium mb-1">No chats yet</h3>
+              <p className="text-text-muted text-sm mb-4">Click New Chat to start a conversation</p>
+            </>
+          )}
         </div>
       ) : chats.length === 0 && searchQuery ? (
         <div className="text-center py-8">

@@ -21,6 +21,7 @@ import filesystemRoutes from './routes/filesystem.ts';
 import systemRoutes from './routes/system.ts';
 import updatesRoutes from './routes/updates.ts';
 import adaptersRoutes from './routes/adapters.ts';
+import adapterSettingsRoutes from './routes/adapter-settings.ts';
 import registerSocketHandlers from './sockets/index.ts';
 import { killAllCCSessions } from './sockets/claude-code.ts';
 import processManager from './services/processManager.ts';
@@ -166,6 +167,7 @@ apiRouter.use('/filesystem', filesystemRoutes);
 apiRouter.use('/system', systemRoutes);
 apiRouter.use('/tools', toolsRoutes);
 apiRouter.use('/adapters', adaptersRoutes);
+apiRouter.use('/adapter-settings', adapterSettingsRoutes);
 
 // Mount at both paths (env-prefixed for tunnel, plain for dev/direct)
 app.use(`/${env}/api`, apiRouter);

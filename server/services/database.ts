@@ -221,6 +221,61 @@ try {
   // Column already exists — ignore
 }
 
+// --- Adapter settings (per-adapter key-value store) ---
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS adapter_settings (
+    adapter_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (adapter_id, key)
+  )
+`);
+
+export function getAdapterSetting(adapterId: string, key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setAdapterSetting(adapterId: string, key: string, value: string): void {
+  db.prepare('INSERT OR REPLACE INTO adapter_settings (adapter_id, key, value) VALUES (?, ?, ?)').run(adapterId, key, value);
+}
+
+export function deleteAdapterSetting(adapterId: string, key: string): void {
+  db.prepare('DELETE FROM adapter_settings WHERE adapter_id = ? AND key = ?').run(adapterId, key);
+}
+
+export function getAdapterSettings(adapterId: string): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM adapter_settings WHERE adapter_id = ?').all(adapterId) as Array<{ key: string; value: string }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) result[row.key] = row.value;
+  return result;
+}
+
+export function getAllAdapterSettings(): Record<string, Record<string, string>> {
+  const rows = db.prepare('SELECT adapter_id, key, value FROM adapter_settings').all() as Array<{ adapter_id: string; key: string; value: string }>;
+  const result: Record<string, Record<string, string>> = {};
+  for (const row of rows) {
+    if (!result[row.adapter_id]) result[row.adapter_id] = {};
+    result[row.adapter_id][row.key] = row.value;
+  }
+  return result;
+}
+
+export function isAdapterEnabled(adapterId: string): boolean {
+  return getAdapterSetting(adapterId, 'enabled') === 'true';
+}
+
+export function getEnabledAdapterIds(): string[] {
+  const rows = db.prepare("SELECT adapter_id FROM adapter_settings WHERE key = 'enabled' AND value = 'true'").all() as Array<{ adapter_id: string }>;
+  return rows.map(r => r.adapter_id);
+}
+
+export function hasAnyAdapterSettings(): boolean {
+  const row = db.prepare('SELECT COUNT(*) as count FROM adapter_settings').get() as { count: number };
+  return row.count > 0;
+}
+
 // --- Session purge ---
 export function purgeExpiredSessions(): void {
   db.prepare("DELETE FROM sessions WHERE expired < datetime('now')").run();

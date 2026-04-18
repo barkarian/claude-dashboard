@@ -26,6 +26,24 @@ import { swipeableRowActive } from './components/ui/SwipeableRow.tsx';
 import { ccSwipeOverride } from './utils/ccSwipeOverride.ts';
 import { useBadgeCount } from './hooks/useBadgeCount.ts';
 
+/** Auto-detect and enable adapters on first launch (runs once) */
+function AdapterAutoDetect() {
+  const hasRun = useRef(false);
+  useEffect(() => {
+    if (hasRun.current) return;
+    hasRun.current = true;
+    // Check if first run (no adapter settings exist yet)
+    api.get<{ needsSetup: boolean }>('/api/adapter-settings/needs-setup')
+      .then(({ needsSetup }) => {
+        if (needsSetup) {
+          return api.post('/api/adapter-settings/auto-detect');
+        }
+      })
+      .catch(() => {}); // silent — auto-detect is best-effort
+  }, []);
+  return null;
+}
+
 function BrandedLoader({ message }: { message?: string }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-bg gap-6">
@@ -258,6 +276,7 @@ export default function App() {
                   <SwipeHandler />
                   <BackButtonHandler />
                   <BadgeManager />
+                  <AdapterAutoDetect />
                   <SearchProvider>
                   <div className="app-layout flex w-full overflow-hidden">
                     <AppSidebar ref={sidebarRef} />

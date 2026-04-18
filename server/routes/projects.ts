@@ -455,6 +455,19 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     }
     // Use explicit adapter if provided, otherwise fall back to project default
     const chatAdapter = adapter || project.defaultAdapter || 'claude-agent-sdk';
+
+    // Validate adapter is registered
+    const { adapterRegistry } = await import('../adapters/registry.ts');
+    if (!adapterRegistry.has(chatAdapter)) {
+      return res.status(400).json({ error: `Unknown adapter: ${chatAdapter}` });
+    }
+
+    // Validate adapter is enabled (if adapter_settings exist)
+    const { isAdapterEnabled, hasAnyAdapterSettings } = await import('../services/database.ts');
+    if (hasAnyAdapterSettings() && !isAdapterEnabled(chatAdapter)) {
+      return res.status(400).json({ error: `Adapter "${chatAdapter}" is not enabled. Configure it in Settings.` });
+    }
+
     const chat = projectManager.createChat(req.params.id, label, chatAdapter);
     activeChatsTracker.onChatCreated(chat.id, req.params.id, chat.label);
     res.status(201).json({ chat });
