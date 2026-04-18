@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -37,7 +37,6 @@ import { haptics } from '../../utils/haptics.ts';
 import { toast } from 'sonner';
 import PullToRefresh from '../ui/PullToRefresh.tsx';
 import SwipeableRow from '../ui/SwipeableRow.tsx';
-import type { SwipeAction } from '../ui/SwipeableRow.tsx';
 import ContextMenu from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
@@ -124,9 +123,15 @@ interface SortableChatCardProps {
   onClick: () => void;
   onMouseEnter?: (e: React.MouseEvent) => void;
   onMouseLeave?: () => void;
+  onLongPressStart?: (e: ReactTouchEvent) => void;
+  onLongPressMove?: (e: ReactTouchEvent) => void;
+  onLongPressEnd?: () => void;
 }
 
-function SortableChatCard({ chat, children, onClick, onMouseEnter, onMouseLeave }: SortableChatCardProps) {
+function SortableChatCard({
+  chat, children, onClick, onMouseEnter, onMouseLeave,
+  onLongPressStart, onLongPressMove, onLongPressEnd,
+}: SortableChatCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
   // Suppress iOS Safari's long-press text-selection / callout. Without this, iOS hijacks
   // the ~500ms hold for its own gesture and dnd-kit's TouchSensor never activates.
@@ -140,7 +145,18 @@ function SortableChatCard({ chat, children, onClick, onMouseEnter, onMouseLeave 
     touchAction: 'manipulation' as const,
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onTouchStart={onLongPressStart}
+      onTouchMove={onLongPressMove}
+      onTouchEnd={onLongPressEnd}
+      onTouchCancel={onLongPressEnd}
+    >
       <Card
         className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
         onClick={onClick}
@@ -169,12 +185,13 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [editMenuTarget, setEditMenuTarget] = useState<Chat | null>(null);
   const [generatingTitle, setGeneratingTitle] = useState<string | null>(null);
   const [infoChat, setInfoChat] = useState<Chat | null>(null);
   const [hoverCtx, setHoverCtx] = useState<{ chat: Chat; x: number; y: number } | null>(null);
   const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressOrigin = useRef<{ x: number; y: number } | null>(null);
 
   // Track which chats have unread completions
   const [unreadIds, setUnreadIds] = useState<Set<string>>(() => {
@@ -450,6 +467,40 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     }, 300);
   }
 
+  // Mobile long-press: 500ms hold opens the same context popover. dnd-kit's TouchSensor
+  // also arms at 500ms — if the user then moves, onDragStart cancels this popover.
+  function handleRowLongPressStart(e: ReactTouchEvent, chat: Chat) {
+    if (!isMobile) return;
+    const t = e.touches[0];
+    longPressOrigin.current = { x: t.clientX, y: t.clientY };
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = Math.min(t.clientX, rect.right - 24);
+    const y = rect.bottom + 4;
+    longPressTimer.current = setTimeout(() => {
+      haptics.impactMedium();
+      setHoverCtx({ chat, x, y });
+      longPressTimer.current = null;
+    }, 500);
+  }
+
+  function handleRowLongPressMove(e: ReactTouchEvent) {
+    if (!longPressOrigin.current || !longPressTimer.current) return;
+    const dx = e.touches[0].clientX - longPressOrigin.current.x;
+    const dy = e.touches[0].clientY - longPressOrigin.current.y;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  function handleRowLongPressEnd() {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressOrigin.current = null;
+  }
+
   function handleToggleFavorite(chat: Chat) {
     const next = !chat.favorite;
     setChats(prev => prev.map(c => c.id === chat.id ? { ...c, favorite: next } : c));
@@ -485,48 +536,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
       // Refetch on error to restore truth.
       loadChats(true);
     });
-  }
-
-  // Build swipe actions for mobile chat rows (long-press is reserved for drag-to-reorder).
-  function buildSwipeActions(chat: Chat, _isSeen: boolean): SwipeAction[] {
-    const actions: SwipeAction[] = [];
-    actions.push({
-      icon: chat.favorite ? (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.32-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
-      ) : (
-        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" /></svg>
-      ),
-      label: chat.favorite ? 'Unstar' : 'Star',
-      className: 'bg-warning',
-      onAction: () => handleToggleFavorite(chat),
-    });
-    if (!unreadIds.has(chat.id)) {
-      actions.push({
-        icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
-        label: 'Unread',
-        className: 'bg-primary',
-        onAction: () => handleSetUnread(chat),
-      });
-    }
-    actions.push({
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-      label: 'Dismiss',
-      className: 'bg-text-dim',
-      onAction: () => handleDismiss(chat),
-    });
-    actions.push({
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>,
-      label: 'Edit',
-      className: 'bg-[#6b7280]',
-      onAction: () => setEditMenuTarget(chat),
-    });
-    actions.push({
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
-      label: 'Delete',
-      className: 'bg-danger',
-      onAction: () => { haptics.notificationWarning(); setDeleteTarget(chat); },
-    });
-    return actions;
   }
 
   // Determine which chats are in 'seen' state (read but not dismissed from tracker)
@@ -719,7 +728,13 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         <DndContext
           sensors={dndSensors}
           collisionDetection={closestCenter}
-          onDragStart={() => setIsChatDragActive(true)}
+          autoScroll={false}
+          onDragStart={() => {
+            setIsChatDragActive(true);
+            // Long-press popover may have just opened; drag wins, hide it.
+            if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+            setHoverCtx(null);
+          }}
           onDragCancel={() => setIsChatDragActive(false)}
           onDragEnd={handleChatDragEnd}
         >
@@ -730,8 +745,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             return (
             <SwipeableRow
               key={chat.id}
+              // Mobile no longer uses swipe — long-press opens the full action popover.
               {...(isMobile
-                ? { actions: buildSwipeActions(chat, isSeen) }
+                ? {}
                 : {
                     onDelete: isSeen ? undefined : () => setDeleteTarget(chat),
                     onDismiss: isSeen ? () => handleDismiss(chat) : undefined,
@@ -743,6 +759,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               onClick={() => goToChat(chat.id)}
               onMouseEnter={(e) => handleRowMouseEnter(e, chat)}
               onMouseLeave={handleRowMouseLeave}
+              onLongPressStart={(e) => handleRowLongPressStart(e, chat)}
+              onLongPressMove={handleRowLongPressMove}
+              onLongPressEnd={handleRowLongPressEnd}
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -908,53 +927,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Mobile edit menu (swipe Edit action) */}
-      <AlertDialog open={!!editMenuTarget} onOpenChange={(open) => !open && setEditMenuTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Edit title</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="flex flex-col gap-2 mt-2">
-                <button
-                  onClick={() => {
-                    const chat = editMenuTarget!;
-                    setEditMenuTarget(null);
-                    handleGenerateTitle(chat);
-                  }}
-                  className="flex items-center gap-3 w-full px-3 py-3 rounded-lg bg-bg hover:bg-bg-hover text-text text-sm transition-colors"
-                >
-                  {editMenuTarget && generatingTitle === editMenuTarget.id ? (
-                    <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
-                  ) : (
-                    <svg className="w-5 h-5 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                    </svg>
-                  )}
-                  Auto generate title
-                </button>
-                <button
-                  onClick={() => {
-                    const chat = editMenuTarget!;
-                    setEditMenuTarget(null);
-                    setRenameTarget(chat);
-                    setRenameValue(chat.label);
-                  }}
-                  className="flex items-center gap-3 w-full px-3 py-3 rounded-lg bg-bg hover:bg-bg-hover text-text text-sm transition-colors"
-                >
-                  <svg className="w-5 h-5 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
-                  </svg>
-                  Manual title
-                </button>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Chat summary dialog */}
       <Dialog open={!!infoChat} onOpenChange={(open) => !open && setInfoChat(null)}>
         <DialogContent>
@@ -1006,6 +978,25 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
             onAction: () => handleDismiss(hoverCtx.chat),
           }] : []),
+          // Edit + Delete only appear on mobile here — desktop already has them inline.
+          ...(isMobile ? [
+            {
+              label: 'Rename',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" /></svg>,
+              onAction: () => { setRenameTarget(hoverCtx.chat); setRenameValue(hoverCtx.chat.label); },
+            },
+            {
+              label: 'Auto generate title',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>,
+              onAction: () => handleGenerateTitle(hoverCtx.chat),
+            },
+            {
+              label: 'Delete',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,
+              variant: 'danger' as const,
+              onAction: () => { haptics.notificationWarning(); setDeleteTarget(hoverCtx.chat); },
+            },
+          ] : []),
         ] : []}
       />
     </PullToRefresh>

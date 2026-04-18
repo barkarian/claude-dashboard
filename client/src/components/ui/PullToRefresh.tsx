@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, type ReactNode, type TouchEvent } from 'react';
+import { useRef, useState, useCallback, useEffect, type ReactNode, type TouchEvent } from 'react';
 import { haptics } from '../../utils/haptics.ts';
 
 interface PullToRefreshProps {
@@ -23,6 +23,17 @@ export default function PullToRefresh({ onRefresh, children, className, disabled
 
   // Only active on mobile
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // When the host disables us mid-gesture (e.g. a long-press turns into a drag),
+  // discard any pull we've already started accumulating so the list doesn't stay
+  // visually offset underneath the drag.
+  useEffect(() => {
+    if (disabled && (pulling.current || pullDistance !== 0)) {
+      pulling.current = false;
+      crossedThreshold.current = false;
+      setPullDistance(0);
+    }
+  }, [disabled, pullDistance]);
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (!isMobile || refreshing || disabled) return;
