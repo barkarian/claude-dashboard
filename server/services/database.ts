@@ -235,11 +235,19 @@ try {
   // Column already exists — ignore
 }
 
-// Add sort_order column to chats (REAL; manual drag order, NULL = use last_activity_at).
+// Add sort_order column to chats (REAL). Stored as a ms-since-epoch timestamp: a
+// frozen "effective activity" date the user picked by dragging. NULL = use live
+// last_activity_at. Previous revisions of this code stored negative seeded values;
+// those are wiped below so old rows fall back to activity-based ordering.
 try {
   db.exec(`ALTER TABLE chats ADD COLUMN sort_order REAL`);
 } catch {
   // Column already exists — ignore
+}
+try {
+  db.exec(`UPDATE chats SET sort_order = NULL WHERE sort_order < 0`);
+} catch {
+  // Table/column missing — nothing to clean up.
 }
 
 // Add favorite column to chats (1 = starred). Distinct from `pinned` which is the active-chats tracker flag.

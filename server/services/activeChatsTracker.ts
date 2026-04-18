@@ -325,16 +325,15 @@ function buildSnapshot(): GlobalActiveChats {
     }
   }
 
-  // Sort each project's chats: favorite first, manually-ordered next, then newest by activity.
+  // Pinned-activity sort (mirrors server SQL): effective = sort_order ?? epoch(activity).
+  // Higher timestamp wins, so dragged anchors and real activity live on the same
+  // date line — fresher messages naturally overtake older pinned anchors.
   for (const projectChats of Object.values(byProject)) {
     projectChats.chats.sort((a, b) => {
       if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-      const aNull = a.sortOrder == null;
-      const bNull = b.sortOrder == null;
-      if (!aNull && !bNull) return (a.sortOrder as number) - (b.sortOrder as number);
-      if (aNull !== bNull) return aNull ? 1 : -1;
-      // Both null — newest activity first.
-      return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+      const aEff = a.sortOrder ?? new Date(a.lastActivityAt).getTime();
+      const bEff = b.sortOrder ?? new Date(b.lastActivityAt).getTime();
+      return bEff - aEff;
     });
   }
 

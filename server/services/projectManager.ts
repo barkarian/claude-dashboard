@@ -297,7 +297,15 @@ function getScript(scriptId: string): Script | null {
 
 // === Chat Methods ===
 
-const CHAT_ORDER_CLAUSE = 'ORDER BY favorite DESC, sort_order IS NULL, sort_order ASC, last_activity_at DESC';
+// Pinned-activity ordering: every chat has an "effective activity date".
+// - Un-dragged chats: the live last_activity_at.
+// - Dragged chats: the timestamp the user implicitly picked by dropping the
+//   chat between two neighbours (stored in sort_order as ms since epoch).
+// Higher timestamp = higher in the list. Fresher real activity therefore
+// naturally overtakes older pinned anchors.
+const CHAT_ORDER_CLAUSE = `ORDER BY favorite DESC,
+  COALESCE(sort_order,
+           CAST(strftime('%s', COALESCE(last_activity_at, created_at)) AS REAL) * 1000) DESC`;
 
 function listChats(projectId: string): Chat[] {
   const rows = db.prepare(`SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
@@ -447,36 +455,39 @@ function setChatFavorite(chatId: string, favorite: boolean): void {
 }
 
 /**
- * Insert `chatId` between `prevId` and `nextId` in the project's chat order.
- * Backfills sort_order for adjacent NULL rows by seeding them from
- * last_activity_at epoch so midpoint math always has a valid baseline.
+ * Freeze `chatId`'s effective activity date so it sits between `prevId`
+ * (newer neighbour) and `nextId` (older neighbour) after the drop.
+ *
+ *   - Both neighbours → midpoint of their effective dates.
+ *   - Drop to top    → nextId.effective + 60s (tiny buffer so the next real
+ *                      activity still wins naturally).
+ *   - Drop to bottom → prevId.effective − 60s.
+ *
+ * Neighbours are never mutated. Un-dragged chats keep sort_order = NULL and
+ * continue to follow their live last_activity_at.
  */
+const DRAG_EDGE_BUFFER_MS = 60_000;
+
 function reorderChat(projectId: string, chatId: string, prevId: string | null, nextId: string | null): void {
-  const seedSort = (id: string): number => {
+  const effective = (id: string): number => {
     const row = db.prepare('SELECT sort_order, last_activity_at, created_at FROM chats WHERE id = ? AND project_id = ?').get(id, projectId) as any;
     if (!row) throw new Error(`Chat ${id} not found in project ${projectId}`);
     if (typeof row.sort_order === 'number') return row.sort_order;
-    const ts = new Date(row.last_activity_at || row.created_at).getTime();
-    // Negative so that newer activity (larger ts → more negative) sorts first under ASC ordering,
-    // matching the legacy "ORDER BY last_activity_at DESC" behavior for un-dragged chats.
-    const seeded = -ts;
-    db.prepare('UPDATE chats SET sort_order = ? WHERE id = ?').run(seeded, id);
-    return seeded;
+    return new Date(row.last_activity_at || row.created_at).getTime();
   };
 
   let newOrder: number;
   if (prevId && nextId) {
-    const prevSort = seedSort(prevId);
-    const nextSort = seedSort(nextId);
-    newOrder = (prevSort + nextSort) / 2;
-  } else if (prevId) {
-    const prevSort = seedSort(prevId);
-    newOrder = prevSort + 1000;
+    newOrder = (effective(prevId) + effective(nextId)) / 2;
   } else if (nextId) {
-    const nextSort = seedSort(nextId);
-    newOrder = nextSort - 1000;
+    // Drop to top: slightly newer than the current top of the list.
+    newOrder = effective(nextId) + DRAG_EDGE_BUFFER_MS;
+  } else if (prevId) {
+    // Drop to bottom: slightly older than the current bottom.
+    newOrder = effective(prevId) - DRAG_EDGE_BUFFER_MS;
   } else {
-    newOrder = 0;
+    // Lone chat in the project — pin it to "now".
+    newOrder = Date.now();
   }
   db.prepare('UPDATE chats SET sort_order = ? WHERE id = ? AND project_id = ?').run(newOrder, chatId, projectId);
 }
