@@ -15,6 +15,9 @@ import {
   getEnabledAdapterIds,
   hasAnyAdapterSettings,
   isAdapterEnabled,
+  getStoredDefaultAdapter,
+  setStoredDefaultAdapter,
+  resolveDefaultAdapter,
 } from '../services/database.ts';
 import { adapterRegistry } from '../adapters/registry.ts';
 
@@ -50,6 +53,32 @@ router.get('/enabled', (_req, res) => {
 /** GET /api/adapter-settings/auto-detect — check if first run */
 router.get('/needs-setup', (_req, res) => {
   res.json({ needsSetup: !hasAnyAdapterSettings() });
+});
+
+/** GET /api/adapter-settings/default — global default adapter (stored + effective) */
+router.get('/default', (_req, res) => {
+  res.json({
+    stored: getStoredDefaultAdapter(),
+    effective: resolveDefaultAdapter(),
+  });
+});
+
+/** PUT /api/adapter-settings/default — set global default adapter */
+router.put('/default', (req, res) => {
+  const { defaultAdapter } = req.body as { defaultAdapter?: string };
+  if (!defaultAdapter || typeof defaultAdapter !== 'string') {
+    res.status(400).json({ error: 'defaultAdapter required' });
+    return;
+  }
+  if (!adapterRegistry.has(defaultAdapter)) {
+    res.status(404).json({ error: `Adapter not found: ${defaultAdapter}` });
+    return;
+  }
+  setStoredDefaultAdapter(defaultAdapter);
+  res.json({
+    stored: getStoredDefaultAdapter(),
+    effective: resolveDefaultAdapter(),
+  });
 });
 
 /** GET /api/adapter-settings/:id — settings for one adapter */

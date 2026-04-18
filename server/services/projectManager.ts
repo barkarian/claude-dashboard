@@ -3,7 +3,7 @@ import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import db from './database.ts';
+import db, { resolveDefaultAdapter } from './database.ts';
 import gitService from './gitService.ts';
 import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry, ChatAdapter, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
@@ -111,7 +111,7 @@ function getProject(projectId: string): Project | null {
     repo: row.repo || null,
     createdAt: row.created_at,
     shellOverride: row.shell_override || null,
-    defaultAdapter: (row.default_adapter as ChatAdapter) || 'claude-agent-sdk',
+    defaultAdapter: (row.default_adapter as ChatAdapter) || resolveDefaultAdapter(),
     adapterOrder: parseAdapterOrder(row.adapter_order),
     aiNamingEnabled: (row.ai_naming_enabled as 'none' | 'on') || 'none',
     scripts,
@@ -140,7 +140,9 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
   }
 
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO projects (id, name, path, repo, created_at) VALUES (?, ?, ?, ?, ?)').run(id, name, targetPath, repoUrl || null, now);
+  const defaultAdapter = resolveDefaultAdapter();
+  db.prepare('INSERT INTO projects (id, name, path, repo, created_at, default_adapter) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, name, targetPath, repoUrl || null, now, defaultAdapter);
 
   const project: Project = {
     id,
@@ -149,7 +151,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     repo: repoUrl || null,
     createdAt: now,
     shellOverride: null,
-    defaultAdapter: 'claude-agent-sdk',
+    defaultAdapter,
     adapterOrder: null,
     aiNamingEnabled: 'none',
     scripts: [],
@@ -168,7 +170,9 @@ function registerProject(name: string, projectPath: string): Project {
   }
 
   const now = new Date().toISOString();
-  db.prepare('INSERT INTO projects (id, name, path, repo, created_at) VALUES (?, ?, ?, ?, ?)').run(id, name, projectPath, null, now);
+  const defaultAdapter = resolveDefaultAdapter();
+  db.prepare('INSERT INTO projects (id, name, path, repo, created_at, default_adapter) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, name, projectPath, null, now, defaultAdapter);
 
   return {
     id,
@@ -177,7 +181,7 @@ function registerProject(name: string, projectPath: string): Project {
     repo: null,
     createdAt: now,
     shellOverride: null,
-    defaultAdapter: 'claude-agent-sdk',
+    defaultAdapter,
     adapterOrder: null,
     aiNamingEnabled: 'none',
     scripts: [],

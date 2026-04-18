@@ -392,4 +392,28 @@ export function getOrCreateSessionSecret(): string {
   return secret;
 }
 
+// --- Global default adapter (user-level preference) ---
+// Stored in the `settings` table under key `default_adapter`. Resolved to an
+// effective value by preferring the stored choice if it's still enabled, then
+// falling back to the first enabled adapter, then to `claude-code`.
+export const DEFAULT_ADAPTER_FALLBACK = 'claude-code';
+
+export function getStoredDefaultAdapter(): string | null {
+  return getSetting('default_adapter') ?? null;
+}
+
+export function setStoredDefaultAdapter(adapterId: string): void {
+  setSetting('default_adapter', adapterId);
+}
+
+export function resolveDefaultAdapter(): string {
+  const stored = getStoredDefaultAdapter();
+  const enabled = getEnabledAdapterIds();
+  if (stored && enabled.includes(stored)) return stored;
+  if (enabled.length > 0) {
+    return enabled.includes(DEFAULT_ADAPTER_FALLBACK) ? DEFAULT_ADAPTER_FALLBACK : enabled[0];
+  }
+  return stored || DEFAULT_ADAPTER_FALLBACK;
+}
+
 export default db;

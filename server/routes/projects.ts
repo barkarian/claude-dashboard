@@ -479,8 +479,9 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
-    // Use explicit adapter if provided, otherwise fall back to project default
-    const chatAdapter = adapter || project.defaultAdapter || 'claude-agent-sdk';
+    // Use explicit adapter if provided, otherwise fall back to project default (then global default)
+    const { resolveDefaultAdapter } = await import('../services/database.ts');
+    const chatAdapter = adapter || project.defaultAdapter || resolveDefaultAdapter();
 
     // Validate adapter is registered
     const { adapterRegistry } = await import('../adapters/registry.ts');

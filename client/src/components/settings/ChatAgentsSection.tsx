@@ -207,7 +207,17 @@ function AdapterCard({ adapter, onToggle, onSaveSettings }: {
 }
 
 export default function ChatAgentsSection() {
-  const { adapters, loading, refresh, updateSettings, toggleEnabled } = useAdapterSettings();
+  const {
+    adapters,
+    loading,
+    refresh,
+    updateSettings,
+    toggleEnabled,
+    effectiveDefaultAdapter,
+    setDefaultAdapter,
+  } = useAdapterSettings();
+
+  const enabledAdapters = adapters.filter(a => a.enabled);
 
   if (loading) {
     return (
@@ -239,20 +249,40 @@ export default function ChatAgentsSection() {
       {adapters.length === 0 ? (
         <p className="text-sm text-text-muted">No chat adapters found.</p>
       ) : (
-        <div className="space-y-3">
-          {adapters.map(adapter => (
-            <AdapterCard
-              key={adapter.metadata.id}
-              adapter={adapter}
-              onToggle={(enabled) => toggleEnabled(adapter.metadata.id, enabled)}
-              onSaveSettings={(updates) => updateSettings(adapter.metadata.id, updates)}
-            />
-          ))}
-        </div>
+        <>
+          {enabledAdapters.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 p-3 bg-bg rounded-lg border border-border">
+              <span className="text-xs font-medium text-text-dim uppercase tracking-wider mr-1">
+                Default for new projects
+              </span>
+              <select
+                value={effectiveDefaultAdapter ?? ''}
+                onChange={(e) => setDefaultAdapter(e.target.value)}
+                className="text-sm bg-bg-surface border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {enabledAdapters.map(a => (
+                  <option key={a.metadata.id} value={a.metadata.id}>
+                    {a.metadata.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="space-y-3">
+            {adapters.map(adapter => (
+              <AdapterCard
+                key={adapter.metadata.id}
+                adapter={adapter}
+                onToggle={(enabled) => toggleEnabled(adapter.metadata.id, enabled)}
+                onSaveSettings={(updates) => updateSettings(adapter.metadata.id, updates)}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <p className="text-xs text-text-dim mt-3">
-        Enable adapters to use them when creating new chats. Each adapter can be configured independently.
+        Enable adapters to use them when creating new chats. The default is used for new projects; each project can override it later.
       </p>
     </div>
   );

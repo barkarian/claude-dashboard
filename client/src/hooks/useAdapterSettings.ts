@@ -23,15 +23,22 @@ export interface AdapterInfo {
 export interface AdapterSettingsState {
   adapters: AdapterInfo[];
   enabledIds: string[];
+  /** User-picked default (may be null if never set). */
+  storedDefaultAdapter: string | null;
+  /** Resolved default the server will actually use for new projects. */
+  effectiveDefaultAdapter: string | null;
   loading: boolean;
   error: string | null;
   refresh: () => void;
   updateSettings: (adapterId: string, updates: Record<string, string | null>) => Promise<void>;
   toggleEnabled: (adapterId: string, enabled: boolean) => Promise<void>;
+  setDefaultAdapter: (adapterId: string) => Promise<void>;
 }
 
 export function useAdapterSettings(): AdapterSettingsState {
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
+  const [storedDefaultAdapter, setStoredDefault] = useState<string | null>(null);
+  const [effectiveDefaultAdapter, setEffectiveDefault] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,11 +47,14 @@ export function useAdapterSettings(): AdapterSettingsState {
       setLoading(true);
       setError(null);
 
-      // Fetch metadata and settings in parallel
-      const [metadataList, allSettings] = await Promise.all([
+      // Fetch metadata, settings, and global default in parallel
+      const [metadataList, allSettings, defaultInfo] = await Promise.all([
         api.get<AdapterMetadata[]>('/api/adapters'),
         api.get<Record<string, Record<string, string>>>('/api/adapter-settings'),
+        api.get<{ stored: string | null; effective: string | null }>('/api/adapter-settings/default'),
       ]);
+      setStoredDefault(defaultInfo.stored);
+      setEffectiveDefault(defaultInfo.effective);
 
       // Fetch prerequisites and auth status for each adapter in parallel
       const enriched = await Promise.all(
@@ -102,15 +112,27 @@ export function useAdapterSettings(): AdapterSettingsState {
     await fetchAll();
   }, [fetchAll]);
 
+  const setDefaultAdapter = useCallback(async (adapterId: string) => {
+    const res = await api.put<{ stored: string | null; effective: string | null }>(
+      '/api/adapter-settings/default',
+      { defaultAdapter: adapterId },
+    );
+    setStoredDefault(res.stored);
+    setEffectiveDefault(res.effective);
+  }, []);
+
   const enabledIds = adapters.filter(a => a.enabled).map(a => a.metadata.id);
 
   return {
     adapters,
     enabledIds,
+    storedDefaultAdapter,
+    effectiveDefaultAdapter,
     loading,
     error,
     refresh: fetchAll,
     updateSettings,
     toggleEnabled,
+    setDefaultAdapter,
   };
 }
