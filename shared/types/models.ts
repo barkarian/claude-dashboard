@@ -36,6 +36,8 @@ export interface Chat {
   draftMessage: string | null;
   stashedInput: string | null;
   unread: boolean;
+  favorite: boolean;
+  sortOrder: number | null;
 }
 
 export interface Project {
@@ -46,6 +48,8 @@ export interface Project {
   createdAt: string;
   shellOverride: string | null;
   defaultAdapter: ChatAdapter;
+  /** Ordered list of adapter IDs for the project. Index 0 is the default. */
+  adapterOrder: ChatAdapter[] | null;
   aiNamingEnabled: 'none' | 'on';
   scripts: Script[];
   chats: Chat[];

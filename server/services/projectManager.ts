@@ -87,6 +87,16 @@ function searchProjectsPaginated(search: string, limit: number = 20, offset: num
   return { projects, total };
 }
 
+function parseAdapterOrder(raw: unknown): ChatAdapter[] | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
 function getProject(projectId: string): Project | null {
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
   if (!row) return null;
@@ -102,6 +112,7 @@ function getProject(projectId: string): Project | null {
     createdAt: row.created_at,
     shellOverride: row.shell_override || null,
     defaultAdapter: (row.default_adapter as ChatAdapter) || 'claude-agent-sdk',
+    adapterOrder: parseAdapterOrder(row.adapter_order),
     aiNamingEnabled: (row.ai_naming_enabled as 'none' | 'on') || 'none',
     scripts,
     chats,
@@ -139,6 +150,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     createdAt: now,
     shellOverride: null,
     defaultAdapter: 'claude-agent-sdk',
+    adapterOrder: null,
     aiNamingEnabled: 'none',
     scripts: [],
     chats: [],
@@ -166,13 +178,14 @@ function registerProject(name: string, projectPath: string): Project {
     createdAt: now,
     shellOverride: null,
     defaultAdapter: 'claude-agent-sdk',
+    adapterOrder: null,
     aiNamingEnabled: 'none',
     scripts: [],
     chats: [],
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; aiNamingEnabled?: 'none' | 'on' }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; adapterOrder?: ChatAdapter[] | null; aiNamingEnabled?: 'none' | 'on' }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -190,6 +203,14 @@ function updateProject(projectId: string, updates: { name?: string; path?: strin
   }
   if (updates.defaultAdapter !== undefined) {
     db.prepare('UPDATE projects SET default_adapter = ? WHERE id = ?').run(updates.defaultAdapter, projectId);
+  }
+  if (updates.adapterOrder !== undefined) {
+    const serialized = updates.adapterOrder === null ? null : JSON.stringify(updates.adapterOrder);
+    db.prepare('UPDATE projects SET adapter_order = ? WHERE id = ?').run(serialized, projectId);
+    // Keep default_adapter in sync with index 0.
+    if (Array.isArray(updates.adapterOrder) && updates.adapterOrder.length > 0) {
+      db.prepare('UPDATE projects SET default_adapter = ? WHERE id = ?').run(updates.adapterOrder[0], projectId);
+    }
   }
   if (updates.aiNamingEnabled !== undefined) {
     db.prepare('UPDATE projects SET ai_naming_enabled = ? WHERE id = ?').run(updates.aiNamingEnabled, projectId);
@@ -279,8 +300,10 @@ function getScript(scriptId: string): Script | null {
 
 // === Chat Methods ===
 
+const CHAT_ORDER_CLAUSE = 'ORDER BY favorite DESC, sort_order IS NULL, sort_order ASC, last_activity_at DESC';
+
 function listChats(projectId: string): Chat[] {
-  const rows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC').all(projectId) as any[];
+  const rows = db.prepare(`SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
   return rows.map(r => ({
     id: r.id,
     label: r.label,
@@ -295,6 +318,8 @@ function listChats(projectId: string): Chat[] {
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
     unread: !!r.unread,
+    favorite: !!r.favorite,
+    sortOrder: typeof r.sort_order === 'number' ? r.sort_order : null,
   }));
 }
 
@@ -310,7 +335,7 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
     ).get(projectId, pattern, pattern) as any;
 
     const rows = db.prepare(
-      'SELECT * FROM chats WHERE project_id = ? AND (label LIKE ? OR description LIKE ?) ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
+      `SELECT * FROM chats WHERE project_id = ? AND (label LIKE ? OR description LIKE ?) ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
     ).all(projectId, pattern, pattern, limit, offset) as any[];
 
     return { chats: rows.map(r => mapRowToChat(r)), total };
@@ -321,14 +346,14 @@ function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: 
   ).get(projectId) as any;
 
   const rows = db.prepare(
-    'SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC LIMIT ? OFFSET ?'
+    `SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
   ).all(projectId, limit, offset) as any[];
 
   return { chats: rows.map(r => mapRowToChat(r)), total };
 }
 
 function listChatsWithHistory(projectId: string): Chat[] {
-  const chatRows = db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY last_activity_at DESC').all(projectId) as any[];
+  const chatRows = db.prepare(`SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
   return chatRows.map(r => mapRowToChat(r));
 }
 
@@ -347,6 +372,8 @@ function mapRowToChat(r: any): Chat {
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
     unread: !!r.unread,
+    favorite: !!r.favorite,
+    sortOrder: typeof r.sort_order === 'number' ? r.sort_order : null,
   };
 }
 
@@ -369,6 +396,8 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     draftMessage: null,
     stashedInput: null,
     unread: false,
+    favorite: false,
+    sortOrder: null,
   };
 }
 
@@ -414,6 +443,45 @@ function markChatRead(chatId: string): void {
 
 function markChatDismissed(chatId: string): void {
   db.prepare('UPDATE chats SET pinned = 0 WHERE id = ?').run(chatId);
+}
+
+function setChatFavorite(chatId: string, favorite: boolean): void {
+  db.prepare('UPDATE chats SET favorite = ? WHERE id = ?').run(favorite ? 1 : 0, chatId);
+}
+
+/**
+ * Insert `chatId` between `prevId` and `nextId` in the project's chat order.
+ * Backfills sort_order for adjacent NULL rows by seeding them from
+ * last_activity_at epoch so midpoint math always has a valid baseline.
+ */
+function reorderChat(projectId: string, chatId: string, prevId: string | null, nextId: string | null): void {
+  const seedSort = (id: string): number => {
+    const row = db.prepare('SELECT sort_order, last_activity_at, created_at FROM chats WHERE id = ? AND project_id = ?').get(id, projectId) as any;
+    if (!row) throw new Error(`Chat ${id} not found in project ${projectId}`);
+    if (typeof row.sort_order === 'number') return row.sort_order;
+    const ts = new Date(row.last_activity_at || row.created_at).getTime();
+    // Negative so that newer activity (larger ts → more negative) sorts first under ASC ordering,
+    // matching the legacy "ORDER BY last_activity_at DESC" behavior for un-dragged chats.
+    const seeded = -ts;
+    db.prepare('UPDATE chats SET sort_order = ? WHERE id = ?').run(seeded, id);
+    return seeded;
+  };
+
+  let newOrder: number;
+  if (prevId && nextId) {
+    const prevSort = seedSort(prevId);
+    const nextSort = seedSort(nextId);
+    newOrder = (prevSort + nextSort) / 2;
+  } else if (prevId) {
+    const prevSort = seedSort(prevId);
+    newOrder = prevSort + 1000;
+  } else if (nextId) {
+    const nextSort = seedSort(nextId);
+    newOrder = nextSort - 1000;
+  } else {
+    newOrder = 0;
+  }
+  db.prepare('UPDATE chats SET sort_order = ? WHERE id = ? AND project_id = ?').run(newOrder, chatId, projectId);
 }
 
 function deleteChat(chatId: string): void {
@@ -561,6 +629,8 @@ export default {
   markChatUnread,
   markChatRead,
   markChatDismissed,
+  setChatFavorite,
+  reorderChat,
   touchChatActivity,
   deleteChat,
   addMessage,

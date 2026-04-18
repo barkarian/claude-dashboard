@@ -548,6 +548,35 @@ router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId
   }
 });
 
+router.put('/:id/chats/:chatId/favorite', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+    const favorite = !!req.body?.favorite;
+    projectManager.setChatFavorite(req.params.chatId, favorite);
+    activeChatsTracker.refreshChatMeta(req.params.chatId, req.params.id);
+    res.json({ success: true, favorite });
+  } catch (err) {
+    console.error('Error toggling chat favorite:', err);
+    res.status(500).json({ error: 'Failed to toggle favorite' });
+  }
+});
+
+router.put('/:id/chats/:chatId/order', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+    const prevId = req.body?.prevId ?? null;
+    const nextId = req.body?.nextId ?? null;
+    projectManager.reorderChat(req.params.id, req.params.chatId, prevId, nextId);
+    activeChatsTracker.refreshChatMeta(req.params.chatId, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering chat:', err);
+    res.status(500).json({ error: 'Failed to reorder chat' });
+  }
+});
+
 router.put('/:id/chats/:chatId/dismiss', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     const { chatId } = req.params;

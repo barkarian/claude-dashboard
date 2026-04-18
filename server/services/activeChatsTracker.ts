@@ -33,6 +33,9 @@ interface TrackedChat {
   seen: boolean;
   /** True when the chat was just created and has no messages yet */
   fresh: boolean;
+  favorite: boolean;
+  sortOrder: number | null;
+  lastActivityAt: string;
 }
 
 // In-memory tracked chats: chatId -> TrackedChat
@@ -64,9 +67,12 @@ function onSessionStateChange(
     if (existing) {
       existing.sessionStatus = state.status;
       existing.fresh = false; // session started, no longer fresh
-      // Refresh label in case it was auto-renamed
+      // Refresh label + activity timestamp in case either changed.
       const chat = projectManager.getChat(chatId);
-      if (chat) existing.label = chat.label;
+      if (chat) {
+        existing.label = chat.label;
+        existing.lastActivityAt = chat.lastActivityAt;
+      }
     } else {
       const info = getChatInfo(chatId, projectId);
       if (!info) return;
@@ -79,6 +85,9 @@ function onSessionStateChange(
         unread: false,
         seen: false,
         fresh: false,
+        favorite: info.favorite,
+        sortOrder: info.sortOrder,
+        lastActivityAt: info.lastActivityAt,
       });
     }
     scheduleBroadcast();
@@ -112,6 +121,9 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
       unread: true,
       seen: false,
       fresh: false,
+      favorite: info?.favorite ?? false,
+      sortOrder: info?.sortOrder ?? null,
+      lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
     });
   }
   scheduleBroadcast();
@@ -130,7 +142,43 @@ function onChatCreated(chatId: string, projectId: string, label: string): void {
     unread: false,
     seen: false,
     fresh: true,
+    favorite: info?.favorite ?? false,
+    sortOrder: info?.sortOrder ?? null,
+    lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
   });
+  scheduleBroadcast();
+}
+
+/** Refresh favorite + sortOrder for a tracked chat after an API mutation. */
+function refreshChatMeta(chatId: string, projectId: string): void {
+  const existing = tracked.get(chatId);
+  const info = getChatInfo(chatId, projectId);
+  if (existing && info) {
+    existing.favorite = info.favorite;
+    existing.sortOrder = info.sortOrder;
+    existing.lastActivityAt = info.lastActivityAt;
+    scheduleBroadcast();
+    return;
+  }
+  // Favorited chats should appear in the tracker even if they had no other state.
+  if (info?.favorite) {
+    tracked.set(chatId, {
+      chatId,
+      label: info.label,
+      projectId,
+      projectName: info.projectName,
+      sessionStatus: null,
+      unread: false,
+      seen: false,
+      fresh: false,
+      favorite: true,
+      sortOrder: info.sortOrder,
+      lastActivityAt: info.lastActivityAt,
+    });
+    scheduleBroadcast();
+    return;
+  }
+  // Not favorited and not tracked — nothing to do, but broadcast anyway in case client re-sorts.
   scheduleBroadcast();
 }
 
@@ -184,27 +232,31 @@ function getSnapshot(): GlobalActiveChats {
 
 // ── Internal ────────────────────────────────────────────────────────
 
-function getChatInfo(chatId: string, projectId: string): { label: string; projectName: string } | null {
+function getChatInfo(chatId: string, projectId: string): { label: string; projectName: string; favorite: boolean; sortOrder: number | null; lastActivityAt: string } | null {
   const chat = projectManager.getChat(chatId);
   const project = projectManager.getProject(projectId);
   if (!chat || !project) return null;
-  return { label: chat.label, projectName: project.name };
+  return { label: chat.label, projectName: project.name, favorite: chat.favorite, sortOrder: chat.sortOrder, lastActivityAt: chat.lastActivityAt };
 }
 
-/** Load both unread and pinned (seen) chats from DB on startup. */
+/** Load unread, pinned (seen), and favorited chats from DB on startup. */
 function loadFromDB(): void {
   const rows = db.prepare(`
-    SELECT c.id, c.label, c.project_id, c.unread, c.pinned, p.name as project_name
+    SELECT c.id, c.label, c.project_id, c.unread, c.pinned, c.favorite, c.sort_order, c.last_activity_at, c.created_at, p.name as project_name
     FROM chats c
     JOIN projects p ON c.project_id = p.id
-    WHERE c.unread = 1 OR c.pinned = 1
-  `).all() as Array<{ id: string; label: string; project_id: string; unread: number; pinned: number; project_name: string }>;
+    WHERE c.unread = 1 OR c.pinned = 1 OR c.favorite = 1
+  `).all() as Array<{ id: string; label: string; project_id: string; unread: number; pinned: number; favorite: number; sort_order: number | null; last_activity_at: string | null; created_at: string; project_name: string }>;
 
   for (const row of rows) {
+    const lastActivityAt = row.last_activity_at || row.created_at;
     const existing = tracked.get(row.id);
     if (existing) {
       if (row.unread) existing.unread = true;
       if (row.pinned && !row.unread) existing.seen = true;
+      existing.favorite = !!row.favorite;
+      existing.sortOrder = typeof row.sort_order === 'number' ? row.sort_order : null;
+      existing.lastActivityAt = lastActivityAt;
     } else {
       tracked.set(row.id, {
         chatId: row.id,
@@ -215,6 +267,9 @@ function loadFromDB(): void {
         unread: !!row.unread,
         seen: !!row.pinned && !row.unread,
         fresh: false,
+        favorite: !!row.favorite,
+        sortOrder: typeof row.sort_order === 'number' ? row.sort_order : null,
+        lastActivityAt,
       });
     }
   }
@@ -251,6 +306,9 @@ function buildSnapshot(): GlobalActiveChats {
       label: t.label,
       status: displayStatus,
       projectId: t.projectId,
+      favorite: t.favorite,
+      sortOrder: t.sortOrder,
+      lastActivityAt: t.lastActivityAt,
     });
     byProject[t.projectId].count++;
     totalCount++;
@@ -265,6 +323,19 @@ function buildSnapshot(): GlobalActiveChats {
     ) {
       badgeCount++;
     }
+  }
+
+  // Sort each project's chats: favorite first, manually-ordered next, then newest by activity.
+  for (const projectChats of Object.values(byProject)) {
+    projectChats.chats.sort((a, b) => {
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+      const aNull = a.sortOrder == null;
+      const bNull = b.sortOrder == null;
+      if (!aNull && !bNull) return (a.sortOrder as number) - (b.sortOrder as number);
+      if (aNull !== bNull) return aNull ? 1 : -1;
+      // Both null — newest activity first.
+      return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+    });
   }
 
   return { byProject, totalCount, badgeCount };
@@ -298,6 +369,7 @@ export default {
   onChatDismiss,
   onSessionExit,
   onChatRenamed,
+  refreshChatMeta,
   getSnapshot,
   getIO,
 };

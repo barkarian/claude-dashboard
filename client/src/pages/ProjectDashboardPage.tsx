@@ -24,6 +24,7 @@ import DesktopRecordingControls from '../components/chat/DesktopRecordingControl
 import { useRepoChanges } from '../hooks/useRepoChanges.ts';
 import api from '../utils/api.ts';
 import { haptics } from '../utils/haptics.ts';
+import { setProjectNavState, clearProjectNavState } from '../utils/projectNavState.ts';
 import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
@@ -75,7 +76,24 @@ export default function ProjectDashboardPage() {
   const currentTab = pathAfterProject.split('/')[0] || 'chats';
   const chatMatch = location.pathname.match(/\/chats\/([^/]+)/);
   const activeChatId = chatMatch ? chatMatch[1] : null;
+  const scriptMatch = location.pathname.match(/\/scripts\/([^/]+)/);
+  const activeScriptId = scriptMatch ? scriptMatch[1] : null;
   const activeChat = activeChatId ? (project?.chats || []).find((c) => c.id === activeChatId) : null;
+
+  // Persist last-visited deep route per project so tab switches restore the previous selection.
+  useEffect(() => {
+    if (id && activeChatId) setProjectNavState(id, { lastChatId: activeChatId });
+  }, [id, activeChatId]);
+  useEffect(() => {
+    if (id && activeScriptId) setProjectNavState(id, { lastScriptId: activeScriptId });
+  }, [id, activeScriptId]);
+
+  // Clear nav state for the project when we leave it (project change or page unmount).
+  useEffect(() => {
+    return () => {
+      if (id) clearProjectNavState(id);
+    };
+  }, [id]);
 
   // Mark chat as read when the user navigates into it
   useEffect(() => {

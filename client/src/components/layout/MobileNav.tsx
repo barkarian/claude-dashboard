@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import api from '../../utils/api.ts';
 import { haptics } from '../../utils/haptics.ts';
+import { getProjectNavState } from '../../utils/projectNavState.ts';
 import type { RunningProcess } from '../../../../shared/types/models.ts';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
@@ -83,7 +84,22 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
     if (hasPorts) {
       setShowPortsPopover((prev) => !prev);
     } else {
-      navigate(`/project/${projectId}/scripts`);
+      const lastScriptId = projectId ? getProjectNavState(projectId)?.lastScriptId : undefined;
+      navigate(lastScriptId
+        ? `/project/${projectId}/scripts/${lastScriptId}`
+        : `/project/${projectId}/scripts`);
+    }
+  }
+
+  function navigateToTab(tabKey: string) {
+    if (!projectId) return;
+    const nav = getProjectNavState(projectId);
+    if (tabKey === 'chats' && nav?.lastChatId) {
+      navigate(`/project/${projectId}/chats/${nav.lastChatId}`);
+    } else if (tabKey === 'scripts' && nav?.lastScriptId) {
+      navigate(`/project/${projectId}/scripts/${nav.lastScriptId}`);
+    } else {
+      navigate(`/project/${projectId}/${tabKey}`);
     }
   }
 
@@ -138,7 +154,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
                   if (isScripts) {
                     handleScriptsTabClick();
                   } else {
-                    navigate(`/project/${projectId}/${tab.key}`);
+                    navigateToTab(tab.key);
                   }
                 }}
                 className={`relative flex flex-col items-center gap-0.5 px-3 py-1 text-xs transition-colors ${

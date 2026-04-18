@@ -5,13 +5,15 @@ interface PullToRefreshProps {
   onRefresh: () => Promise<void> | void;
   children: ReactNode;
   className?: string;
+  /** When true, touch gestures are passed through so the host can own them (e.g. drag-to-reorder). */
+  disabled?: boolean;
 }
 
 const THRESHOLD = 80;
 const MAX_PULL = 120;
 const DAMPING = 0.4;
 
-export default function PullToRefresh({ onRefresh, children, className }: PullToRefreshProps) {
+export default function PullToRefresh({ onRefresh, children, className, disabled = false }: PullToRefreshProps) {
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const touchStartY = useRef(0);
@@ -23,17 +25,17 @@ export default function PullToRefresh({ onRefresh, children, className }: PullTo
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
-    if (!isMobile || refreshing) return;
+    if (!isMobile || refreshing || disabled) return;
     // Only start if scrolled to top
     const el = containerRef.current;
     if (el && el.scrollTop > 0) return;
     touchStartY.current = e.touches[0].clientY;
     pulling.current = true;
     crossedThreshold.current = false;
-  }, [isMobile, refreshing]);
+  }, [isMobile, refreshing, disabled]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!pulling.current || refreshing) return;
+    if (!pulling.current || refreshing || disabled) return;
     const delta = e.touches[0].clientY - touchStartY.current;
     if (delta <= 0) {
       setPullDistance(0);
@@ -48,7 +50,7 @@ export default function PullToRefresh({ onRefresh, children, className }: PullTo
     } else if (damped < THRESHOLD) {
       crossedThreshold.current = false;
     }
-  }, [refreshing]);
+  }, [refreshing, disabled]);
 
   const handleTouchEnd = useCallback(async () => {
     if (!pulling.current) return;

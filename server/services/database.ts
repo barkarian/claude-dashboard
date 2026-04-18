@@ -221,6 +221,27 @@ try {
   // Column already exists — ignore
 }
 
+// Add adapter_order column to projects (JSON array of adapter IDs; index 0 is the default).
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN adapter_order TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Add sort_order column to chats (REAL; manual drag order, NULL = use last_activity_at).
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN sort_order REAL`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Add favorite column to chats (1 = starred). Distinct from `pinned` which is the active-chats tracker flag.
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Adapter settings (per-adapter key-value store) ---
 
 db.exec(`
