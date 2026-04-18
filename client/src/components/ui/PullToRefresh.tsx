@@ -37,6 +37,9 @@ export default function PullToRefresh({ onRefresh, children, className, disabled
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (!isMobile || refreshing || disabled) return;
+    // Skip when any vaul drawer is open. Otherwise dragging the drawer down to
+    // close also fires pull-to-refresh on the page underneath.
+    if (typeof document !== 'undefined' && document.querySelector('[data-vaul-drawer-visible="true"]')) return;
     // Only start if scrolled to top
     const el = containerRef.current;
     if (el && el.scrollTop > 0) return;

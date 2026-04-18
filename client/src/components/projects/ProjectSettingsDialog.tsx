@@ -158,9 +158,10 @@ export default function ProjectSettingsDialog({
 
   return (
     <>
-      {/* handleOnly: only the pill handle at the top dismisses the drawer. Everything inside
-          (scrollable body, form controls, adapter drag) is free of vaul gesture conflicts. */}
-      <Drawer open={open} onOpenChange={onOpenChange} handleOnly>
+      {/* Vaul handles scroll-vs-close natively when content scrolls. Adapter drag handles
+          already carry data-vaul-no-drag, so dragging anywhere on the drawer body still
+          closes it like the New Chat picker. */}
+      <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent className="max-h-[90vh]">
           <DrawerHeader className="px-4 pb-2 pt-1">
             <DrawerTitle className="text-base">Project Settings</DrawerTitle>

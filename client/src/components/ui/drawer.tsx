@@ -41,6 +41,9 @@ const DrawerContent = React.forwardRef<
         "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-2xl border-t border-border bg-bg-surface",
         className
       )}
+      // Reserve room for the iOS home indicator + a little visual breathing room
+      // so drawer content never hugs the very bottom edge of the screen.
+      style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
       {...props}
     >
       <DrawerPrimitive.Handle className="mx-auto mt-3 mb-1 h-1.5 w-12 rounded-full bg-border" />
