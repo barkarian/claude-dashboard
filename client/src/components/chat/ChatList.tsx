@@ -147,6 +147,11 @@ function SortableChatCard({
     WebkitTouchCallout: 'none' as const,
     touchAction: isDragging ? ('none' as const) : ('pan-y' as const),
   };
+  // Long-press touch handlers must live on a child — not on the same element as
+  // {...listeners}. React spread semantics mean later onTouchStart props clobber
+  // earlier ones, so attaching them on the outer div silently ate dnd-kit's
+  // TouchSensor handler and the drag could never arm. Keeping them on Card lets
+  // both handlers fire on the same touch via React's normal event bubbling.
   return (
     <div
       ref={setNodeRef}
@@ -155,14 +160,14 @@ function SortableChatCard({
       {...listeners}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      onTouchStart={onLongPressStart}
-      onTouchMove={onLongPressMove}
-      onTouchEnd={onLongPressEnd}
-      onTouchCancel={onLongPressEnd}
     >
       <Card
         className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
         onClick={onClick}
+        onTouchStart={onLongPressStart}
+        onTouchMove={onLongPressMove}
+        onTouchEnd={onLongPressEnd}
+        onTouchCancel={onLongPressEnd}
       >
         {children}
       </Card>
