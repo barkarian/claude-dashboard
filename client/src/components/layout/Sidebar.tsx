@@ -554,7 +554,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       )}
 
                       {/* Project link */}
-                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-lg h-12 md:text-[15px] md:h-9">
+                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-base h-10 md:text-[15px] md:h-9">
                         <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
                           <span className="truncate">{project.name}</span>
                           {count > 0 && (
