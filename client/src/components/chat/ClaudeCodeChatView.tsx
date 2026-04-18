@@ -251,7 +251,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     handleArrow(seq);
   }
 
-  const overlayBtnBase = 'flex items-center justify-center rounded-lg bg-bg-surface/70 border border-border/50 text-text-muted active:bg-bg-surface/90 transition-colors backdrop-blur-sm disabled:opacity-30';
+  const overlayBtnBase = 'flex items-center justify-center rounded-lg bg-bg-surface/70 border border-border/50 text-text-muted active:bg-bg-surface/90 transition-colors backdrop-blur-sm disabled:opacity-30 touch-manipulation';
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -259,9 +259,10 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       <div className="flex-1 overflow-hidden relative">
         <div ref={containerRef} className="absolute inset-0" />
 
-        {/* Floating arrow overlay — top-left corner of terminal, mobile only */}
+        {/* Floating arrow overlay — top-left corner of terminal, mobile only.
+            z-50 keeps it above the xterm touch-blocker (z-40) so buttons stay tappable. */}
         {hasOverlayContent && (
-          <div className="absolute top-2 left-2 z-30 flex flex-col items-center gap-1 md:hidden">
+          <div className="absolute top-2 left-2 z-50 flex flex-col items-start gap-1 md:hidden">
             {/* Action buttons for terminal prompts */}
             {terminalUIMode.mode === 'dismiss' && (
               <button
@@ -332,14 +333,15 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
               </div>
             )}
 
-            {/* Gesture info icon + tooltip — tooltip expands horizontally to the right,
-                keeping the arrow buttons above unobstructed and easy to tap. */}
+            {/* Gesture info icon + tooltip — popover is absolutely positioned to the
+                right of the icon so opening/closing it never resizes the column above,
+                which would otherwise shift the arrow buttons and flicker on close. */}
             {native && (
-              <div className="flex flex-row items-center gap-1.5 self-start">
+              <div className="relative">
                 <button
                   type="button"
                   onClick={toggleSwipeInfo}
-                  className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full bg-bg-surface/60 backdrop-blur-sm text-text-dim hover:text-primary transition-colors"
+                  className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full bg-bg-surface/60 backdrop-blur-sm text-text-dim hover:text-primary transition-colors touch-manipulation"
                   title="Gesture info"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -347,7 +349,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
                   </svg>
                 </button>
                 {showSwipeInfo && (
-                  <div className="bg-bg-surface/95 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg text-[10px] text-text-muted w-40">
+                  <div className="absolute left-full top-0 ml-1.5 bg-bg-surface/95 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg text-[10px] text-text-muted w-40 z-10">
                     <div className="text-[8px] font-semibold text-primary/80 uppercase tracking-wider mb-0.5">
                       Swipe · 1 finger
                     </div>
