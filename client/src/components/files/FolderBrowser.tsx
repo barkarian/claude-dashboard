@@ -7,6 +7,7 @@ import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useLongPress } from '../../hooks/useLongPress.ts';
 import ContextMenu from '../ui/ContextMenu.tsx';
 import api from '../../utils/api.ts';
+import { downloadProjectFile } from '../../utils/downloadFile.ts';
 import FileContentView from './FileContentView.tsx';
 
 type FileStatus = 'added' | 'modified' | 'deleted' | 'untracked' | 'renamed';
@@ -21,15 +22,9 @@ interface FolderBrowserProps {
 }
 
 function triggerDownload(projectId: string, filePath: string) {
-  const envMatch = window.location.pathname.match(/^\/(local|vps)/);
-  const base = envMatch ? envMatch[0] : '';
-  const url = `${base}/api/projects/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filePath.split('/').pop() || 'download';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  downloadProjectFile(projectId, filePath).catch((err) => {
+    console.error('Download failed:', err);
+  });
 }
 
 export default function FolderBrowser({ projectId }: FolderBrowserProps) {
