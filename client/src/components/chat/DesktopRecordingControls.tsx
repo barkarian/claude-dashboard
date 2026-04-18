@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import { Button } from '../ui/button.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
+import { recordingPanelTrigger } from '../../utils/recordingPanelTrigger.ts';
 import ScriptPickerPanel from './ScriptPickerPanel.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import SavedRecordingsPanel from './SavedRecordingsPanel.tsx';
@@ -49,6 +50,15 @@ export default function DesktopRecordingControls({ projectId, onInsertText }: De
       setShowScriptPicker(false);
     }
   }, [activeRecording]);
+
+  // Expose an imperative open() so other parts of the app (e.g. the mobile CC
+  // prompt's More popover) can surface this panel instead of rolling their own.
+  useEffect(() => {
+    recordingPanelTrigger.open = () => setShowPanel(true);
+    return () => {
+      if (recordingPanelTrigger.open) recordingPanelTrigger.open = null;
+    };
+  }, []);
 
   function formatTime(secs: number): string {
     const m = Math.floor(secs / 60);

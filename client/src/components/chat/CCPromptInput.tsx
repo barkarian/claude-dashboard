@@ -2,12 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import { haptics } from '../../utils/haptics.ts';
 import { isCapacitorNative } from '../../utils/platform.ts';
-import ScriptPickerPanel from './ScriptPickerPanel.tsx';
-import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
+import { recordingPanelTrigger } from '../../utils/recordingPanelTrigger.ts';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
-import SavedRecordingsPanel, { formatSavedRecording, buildRecordingHeader } from './SavedRecordingsPanel.tsx';
+import { formatSavedRecording, buildRecordingHeader } from './SavedRecordingsPanel.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import api from '../../utils/api.ts';
@@ -47,13 +46,10 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Recording state
-  const [showScriptPicker, setShowScriptPicker] = useState(false);
-  const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
+  const { getRecordingContent } = useTerminalRecording();
   const isMobile = useIsMobile();
-  const [showSavedRecordings, setShowSavedRecordings] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   // Mobile auto-insert: prepend saved recordings into prompt on chat open
@@ -192,15 +188,6 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
     onArrow(seq);
   }
 
-  function handleStopAndInsert(id: string) {
-    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-    setShowLivePreview(false);
-  }
-
-  function handleRecordingStopped(id: string) {
-    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-  }
-
   // Stop button: shown when Claude is working and prompt is empty
   const showStop = unifiedStatus === 'working' && !value.trim();
   // Send disabled: when prompt is empty and not in selection mode
@@ -210,53 +197,6 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
 
   return (
     <div className="flex-shrink-0 border-t border-border relative">
-      {/* Recording popups above input */}
-      {showScriptPicker && !activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <ScriptPickerPanel
-            projectId={projectId}
-            onClose={() => setShowScriptPicker(false)}
-            onStarted={() => setShowLivePreview(true)}
-          />
-        </div>
-      )}
-
-      {showSavedRecordings && !activeRecording && !showScriptPicker && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <div className="bg-bg-surface border border-border rounded-xl shadow-xl overflow-hidden">
-            <div className="p-3 border-b border-border">
-              <button
-                onClick={() => { setShowSavedRecordings(false); setShowScriptPicker(true); }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
-              >
-                <svg className="w-4 h-4 text-danger" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="7" />
-                </svg>
-                New Recording
-              </button>
-            </div>
-            <SavedRecordingsPanel
-              projectId={projectId}
-              onInsert={(content) => {
-                setValue(prev => content + (prev ? '\n\n' + prev : ''));
-                setShowSavedRecordings(false);
-              }}
-              onClose={() => setShowSavedRecordings(false)}
-              compact
-            />
-          </div>
-        </div>
-      )}
-
-      {showLivePreview && activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <RecordingPreviewPanel
-            onClose={() => setShowLivePreview(false)}
-            onStop={handleStopAndInsert}
-          />
-        </div>
-      )}
-
       {/* Navigation bar — all buttons same height (h-7) */}
       <div className="flex items-center px-2 py-2 bg-bg-surface/50 gap-1.5">
         {/* Esc */}
@@ -392,14 +332,15 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               </div>
             </div>
 
-            {/* Big Record button below. Closes this popover and hands off to the
-                chat-level SavedRecordingsPanel instead of stacking another popover here. */}
+            {/* Big Record button below. Closes the More popover and opens the
+                header's recording popover (DesktopRecordingControls) so mobile
+                and desktop share one Record UI instead of stacking another panel here. */}
             <button
               type="button"
               onClick={() => {
                 haptics.impactLight();
                 setMoreOpen(false);
-                setShowSavedRecordings(true);
+                recordingPanelTrigger.open?.();
               }}
               disabled={disabled}
               className="mt-3 w-full h-12 rounded-lg bg-danger/10 border border-danger/40 hover:bg-danger/20 active:bg-danger/20 transition-colors flex items-center justify-center gap-2 disabled:opacity-30 touch-manipulation"
