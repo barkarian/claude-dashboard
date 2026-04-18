@@ -471,6 +471,7 @@ function mapMachineToSessionState(ctx: MachineContext): SessionStateContext {
 // --- Context window token extraction ---
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-opus-4-7': 1_000_000,
   'claude-opus-4-6': 1_000_000,
   'claude-sonnet-4-6': 200_000,
   'claude-opus-4-5-20251101': 200_000,
@@ -478,6 +479,12 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-haiku-4-5-20251001': 200_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+function resolveContextWindow(model: string): number {
+  if (model.includes('[1m]')) return 1_000_000;
+  const base = model.replace(/\[.*\]$/, '');
+  return MODEL_CONTEXT_WINDOWS[base] ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+}
 
 function extractContextUsage(entries: ParsedEntry[]): ContextUsage | undefined {
   // Walk backwards to find the last assistant message with usage data
@@ -492,7 +499,7 @@ function extractContextUsage(entries: ParsedEntry[]): ContextUsage | undefined {
     const cacheReadTokens: number = usage.cache_read_input_tokens || 0;
     const outputTokens: number = usage.output_tokens || 0;
     const effectiveContext = inputTokens + cacheCreationTokens + cacheReadTokens;
-    const contextWindowMax = MODEL_CONTEXT_WINDOWS[model] || DEFAULT_CONTEXT_WINDOW;
+    const contextWindowMax = resolveContextWindow(model);
     const percentage = contextWindowMax > 0 ? (effectiveContext / contextWindowMax) * 100 : 0;
 
     return {
