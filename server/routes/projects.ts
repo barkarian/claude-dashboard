@@ -332,10 +332,33 @@ router.post('/:id/git-checkout', async (req: Request<{ id: string }>, res: Respo
   }
 });
 
-// File download (binary-safe, streams with Content-Disposition)
+// Known MIME types — we want iOS to recognise images/PDFs so its Share Sheet
+// offers "Save Image" / preview instead of treating everything as opaque bytes.
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  svg: 'image/svg+xml', heic: 'image/heic', avif: 'image/avif',
+  ico: 'image/x-icon', tiff: 'image/tiff',
+  pdf: 'application/pdf', zip: 'application/zip',
+  mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+  json: 'application/json', xml: 'application/xml',
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+  html: 'text/html', css: 'text/css',
+};
+
+function mimeForFile(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return EXT_MIME[ext] || 'application/octet-stream';
+}
+
+// File download (binary-safe, streams the file with a correct MIME type).
+// Query: ?path=<relative>&inline=1 — with inline=1 we omit Content-Disposition
+// so the response can be used as an <img>/<video>/iframe src.
 router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const filePath = req.query.path as string;
+    const inline = req.query.inline === '1';
     if (!filePath) {
       return res.status(400).json({ error: 'path query parameter is required' });
     }
@@ -349,8 +372,11 @@ router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Resp
       return res.status(404).json({ error: 'File not found' });
     }
     const basename = path.basename(fullPath);
-    res.setHeader('Content-Disposition', `attachment; filename="${basename.replace(/"/g, '\\"')}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
+    const mime = mimeForFile(basename);
+    if (!inline) {
+      res.setHeader('Content-Disposition', `attachment; filename="${basename.replace(/"/g, '\\"')}"`);
+    }
+    res.setHeader('Content-Type', mime);
     const stream = fs.createReadStream(fullPath);
     stream.pipe(res);
     stream.on('error', (err) => {

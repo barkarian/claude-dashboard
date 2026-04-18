@@ -4,13 +4,17 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useTheme } from '../../context/ThemeContext.tsx';
-import { downloadProjectFile } from '../../utils/downloadFile.ts';
+import { buildDownloadUrl, downloadProjectFile } from '../../utils/downloadFile.ts';
 
 const SIZE_WARN_BYTES = 2 * 1024 * 1024; // 2 MB
 
+const IMAGE_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff', 'heic', 'avif', 'svg',
+]);
+
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff', 'heic', 'avif',
+  ...IMAGE_EXTENSIONS,
   'mp3', 'wav', 'flac', 'ogg', 'm4a',
   'mp4', 'mov', 'avi', 'mkv', 'webm',
   'exe', 'dll', 'so', 'dylib', 'bin', 'o', 'a',
@@ -19,9 +23,16 @@ const BINARY_EXTENSIONS = new Set([
   'db', 'sqlite', 'sqlite3',
 ]);
 
+function getExtension(filePath: string): string {
+  return filePath.split('/').pop()?.split('.').pop()?.toLowerCase() ?? '';
+}
+
 function isBinaryByExtension(filePath: string): boolean {
-  const ext = filePath.split('/').pop()?.split('.').pop()?.toLowerCase() ?? '';
-  return BINARY_EXTENSIONS.has(ext);
+  return BINARY_EXTENSIONS.has(getExtension(filePath));
+}
+
+function isImageByExtension(filePath: string): boolean {
+  return IMAGE_EXTENSIONS.has(getExtension(filePath));
 }
 
 function looksBinary(content: string): boolean {
@@ -78,6 +89,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   const [largeFileSize, setLargeFileSize] = useState<number | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   const binaryByExt = isBinaryByExtension(filePath);
+  const imageByExt = isImageByExtension(filePath);
 
   const fetchContent = useCallback(() => {
     if (!socket) return;
@@ -219,6 +231,18 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
             </svg>
             <p className="text-text-muted text-sm">This file is empty</p>
+          </div>
+        ) : imageByExt ? (
+          <div className="flex flex-col items-center gap-3 p-4">
+            <img
+              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              alt={filePath}
+              className="max-w-full h-auto rounded-lg bg-bg-surface"
+              style={{ WebkitTouchCallout: 'default', touchAction: 'manipulation' }}
+            />
+            <p className="text-text-dim text-xs text-center">
+              Long-press the image to save it to Photos, or tap Download above.
+            </p>
           </div>
         ) : isBinary ? (
           <div className="flex flex-col items-center gap-4 pt-16 px-6 text-center">
