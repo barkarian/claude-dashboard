@@ -30,19 +30,33 @@ for dir in routes services sockets data public adapters; do
   fi
 done
 
-# Install a flat node_modules (pnpm's symlink structure isn't portable)
-echo "→ Installing production dependencies (flat node_modules)..."
-cd "$RESOURCES_DIR/server"
+# --- Copy shared/ ---
+echo "→ Copying shared/..."
+rm -rf "$RESOURCES_DIR/shared"
+cp -R "$DASHBOARD_DIR/shared" "$RESOURCES_DIR/shared"
+
+# --- Copy adapters/ ---
+# server/adapters/loader.ts resolves adapter modules from ../../adapters
+# (sibling of server/ under resources/). Adapter server.ts files import
+# npm deps like node-pty, so node_modules must be reachable at or above
+# resources/ — we install it at the resources/ root below.
+echo "→ Copying adapters/..."
+rm -rf "$RESOURCES_DIR/adapters"
+cp -R "$DASHBOARD_DIR/adapters" "$RESOURCES_DIR/adapters"
+
+# --- Install flat node_modules at resources/ root ---
+# Placed at resources/ (not resources/server/) so Node's parent-walk
+# resolves deps identically for both resources/server/*.ts and
+# resources/adapters/<name>/server.ts. pnpm's symlink layout isn't portable.
+echo "→ Installing production dependencies (flat node_modules at resources/)..."
+cp "$DASHBOARD_DIR/server/package.json" "$RESOURCES_DIR/package.json"
+rm -rf "$RESOURCES_DIR/server/node_modules"
+cd "$RESOURCES_DIR"
 npm install --omit=dev --ignore-scripts 2>&1 | tail -3
 # Rebuild native modules for the current platform
 echo "→ Rebuilding native modules..."
 npm rebuild better-sqlite3 2>&1 | tail -3
 npm rebuild node-pty 2>&1 | tail -3
 cd "$DASHBOARD_DIR"
-
-# --- Copy shared/ ---
-echo "→ Copying shared/..."
-rm -rf "$RESOURCES_DIR/shared"
-cp -R "$DASHBOARD_DIR/shared" "$RESOURCES_DIR/shared"
 
 echo "Resources prepared at $RESOURCES_DIR"
