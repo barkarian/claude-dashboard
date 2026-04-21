@@ -1,5 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '../ui/button.tsx';
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
@@ -23,6 +41,41 @@ interface ScriptListProps {
   project: Project;
 }
 
+function SortableScriptRow({
+  script,
+  projectId,
+  onDelete,
+  onRefresh,
+}: {
+  script: ScriptWithStatus;
+  projectId: string;
+  onDelete: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: script.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <SwipeableRow onDelete={() => onDelete(script.id)}>
+        <ScriptCard
+          script={script}
+          projectId={projectId}
+          onDelete={onDelete}
+          onRefresh={onRefresh}
+          dragHandleProps={{ ...attributes, ...listeners }}
+        />
+      </SwipeableRow>
+    </div>
+  );
+}
+
 export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [scripts, setScripts] = useState<ScriptWithStatus[]>([]);
   const { processes } = useProcessStatus(projectId);
@@ -41,6 +94,29 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
   const [spawningShell, setSpawningShell] = useState(false);
   const navigate = useNavigate();
   const { socket } = useSocket();
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = scripts.map(s => s.id);
+    const oldIndex = ids.indexOf(active.id as string);
+    const newIndex = ids.indexOf(over.id as string);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const nextScripts = arrayMove(scripts, oldIndex, newIndex);
+    setScripts(nextScripts);
+    haptics.impactLight();
+    api.patch(`/api/projects/${projectId}/scripts/reorder`, { orderedIds: nextScripts.map(s => s.id) })
+      .catch((err) => {
+        console.error('Failed to reorder scripts:', err);
+        loadScripts();
+      });
+  }
 
   useEffect(() => {
     loadScripts();
@@ -174,16 +250,21 @@ export default function ScriptList({ projectId, project }: ScriptListProps) {
           <p className="text-text-muted text-sm mb-4">Add scripts to run dev servers, tests, etc.</p>
         </div>
       ) : (
-        scripts.map((script) => (
-          <SwipeableRow key={script.id} onDelete={() => promptDelete(script.id)}>
-            <ScriptCard
-              script={script}
-              projectId={projectId}
-              onDelete={promptDelete}
-              onRefresh={handleRefresh}
-            />
-          </SwipeableRow>
-        ))
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={scripts.map(s => s.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3">
+              {scripts.map((script) => (
+                <SortableScriptRow
+                  key={script.id}
+                  script={script}
+                  projectId={projectId}
+                  onDelete={promptDelete}
+                  onRefresh={handleRefresh}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {/* AI Script Generator */}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type HTMLAttributes } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { Card } from '../ui/card.tsx';
@@ -13,9 +13,10 @@ interface ScriptCardProps {
   projectId: string;
   onDelete: (scriptId: string) => void;
   onRefresh: () => void;
+  dragHandleProps?: HTMLAttributes<HTMLElement>;
 }
 
-export default function ScriptCard({ script, projectId, onDelete, onRefresh }: ScriptCardProps) {
+export default function ScriptCard({ script, projectId, onDelete, onRefresh, dragHandleProps }: ScriptCardProps) {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const [status, setStatus] = useState<ProcessStatus>(script.status || 'stopped');
@@ -92,6 +93,18 @@ export default function ScriptCard({ script, projectId, onDelete, onRefresh }: S
       onContextMenu={longPressHandlers.onContextMenu}
     >
       <div className="flex items-center gap-3">
+        {dragHandleProps && (
+          <button
+            type="button"
+            aria-label="Reorder script"
+            {...dragHandleProps}
+            className="flex-shrink-0 -ml-1 w-6 h-6 flex items-center justify-center text-text-dim hover:text-text-muted cursor-grab active:cursor-grabbing touch-none"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
+            </svg>
+          </button>
+        )}
         <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColor[status] || 'bg-text-dim'}`} />
 
         <button

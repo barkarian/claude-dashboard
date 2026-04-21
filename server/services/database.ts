@@ -257,6 +257,14 @@ try {
   // Column already exists — ignore
 }
 
+// Add sort_order column to scripts (INTEGER). User-picked ordering per project;
+// NULL rows fall back to created_at order after the explicitly ordered ones.
+try {
+  db.exec(`ALTER TABLE scripts ADD COLUMN sort_order INTEGER`);
+} catch {
+  // Column already exists — ignore
+}
+
 // --- Adapter settings (per-adapter key-value store) ---
 
 db.exec(`

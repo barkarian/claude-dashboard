@@ -39,6 +39,24 @@ router.get('/', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
+router.patch('/reorder', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { orderedIds } = req.body;
+    if (!Array.isArray(orderedIds) || !orderedIds.every(s => typeof s === 'string')) {
+      return res.status(400).json({ error: 'orderedIds must be an array of strings' });
+    }
+    const project = projectManager.getProject(req.params.id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    projectManager.reorderScripts(req.params.id, orderedIds);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering scripts:', err);
+    res.status(500).json({ error: 'Failed to reorder scripts' });
+  }
+});
+
 router.post('/', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { label, command } = req.body;

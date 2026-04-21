@@ -260,12 +260,27 @@ function getProjectPath(projectId: string): string {
 // === Script Methods ===
 
 function listScripts(projectId: string): Script[] {
-  const rows = db.prepare('SELECT * FROM scripts WHERE project_id = ? ORDER BY created_at').all(projectId) as any[];
+  const rows = db.prepare(
+    'SELECT * FROM scripts WHERE project_id = ? ORDER BY sort_order IS NULL, sort_order, created_at'
+  ).all(projectId) as any[];
   return rows.map(r => ({
     id: r.id,
     label: r.label,
     command: r.command,
   }));
+}
+
+function reorderScripts(projectId: string, orderedIds: string[]): void {
+  const existing = db.prepare('SELECT id FROM scripts WHERE project_id = ?').all(projectId) as Array<{ id: string }>;
+  const validIds = new Set(existing.map(r => r.id));
+  const update = db.prepare('UPDATE scripts SET sort_order = ? WHERE id = ? AND project_id = ?');
+  const tx = db.transaction((ids: string[]) => {
+    let order = 0;
+    for (const id of ids) {
+      if (validIds.has(id)) update.run(order++, id, projectId);
+    }
+  });
+  tx(orderedIds);
 }
 
 function createScript(projectId: string, label: string, command: string): Script {
@@ -630,6 +645,7 @@ export default {
   updateScript,
   deleteScript,
   getScript,
+  reorderScripts,
   // Chats
   listChats,
   listChatsPaginated,
