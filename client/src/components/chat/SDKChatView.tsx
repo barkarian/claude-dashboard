@@ -25,7 +25,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   refreshRef.current = refreshProject;
 
   const chat = project?.chats?.find(c => c.id === chatId);
-  const { updateDraft } = useDraft(projectId, chatId, setProject);
+  const { updateDraft, clearDraft } = useDraft(projectId, chatId, chat?.draftMessage || '', setProject);
   const { registerHandler, unregisterHandler } = useSearch();
   const messageListRef = useRef<HTMLDivElement>(null);
 
@@ -252,6 +252,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             autoFocus={isNewChat}
             initialDraft={chat?.draftMessage || ''}
             onDraftChange={updateDraft}
+            onClearDraft={clearDraft}
           />
         </>
       )}

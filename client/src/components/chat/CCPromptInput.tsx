@@ -25,6 +25,7 @@ interface CCPromptInputProps {
   autoFocus?: boolean;
   initialDraft?: string;
   onDraftChange?: (text: string) => void;
+  onClearDraft?: () => void;
 }
 
 // ANSI escape sequences
@@ -36,7 +37,7 @@ const ARROW_DOWN = '\x1b[B';
 const ARROW_LEFT = '\x1b[D';
 const ARROW_RIGHT = '\x1b[C';
 
-export default function CCPromptInput({ projectId, status, terminalUIMode, unifiedStatus, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange }: CCPromptInputProps) {
+export default function CCPromptInput({ projectId, status, terminalUIMode, unifiedStatus, onSend, onArrow, onInterrupt, autoFocus, initialDraft, onDraftChange, onClearDraft }: CCPromptInputProps) {
   const isSelectionMode = terminalUIMode?.mode === 'multi-choice'
     || terminalUIMode?.mode === 'multi-choice-tabs'
     || terminalUIMode?.mode === 'plan-review'
@@ -129,7 +130,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
       if (value.trim()) {
         // First tap: clear the input ("clear line")
         setValue('');
-        onDraftChange?.('');
+        onClearDraft?.();
       } else if (
         unifiedStatus === 'working' ||
         unifiedStatus === 'question-awaiting' ||
@@ -163,7 +164,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
       }
       searchHasContentRef.current = true;
       setValue('');
-      onDraftChange?.('');
+      onClearDraft?.();
       return;
     }
 
@@ -179,7 +180,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
 
     onSend(text + '\r');
     setValue('');
-    onDraftChange?.('');
+    onClearDraft?.();
   }
 
   function btn(seq: string) {

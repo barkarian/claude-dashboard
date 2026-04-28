@@ -24,9 +24,10 @@ interface SDKPromptInputProps {
   autoFocus?: boolean;
   initialDraft?: string;
   onDraftChange?: (text: string) => void;
+  onClearDraft?: () => void;
 }
 
-export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus, initialDraft, onDraftChange }: SDKPromptInputProps) {
+export default function SDKPromptInput({ projectId, status, onSend, onInterrupt, autoFocus, initialDraft, onDraftChange, onClearDraft }: SDKPromptInputProps) {
   const location = useLocation();
   const [value, setValue] = useState(initialDraft || '');
   const [showFilePicker, setShowFilePicker] = useState(false);
@@ -154,7 +155,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
 
     onSend(text);
     setValue('');
-    onDraftChange?.('');
+    onClearDraft?.();
   }
 
   function handleFileSelect(filePath: string) {

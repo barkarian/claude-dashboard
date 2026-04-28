@@ -39,7 +39,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   // Find chat to get sessionId for resume (unified, falls back to legacy ccConversationId)
   const chat = project?.chats?.find(c => c.id === chatId);
   const conversationId = chat?.sessionId || chat?.ccConversationId;
-  const { updateDraft } = useDraft(projectId, chatId, setProject);
+  const { updateDraft, clearDraft } = useDraft(projectId, chatId, chat?.draftMessage || '', setProject);
   const sessionStates = useSessionStates(projectId);
   const sessionState = chatId ? sessionStates[chatId] : undefined;
 
@@ -405,6 +405,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
           autoFocus={isNewChat}
           initialDraft={chat?.draftMessage || ''}
           onDraftChange={handleDraftChange}
+          onClearDraft={clearDraft}
         />
       </div>
     </div>

@@ -10,9 +10,10 @@ import type { Project } from '../../../shared/types/models.ts';
 export function useDraft(
   projectId: string,
   chatId: string | undefined,
+  initialDraft: string = '',
   setProject?: React.Dispatch<React.SetStateAction<Project | null>>,
 ) {
-  const savedRef = useRef('');
+  const savedRef = useRef(initialDraft);
   const currentRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -38,6 +39,14 @@ export function useDraft(
     timerRef.current = setTimeout(() => save(text), 500);
   }, [save]);
 
+  // Immediate, non-debounced clear. Use on send so a fast send →
+  // refreshProject sequence can't read back a stale draft.
+  const clearDraft = useCallback(() => {
+    clearTimeout(timerRef.current);
+    currentRef.current = '';
+    save('');
+  }, [save]);
+
   // Save on visibility change (user switches tab/app) and on unmount
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -54,11 +63,17 @@ export function useDraft(
     };
   }, [save]);
 
-  // Reset refs when chatId changes so stale data isn't carried over
+  // Seed savedRef with the persisted draft on chat change so save('') on the
+  // next clear actually fires — otherwise it short-circuits because savedRef
+  // happens to still equal '' even though the server has stale text.
+  // Only re-seed when the chat itself changes; subsequent initialDraft updates
+  // come from our own setProject() and must not clobber currentRef while the
+  // user is still typing.
   useEffect(() => {
-    savedRef.current = '';
+    savedRef.current = initialDraft;
     currentRef.current = '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 
-  return { updateDraft };
+  return { updateDraft, clearDraft };
 }
