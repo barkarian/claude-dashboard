@@ -446,20 +446,23 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
 
   socket.on('cc:attach', ({ chatId, cols, rows }: CCAttachPayload) => {
     const room = `cc:${chatId}`;
+    // If a duplicate cc:attach arrives on the same socket (e.g. mount-effect
+    // and reconnect handler both firing on flaky mobile networks), skip the
+    // buffer replay — otherwise the terminal shows the same output 2-3×.
+    const alreadyAttached = socket.rooms.has(room);
     socket.join(room);
 
     const session = sessions.get(chatId);
     if (session) {
-      // Resize PTY to match the client terminal before replaying buffer
       if (cols && rows && session.status === 'running') {
         try { session.pty.resize(cols, rows); } catch {}
       }
-      // Replay buffer
-      const fullBuffer = session.buffer.join('');
-      if (fullBuffer) {
-        socket.emit('cc:output', { chatId, data: fullBuffer });
+      if (!alreadyAttached) {
+        const fullBuffer = session.buffer.join('');
+        if (fullBuffer) {
+          socket.emit('cc:output', { chatId, data: fullBuffer });
+        }
       }
-      // Send current status
       socket.emit('cc:status', { chatId, status: session.status });
     }
   });
