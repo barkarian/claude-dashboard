@@ -20,9 +20,9 @@ import manifest from './manifest.ts';
 import projectManager from '../../server/services/projectManager.ts';
 import processManager, { killProcessTree } from '../../server/services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../../server/services/jsonlWatcher.ts';
+import pidSessionWatcher from '../../server/services/pidSessionWatcher.ts';
 
 const MAX_BUFFER_LINES = 50000;
-const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
@@ -47,29 +47,6 @@ interface CCSession {
   jsonlStateHandler: ((...args: any[]) => void) | null;
   inputBuffer: string;
   hasAutoRenamed: boolean;
-}
-
-function detectActualSessionId(
-  pid: number,
-  expectedSessionId: string,
-  onMismatch: (actualSessionId: string) => void,
-): void {
-  const sessionFile = path.join(CLAUDE_SESSIONS_DIR, `${pid}.json`);
-  let attempts = 0;
-  const maxAttempts = 25;
-
-  const timer = setInterval(() => {
-    attempts++;
-    try {
-      const data = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
-      clearInterval(timer);
-      if (data.sessionId && data.sessionId !== expectedSessionId) {
-        onMismatch(data.sessionId);
-      }
-    } catch {
-      if (attempts >= maxAttempts) clearInterval(timer);
-    }
-  }, 200);
 }
 
 // Throttle map for touchChatActivity
@@ -157,18 +134,22 @@ export default class ClaudeCodeAdapter extends EventEmitter implements IChatAdap
       jsonlWatcher.on('state-change', stateHandler);
       session.jsonlStateHandler = stateHandler;
 
-      // Detect if Claude assigned a different session ID
-      if (requestedSessionId) {
-        detectActualSessionId(ptyProcess.pid, sessionId, (actualId) => {
-          const current = this.sessions.get(chatId);
-          if (!current || current.pty !== ptyProcess) return;
+      // Track ~/.claude/sessions/{pid}.json for the lifetime of the PTY.
+      // Catches initial --resume mismatches AND mid-session rotations from
+      // /resume or /compact, both of which fork to a new sessionId without
+      // restarting the process.
+      pidSessionWatcher.track(ptyProcess.pid, sessionId, (actualId) => {
+        const current = this.sessions.get(chatId);
+        if (!current || current.pty !== ptyProcess) return;
+        if (actualId === session.jsonlSessionId) return;
 
-          jsonlWatcher.unwatchSession(sessionId!);
-          jsonlWatcher.watchSession(actualId, projectPath);
-          session.jsonlSessionId = actualId;
-          this.emit('session-id', chatId, actualId);
-        });
-      }
+        const oldId = session.jsonlSessionId;
+        if (oldId) jsonlWatcher.unwatchSession(oldId);
+        jsonlWatcher.watchSession(actualId, projectPath);
+        session.jsonlSessionId = actualId;
+        projectManager.updateChat(chatId, { ccConversationId: actualId, sessionId: actualId });
+        this.emit('session-id', chatId, actualId);
+      });
     }
 
     // Stream PTY output
@@ -210,6 +191,7 @@ export default class ClaudeCodeAdapter extends EventEmitter implements IChatAdap
       jsonlWatcher.off('state-change', session.jsonlStateHandler);
     }
 
+    pidSessionWatcher.untrack(session.pty.pid);
     processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);
     killProcessTree(session.pty);
     session.status = 'exited';

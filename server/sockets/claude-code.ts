@@ -7,6 +7,7 @@ import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager, { killProcessTree } from '../services/processManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
+import pidSessionWatcher from '../services/pidSessionWatcher.ts';
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
@@ -76,38 +77,6 @@ const lastActivityTouch = new Map<string, number>();
 // Prevents "New Reply" flash when Claude briefly transitions to idle between turns.
 const UNREAD_CONFIRM_MS = 2500;
 const idleUnreadTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
-
-/**
- * After spawning a Claude PTY, poll `~/.claude/sessions/{pid}.json` to discover the
- * actual session ID.  When `--resume` is used but Claude can't resume (session too old,
- * JSONL missing, etc.) it silently creates a new session with a different ID.  Without
- * this check the dashboard keeps watching the old (empty) JSONL file and status never
- * updates.
- */
-function detectActualSessionId(
-  pid: number,
-  expectedSessionId: string,
-  onMismatch: (actualSessionId: string) => void,
-): void {
-  const sessionFile = path.join(CLAUDE_SESSIONS_DIR, `${pid}.json`);
-  let attempts = 0;
-  const maxAttempts = 25; // 25 × 200ms = 5s max
-
-  const timer = setInterval(() => {
-    attempts++;
-    try {
-      const data = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
-      clearInterval(timer);
-      if (data.sessionId && data.sessionId !== expectedSessionId) {
-        onMismatch(data.sessionId);
-      }
-    } catch {
-      if (attempts >= maxAttempts) clearInterval(timer);
-    }
-  }, 200);
-}
 
 export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOServer): void {
 
@@ -277,21 +246,22 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         jsonlWatcher.on('state-change', stateHandler);
         session.jsonlStateHandler = stateHandler;
 
-        // Detect if Claude assigned a different session ID (e.g. --resume failed
-        // and Claude started a fresh session). Re-bind the JSONL watcher to track
-        // the actual session so status updates flow correctly.
-        if (conversationId) {
-          detectActualSessionId(ptyProcess.pid, sessionId, (actualId) => {
-            // Check session is still alive (user might have closed the chat)
-            const current = sessions.get(chatId);
-            if (!current || current.pty !== ptyProcess) return;
+        // Track ~/.claude/sessions/{pid}.json for the lifetime of the PTY.
+        // Catches both the initial --resume mismatch (when Claude silently
+        // forks because the JSONL is missing/old) and mid-session rotations
+        // from /resume or /compact, both of which assign a new sessionId
+        // without restarting the process.
+        pidSessionWatcher.track(ptyProcess.pid, sessionId, (actualId) => {
+          const current = sessions.get(chatId);
+          if (!current || current.pty !== ptyProcess) return;
+          if (actualId === session.jsonlSessionId) return;
 
-            jsonlWatcher.unwatchSession(sessionId);
-            jsonlWatcher.watchSession(actualId, projectPath);
-            session.jsonlSessionId = actualId;
-            projectManager.updateChat(chatId, { ccConversationId: actualId, sessionId: actualId });
-          });
-        }
+          const oldId = session.jsonlSessionId;
+          if (oldId) jsonlWatcher.unwatchSession(oldId);
+          jsonlWatcher.watchSession(actualId, projectPath);
+          session.jsonlSessionId = actualId;
+          projectManager.updateChat(chatId, { ccConversationId: actualId, sessionId: actualId });
+        });
       }
 
       // Stream PTY output to clients (no spinner analysis — JSONL watcher handles status)
@@ -501,6 +471,8 @@ export function killSession(chatId: string): void {
   if (session.jsonlStateHandler) {
     jsonlWatcher.off('state-change', session.jsonlStateHandler);
   }
+
+  pidSessionWatcher.untrack(session.pty.pid);
 
   // Unregister from processManager before killing
   processManager.unregisterExternalProcess(session.projectId, `cc-${chatId}`);

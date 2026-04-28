@@ -33,6 +33,7 @@ import sdkSessionManager from './services/sdkSessionManager.ts';
 import fileService from './services/fileService.ts';
 import projectManager from './services/projectManager.ts';
 import jsonlWatcher from './services/jsonlWatcher.ts';
+import pidSessionWatcher from './services/pidSessionWatcher.ts';
 import { installHooks } from './services/signalHooks.ts';
 import db, { purgeExpiredSessions, getTunnelCredentials, getOrCreateSessionSecret } from './services/database.ts';
 import { emitSidecarEvent } from './services/sidecarEmitter.ts';
@@ -200,6 +201,9 @@ await registerSocketHandlers(io);
 // Start JSONL watcher (chokidar + signal file watching + stale checker)
 jsonlWatcher.startGlobalWatch();
 
+// Start pid → sessionId watcher (catches /resume and /compact mid-session forks)
+pidSessionWatcher.start();
+
 // Install Claude Code hooks for authoritative session signal files
 installHooks();
 
@@ -248,6 +252,7 @@ async function shutdown(): Promise<void> {
   sdkSessionManager.stopIdleCleanup();
   fileService.stopAllWatching();
   jsonlWatcher.dispose();
+  pidSessionWatcher.dispose();
 
   // Disconnect tunnel (don't await remote calls — they may hang)
   tunnelManager.deactivateAllEndpoints().catch(() => {});
