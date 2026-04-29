@@ -63,15 +63,17 @@ export function useDraft(
     };
   }, [save]);
 
-  // Seed savedRef with the persisted draft on chat change so save('') on the
-  // next clear actually fires — otherwise it short-circuits because savedRef
-  // happens to still equal '' even though the server has stale text.
+  // Seed both refs with the persisted draft on chat change. savedRef so that
+  // save('') on the next clear actually fires (it would otherwise short-circuit
+  // because savedRef happened to still equal ''); currentRef so that the
+  // unmount cleanup's save(currentRef.current) is a no-op when the user opened
+  // the chat without typing — otherwise we'd PUT '' and wipe the existing draft.
   // Only re-seed when the chat itself changes; subsequent initialDraft updates
-  // come from our own setProject() and must not clobber currentRef while the
-  // user is still typing.
+  // flow back from our own setProject() and must not clobber the user's
+  // in-progress typing.
   useEffect(() => {
     savedRef.current = initialDraft;
-    currentRef.current = '';
+    currentRef.current = initialDraft;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 

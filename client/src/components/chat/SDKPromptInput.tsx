@@ -8,13 +8,10 @@ import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
-import SavedRecordingsPanel, { formatSavedRecording, buildRecordingHeader } from './SavedRecordingsPanel.tsx';
+import SavedRecordingsPanel from './SavedRecordingsPanel.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
-import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { haptics } from '../../utils/haptics.ts';
-import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
-import type { SavedRecording } from '../../../../shared/types/models.ts';
 
 interface SDKPromptInputProps {
   projectId: string;
@@ -40,29 +37,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const pendingAutoSendRef = useRef<string | null>(null);
 
   const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
-  const isMobile = useIsMobile();
   const [showSavedRecordings, setShowSavedRecordings] = useState(false);
-
-  // Mobile auto-insert: prepend saved recordings into prompt on chat open
-  useEffect(() => {
-    if (!isMobile) return;
-    api.get<{ recordings: SavedRecording[] }>(`/api/projects/${projectId}/recordings`)
-      .then(res => {
-        const recs = res.recordings;
-        if (!recs?.length) return;
-        setValue(prev => {
-          // Filter out recordings already present in the prompt (deduplicate by header)
-          const newRecs = recs.filter(r => {
-            const header = buildRecordingHeader(r);
-            return !prev.includes(header);
-          });
-          if (!newRecs.length) return prev;
-          const content = newRecs.map(formatSavedRecording).join('\n\n');
-          return content + (prev ? '\n\n' + prev : '');
-        });
-      })
-      .catch(() => {});
-  }, [isMobile, projectId]);
 
   useEffect(() => {
     if (textareaRef.current) {

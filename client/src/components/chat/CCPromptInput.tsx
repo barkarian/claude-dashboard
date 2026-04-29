@@ -6,11 +6,7 @@ import { recordingPanelTrigger } from '../../utils/recordingPanelTrigger.ts';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
-import { formatSavedRecording, buildRecordingHeader } from './SavedRecordingsPanel.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
-import { useIsMobile } from '../../hooks/use-mobile.tsx';
-import api from '../../utils/api.ts';
-import type { SavedRecording } from '../../../../shared/types/models.ts';
 import type { UnifiedStatus } from '../../../../shared/types/session.ts';
 import type { TerminalUIMode } from '../../utils/claudeTerminalRegexDetection.ts';
 
@@ -50,28 +46,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const { getRecordingContent } = useTerminalRecording();
-  const isMobile = useIsMobile();
   const [moreOpen, setMoreOpen] = useState(false);
-
-  // Mobile auto-insert: prepend saved recordings into prompt on chat open
-  useEffect(() => {
-    if (!isMobile) return;
-    api.get<{ recordings: SavedRecording[] }>(`/api/projects/${projectId}/recordings`)
-      .then(res => {
-        const recs = res.recordings;
-        if (!recs?.length) return;
-        setValue(prev => {
-          const newRecs = recs.filter(r => {
-            const header = buildRecordingHeader(r);
-            return !prev.includes(header);
-          });
-          if (!newRecs.length) return prev;
-          const content = newRecs.map(formatSavedRecording).join('\n\n');
-          return content + (prev ? '\n\n' + prev : '');
-        });
-      })
-      .catch(() => {});
-  }, [isMobile, projectId]);
 
   useEffect(() => {
     if (textareaRef.current) {
