@@ -4,6 +4,7 @@ import { useSearch } from '../../context/SearchContext.tsx';
 export default function SearchOverlay() {
   const { isOpen, close, handler } = useSearch();
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<{ resultIndex: number; resultCount: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus input when opening
@@ -15,8 +16,19 @@ export default function SearchOverlay() {
       }, 50);
     } else {
       setQuery('');
+      setResults(null);
     }
   }, [isOpen]);
+
+  // Subscribe to live result counts from the active handler (xterm SearchAddon).
+  // No-op for handlers that don't expose onResultsChange.
+  useEffect(() => {
+    if (!handler?.onResultsChange) {
+      setResults(null);
+      return;
+    }
+    return handler.onResultsChange((info) => setResults(info));
+  }, [handler]);
 
   // Incremental search as user types
   useEffect(() => {
@@ -25,10 +37,13 @@ export default function SearchOverlay() {
       handler.findNext(query, true);
     } else {
       handler.clearSearch();
+      setResults(null);
     }
   }, [query, handler, isOpen]);
 
-  if (!isOpen) return null;
+  // Belt-and-suspenders: SearchContext already prevents the overlay from
+  // opening without a handler, but if one unregisters mid-session we hide.
+  if (!isOpen || !handler) return null;
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
@@ -61,6 +76,12 @@ export default function SearchOverlay() {
         placeholder="Find in page..."
         className="w-48 text-sm bg-transparent text-text placeholder:text-text-dim focus:outline-none ml-1"
       />
+      {/* Live match count from xterm SearchAddon. Hidden when the handler doesn't report counts. */}
+      {query && results && (
+        <span className={`text-[11px] font-mono px-1 ${results.resultCount === 0 ? 'text-danger' : 'text-text-muted'}`}>
+          {results.resultCount === 0 ? 'no results' : `${results.resultIndex + 1}/${results.resultCount}`}
+        </span>
+      )}
       <button
         onClick={() => handler?.findPrevious(query)}
         disabled={!query}

@@ -4,6 +4,13 @@ export interface SearchHandler {
   findNext: (query: string, incremental?: boolean) => boolean;
   findPrevious: (query: string) => boolean;
   clearSearch: () => void;
+  /**
+   * Optional: subscribe to match-count updates from the underlying engine
+   * (e.g. xterm.js SearchAddon's onDidChangeResults). Returns an unsubscribe
+   * fn. SearchOverlay uses this to render a "3/17" indicator next to the
+   * input when the active page is a terminal.
+   */
+  onResultsChange?: (cb: (info: { resultIndex: number; resultCount: number }) => void) => () => void;
 }
 
 interface SearchContextValue {
@@ -46,25 +53,38 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Listen for Ctrl/Cmd+F on desktop — capture phase to prevent native find bar
+  // Listen for Ctrl/Cmd+F on desktop. We only intercept the shortcut when a
+  // page-scoped search handler is registered (chat views, script terminals).
+  // Otherwise we fall through to the browser's native find bar so DOM-level
+  // pages (workspace list, Catalog, settings, etc.) remain searchable.
   useEffect(() => {
     if (window.innerWidth < 768) return;
 
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        setIsOpen(prev => {
-          if (prev) handlerRef.current?.clearSearch();
-          return !prev;
-        });
+      if (!((e.ctrlKey || e.metaKey) && e.key === 'f')) return;
+      if (!handlerRef.current) {
+        // No handler — close any stale overlay and let the browser handle Cmd+F.
+        setIsOpen(false);
+        return;
       }
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      setIsOpen(prev => {
+        if (prev) handlerRef.current?.clearSearch();
+        return !prev;
+      });
     }
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, []);
+
+  // Auto-close the overlay if the active handler unregisters (e.g. the user
+  // navigates away from a chat). Avoids a stuck "find" bar with no target.
+  useEffect(() => {
+    if (!handler && isOpen) setIsOpen(false);
+  }, [handler, isOpen]);
 
   return (
     <SearchContext.Provider value={{ isOpen, open, close, handler, registerHandler, unregisterHandler }}>

@@ -49,7 +49,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     updateDraft(text);
   }, [updateDraft]);
 
-  const { terminal, status, terminalUIMode, write, searchFindNext, searchFindPrevious, searchClear } = useClaudeCode(containerRef, {
+  const { terminal, status, terminalUIMode, write, searchFindNext, searchFindPrevious, searchClear, searchOnResultsChange } = useClaudeCode(containerRef, {
     socket,
     projectId,
     chatId: chatId!,
@@ -155,7 +155,8 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
     findNext: (q, inc) => searchFindNext(q, inc),
     findPrevious: (q) => searchFindPrevious(q),
     clearSearch: () => searchClear(),
-  }), [searchFindNext, searchFindPrevious, searchClear]);
+    onResultsChange: searchOnResultsChange,
+  }), [searchFindNext, searchFindPrevious, searchClear, searchOnResultsChange]);
 
   useEffect(() => {
     registerHandler(searchHandler);

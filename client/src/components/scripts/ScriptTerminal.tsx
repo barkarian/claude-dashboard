@@ -24,7 +24,7 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { processes } = useProcessStatus(projectId);
 
-  const { status, searchFindNext, searchFindPrevious, searchClear } = useTerminal(containerRef, {
+  const { status, searchFindNext, searchFindPrevious, searchClear, searchOnResultsChange } = useTerminal(containerRef, {
     socket,
     projectId,
     scriptId: scriptId!,
@@ -35,7 +35,8 @@ export default function ScriptTerminal({ projectId }: ScriptTerminalProps) {
     findNext: (q, inc) => searchFindNext(q, inc),
     findPrevious: (q) => searchFindPrevious(q),
     clearSearch: () => searchClear(),
-  }), [searchFindNext, searchFindPrevious, searchClear]);
+    onResultsChange: searchOnResultsChange,
+  }), [searchFindNext, searchFindPrevious, searchClear, searchOnResultsChange]);
 
   useEffect(() => {
     registerHandler(searchHandler);

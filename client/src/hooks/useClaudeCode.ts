@@ -28,6 +28,7 @@ interface UseClaudeCodeReturn {
   searchFindNext: (query: string, incremental?: boolean) => boolean;
   searchFindPrevious: (query: string) => boolean;
   searchClear: () => void;
+  searchOnResultsChange: (cb: (info: { resultIndex: number; resultCount: number }) => void) => () => void;
 }
 
 export function useClaudeCode(
@@ -576,5 +577,10 @@ export function useClaudeCode(
     try { searchAddonRef.current?.clearDecorations(); } catch {}
   }, []);
 
-  return { terminal: termRef, status, terminalUIMode, write, stop, searchFindNext, searchFindPrevious, searchClear };
+  const searchOnResultsChange = useCallback((cb: (info: { resultIndex: number; resultCount: number }) => void) => {
+    const disp = searchAddonRef.current?.onDidChangeResults?.(cb);
+    return () => { try { disp?.dispose(); } catch {} };
+  }, []);
+
+  return { terminal: termRef, status, terminalUIMode, write, stop, searchFindNext, searchFindPrevious, searchClear, searchOnResultsChange };
 }
