@@ -2,15 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 
 import { useLocation } from 'react-router-dom';
 import FilePicker from './FilePicker.tsx';
-import TerminalRecordButton from './TerminalRecordButton.tsx';
-import ScriptPickerPanel from './ScriptPickerPanel.tsx';
-import RecordingPreviewPanel from './RecordingPreviewPanel.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
-import SavedRecordingsPanel from './SavedRecordingsPanel.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { haptics } from '../../utils/haptics.ts';
+import { isCapacitorNative } from '../../utils/platform.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
 interface SDKPromptInputProps {
@@ -29,15 +26,14 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const [value, setValue] = useState(initialDraft || '');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
-  const [showScriptPicker, setShowScriptPicker] = useState(false);
-  const [showLivePreview, setShowLivePreview] = useState(false);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingAutoSendRef = useRef<string | null>(null);
 
-  const { activeRecording, stopRecording, getRecordingContent } = useTerminalRecording();
-  const [showSavedRecordings, setShowSavedRecordings] = useState(false);
+  const { getRecordingContent } = useTerminalRecording();
+  const native = isCapacitorNative();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -143,15 +139,6 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
     textareaRef.current?.focus();
   }
 
-  function handleStopAndInsert(id: string) {
-    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-    setShowLivePreview(false);
-  }
-
-  function handleRecordingStopped(id: string) {
-    setValue(prev => (prev ? prev + ' ' : '') + `#rec:${id}`);
-  }
-
   return (
     <div className="flex-shrink-0 relative border-t border-border p-3">
       {/* Popups above input */}
@@ -165,52 +152,6 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
         </div>
       )}
 
-      {showScriptPicker && !activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <ScriptPickerPanel
-            projectId={projectId}
-            onClose={() => setShowScriptPicker(false)}
-            onStarted={() => setShowLivePreview(true)}
-          />
-        </div>
-      )}
-
-      {showSavedRecordings && !activeRecording && !showScriptPicker && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <div className="bg-bg-surface border border-border rounded-xl shadow-xl overflow-hidden">
-            <div className="p-3 border-b border-border">
-              <button
-                onClick={() => { setShowSavedRecordings(false); setShowScriptPicker(true); }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border hover:bg-bg-hover transition-colors text-text-muted hover:text-text"
-              >
-                <svg className="w-4 h-4 text-danger" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="7" />
-                </svg>
-                New Recording
-              </button>
-            </div>
-            <SavedRecordingsPanel
-              projectId={projectId}
-              onInsert={(content) => {
-                setValue(prev => content + (prev ? '\n\n' + prev : ''));
-                setShowSavedRecordings(false);
-              }}
-              onClose={() => setShowSavedRecordings(false)}
-              compact
-            />
-          </div>
-        </div>
-      )}
-
-      {showLivePreview && activeRecording && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 px-3 z-[60]">
-          <RecordingPreviewPanel
-            onClose={() => setShowLivePreview(false)}
-            onStop={handleStopAndInsert}
-          />
-        </div>
-      )}
-
       {/* Badge bar for recording tokens */}
       <RecordingBadgeBar
         value={value}
@@ -219,31 +160,39 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
       />
 
       <div className="flex items-end gap-2">
-        <button
-          onClick={() => setShowHistory(true)}
-          disabled={disabled}
-          className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-50"
-          aria-label="Previous messages"
-          title="Previous messages"
+        {/* Previous messages — collapses out of the row when textarea is focused on native (keyboard open) */}
+        <div
+          className="flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
+          style={{
+            width: native && focused ? 0 : 36,
+            opacity: native && focused ? 0 : 1,
+          }}
+          aria-hidden={native && focused}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-
-        <TerminalRecordButton
-          onOpenScriptPicker={() => setShowSavedRecordings(true)}
-          onOpenLivePreview={() => setShowLivePreview(true)}
-          disabled={disabled}
-        />
+          <button
+            onClick={() => setShowHistory(true)}
+            disabled={disabled}
+            tabIndex={native && focused ? -1 : 0}
+            className="w-9 h-9 flex items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-50"
+            aria-label="Previous messages"
+            title="Previous messages"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+        </div>
 
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => { setValue(e.target.value); onDraftChange?.(e.target.value); }}
           onKeyDown={handleKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           autoFocus={autoFocus}
-          className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[42px] max-h-[200px] py-2.5 flex-1"
+          style={{ minHeight: native && focused ? 140 : 42 }}
+          className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1"
           placeholder={
             disabled
               ? 'Session not active'

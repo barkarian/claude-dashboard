@@ -47,6 +47,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   const [showHistory, setShowHistory] = useState(false);
   const { getRecordingContent } = useTerminalRecording();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -340,18 +341,28 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
         />
 
         <div className="flex items-end gap-2">
-          {/* Previous message picker — compact icon button */}
-          <button
-            type="button"
-            onClick={() => setShowHistory(true)}
-            disabled={disabled}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
-            title="Previous messages"
+          {/* Previous messages — collapses out of the row when textarea is focused on native (keyboard open) */}
+          <div
+            className="flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
+            style={{
+              width: native && focused ? 0 : 40,
+              opacity: native && focused ? 0 : 1,
+            }}
+            aria-hidden={native && focused}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </button>
+            <button
+              type="button"
+              onClick={() => setShowHistory(true)}
+              disabled={disabled}
+              tabIndex={native && focused ? -1 : 0}
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
+              title="Previous messages"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
 
           <textarea
             ref={textareaRef}
@@ -361,14 +372,17 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               onDraftChange?.(e.target.value);
             }}
             onFocus={() => {
+              setFocused(true);
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
                 textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
               }
             }}
+            onBlur={() => setFocused(false)}
             onKeyDown={handleKeyDown}
             autoFocus={autoFocus}
-            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[44px] max-h-[200px] py-2.5 flex-1 text-base"
+            style={{ minHeight: native && focused ? 140 : 44 }}
+            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1 text-base"
             placeholder={
               disabled
                 ? 'Session not active'

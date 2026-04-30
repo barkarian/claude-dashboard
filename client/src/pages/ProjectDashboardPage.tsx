@@ -288,7 +288,7 @@ export default function ProjectDashboardPage() {
         statusDot={statusDotClass}
         statusLabel={statusLabel}
         onProjectSettings={() => setShowProjectSettings(true)}
-        projectActions={project ? (
+        projectActions={project && project.mode !== 'simple' ? (
           <DesktopRecordingControls projectId={id!} />
         ) : undefined}
         simpleMode={project?.mode === 'simple'}
