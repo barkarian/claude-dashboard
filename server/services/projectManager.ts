@@ -5,7 +5,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db, { resolveDefaultAdapter } from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
 // === Project Methods ===
 
@@ -567,6 +567,40 @@ function getChatMessages(chatId: string): ChatHistoryEntry[] {
   });
 }
 
+// === Chat Artifact Methods ===
+
+function createArtifact(chatId: string, params: { path: string; label?: string | null; size?: number | null; messageId?: string | null }): ChatArtifact {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO chat_artifacts (id, chat_id, message_id, path, label, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, chatId, params.messageId || null, params.path, params.label || null, params.size ?? null, now);
+  return {
+    id,
+    chatId,
+    messageId: params.messageId || null,
+    path: params.path,
+    label: params.label || null,
+    size: params.size ?? null,
+    createdAt: now,
+  };
+}
+
+function listArtifactsByChat(chatId: string): ChatArtifact[] {
+  const rows = db.prepare(
+    'SELECT id, chat_id, message_id, path, label, size, created_at FROM chat_artifacts WHERE chat_id = ? ORDER BY created_at ASC'
+  ).all(chatId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    chatId: r.chat_id,
+    messageId: r.message_id || null,
+    path: r.path,
+    label: r.label || null,
+    size: typeof r.size === 'number' ? r.size : null,
+    createdAt: r.created_at,
+  }));
+}
+
 // === Recording Methods ===
 
 const MAX_RECORDINGS_PER_PROJECT = 20;
@@ -676,6 +710,9 @@ export default {
   deleteChat,
   addMessage,
   getChatMessages,
+  // Artifacts
+  createArtifact,
+  listArtifactsByChat,
   // Recordings
   saveRecording,
   listRecordings,

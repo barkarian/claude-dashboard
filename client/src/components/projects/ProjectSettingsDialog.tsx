@@ -199,12 +199,12 @@ export default function ProjectSettingsDialog({
   }
 
   const shellChanged = (localShellOverride || null) !== (shellOverride || null);
-  // Adapter list filtered by mode: simple workspaces only see claude-agent-sdk;
+  // Adapter list filtered by mode: simple workspaces only see claw-chat;
   // dev workspaces see every enabled adapter. Filtered against the SAVED mode
   // (not localMode) so adapters don't flicker on toggle before save.
   const enabledAdapters = adapterInfos
     .filter(a => a.enabled)
-    .filter(a => mode === 'dev' || a.metadata.id === 'claude-agent-sdk')
+    .filter(a => mode === 'dev' || a.metadata.id === 'claw-chat')
     .map(a => ({ metadata: a.metadata }));
 
   return (

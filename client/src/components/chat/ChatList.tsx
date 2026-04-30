@@ -632,7 +632,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         onSelect={handlePickerSelect}
         enabledAdapters={adapterInfos
           .filter(a => a.enabled)
-          .filter(a => project?.mode === 'dev' || a.metadata.id === 'claude-agent-sdk')
+          .filter(a => project?.mode === 'dev' || a.metadata.id === 'claw-chat')
           .map(a => ({ metadata: a.metadata }))}
         adapterOrder={project?.adapterOrder ?? null}
         onReorder={handleAdapterReorder}

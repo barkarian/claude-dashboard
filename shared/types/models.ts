@@ -65,6 +65,21 @@ export interface Project {
   chats: Chat[];
 }
 
+/**
+ * Chat artifact — a file or image the agent surfaces inline via the
+ * `display_artifact` tool in the claw-chat adapter. Stored separately from
+ * messages so they survive partial-message rebuilds and chat reloads.
+ */
+export interface ChatArtifact {
+  id: string;
+  chatId: string;
+  messageId: string | null;
+  path: string;
+  label: string | null;
+  size: number | null;
+  createdAt: string;
+}
+
 export interface ProjectSummary {
   id: string;
   name: string;

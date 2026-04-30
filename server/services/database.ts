@@ -302,6 +302,21 @@ try {
   // settings table not ready or projects table missing mode column — skip.
 }
 
+// Chat artifacts (file/image references the agent surfaces in chat via display_artifact).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_artifacts (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id TEXT,
+    path TEXT NOT NULL,
+    label TEXT,
+    size INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_artifacts_chat ON chat_artifacts(chat_id, created_at);
+`);
+
+
 // --- Adapter settings (per-adapter key-value store) ---
 
 db.exec(`
@@ -312,6 +327,29 @@ db.exec(`
     PRIMARY KEY (adapter_id, key)
   )
 `);
+
+// One-shot: mirror claude-agent-sdk's enabled state to claw-chat for existing
+// installs. They share authentication; the only delta is the artifacts tool.
+// Without this, simple-mode chat creation would fail "adapter not enabled" for
+// users with a pre-existing DB. Gated by a flag so it runs at most once.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.claw_chat_seed_at'").get();
+  if (!flag) {
+    const sdkEnabled = db.prepare(
+      "SELECT value FROM adapter_settings WHERE adapter_id = 'claude-agent-sdk' AND key = 'enabled'"
+    ).get() as { value: string } | undefined;
+    if (sdkEnabled) {
+      db.prepare(
+        "INSERT OR REPLACE INTO adapter_settings (adapter_id, key, value) VALUES ('claw-chat', 'enabled', ?)"
+      ).run(sdkEnabled.value);
+    }
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.claw_chat_seed_at', ?)"
+    ).run(new Date().toISOString());
+  }
+} catch (err) {
+  console.error('claw-chat seed migration failed:', err);
+}
 
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;

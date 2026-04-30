@@ -10,7 +10,9 @@ import SDKPromptInput from './SDKPromptInput.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
+import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
+import type { ChatArtifact } from '../../../../shared/types/models.ts';
 
 interface SDKChatViewProps {
   projectId: string;
@@ -43,6 +45,47 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   } = useSDKMessages(socket, chatId);
 
   const [connecting, setConnecting] = useState(true);
+
+  // Artifacts emitted by the agent's display_artifact tool (claw-chat adapter).
+  // Loaded from the REST endpoint on mount, plus appended live via socket events.
+  const [artifacts, setArtifacts] = useState<ChatArtifact[]>([]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    let cancelled = false;
+    api.get<{ artifacts: ChatArtifact[] }>(`/api/projects/${projectId}/chats/${chatId}/artifacts`)
+      .then((data) => {
+        if (!cancelled) setArtifacts(data.artifacts || []);
+      })
+      .catch(() => {
+        // 404 / network — leave artifacts empty
+      });
+    return () => { cancelled = true; };
+  }, [projectId, chatId]);
+
+  useEffect(() => {
+    if (!socket || !chatId) return;
+    function handleArtifact({ chatId: cid, artifact }: { chatId: string; artifact: ChatArtifact }) {
+      if (cid !== chatId) return;
+      setArtifacts((prev) => prev.some(a => a.id === artifact.id) ? prev : [...prev, artifact]);
+    }
+    socket.on('chat:artifact', handleArtifact);
+    return () => { socket.off('chat:artifact', handleArtifact); };
+  }, [socket, chatId]);
+
+  const { artifactsByMessageId, trailingArtifacts } = useMemo(() => {
+    const byMsg: Record<string, ChatArtifact[]> = {};
+    const trailing: ChatArtifact[] = [];
+    const messageIds = new Set(messages.map(m => m.id));
+    for (const a of artifacts) {
+      if (a.messageId && messageIds.has(a.messageId)) {
+        (byMsg[a.messageId] ||= []).push(a);
+      } else {
+        trailing.push(a);
+      }
+    }
+    return { artifactsByMessageId: byMsg, trailingArtifacts: trailing };
+  }, [artifacts, messages]);
 
   // Determine autoFocus from navigation state (only set when explicitly creating a new chat)
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
@@ -208,7 +251,13 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
       ) : (
         <>
           {/* Messages (errors appear inline as chat bubbles) */}
-          <MessageList ref={messageListRef} messages={messages} />
+          <MessageList
+            ref={messageListRef}
+            messages={messages}
+            artifactsByMessageId={artifactsByMessageId}
+            trailingArtifacts={trailingArtifacts}
+            projectId={projectId}
+          />
 
           {/* Cost badge */}
           {lastResult && status === 'idle' && <CostBadge result={lastResult} />}

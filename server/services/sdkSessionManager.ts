@@ -1,4 +1,7 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import path from 'node:path';
+import fs from 'node:fs';
 import type { Server as SocketIOServer } from 'socket.io';
 import type {
   SDKSessionStatus,
@@ -35,8 +38,14 @@ const INTERACTIVE_TOOLS = new Set([
   'AskUserQuestion',
 ]);
 
-// Union of unsupported + interactive — used to filter these tool blocks from the chat stream
-const FILTERED_TOOLS = new Set([...UNSUPPORTED_TOOLS, ...INTERACTIVE_TOOLS]);
+// Tools whose tool_use blocks we hide from the chat stream because the UI
+// renders a dedicated affordance for them (artifact cards in this case).
+const HIDDEN_TOOLS = new Set([
+  'mcp__claw_artifacts__display_artifact',
+]);
+
+// Union of unsupported + interactive + hidden — used to filter these tool blocks from the chat stream
+const FILTERED_TOOLS = new Set([...UNSUPPORTED_TOOLS, ...INTERACTIVE_TOOLS, ...HIDDEN_TOOLS]);
 
 interface PermissionResolver {
   resolve: (result: { behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }) => void;
@@ -62,6 +71,14 @@ interface SDKSession {
   questionResolvers: Map<string, QuestionResolver>;
   queryStartTime: number | null;
   lastActivityAt: number;
+  /** Enable the display_artifact MCP tool (claw-chat adapter). */
+  withArtifacts: boolean;
+  /** ID of the assistant message currently being streamed (used to anchor artifacts). */
+  currentAssistantMsgId?: string;
+}
+
+interface InitSessionOptions {
+  withArtifacts?: boolean;
 }
 
 const sessions = new Map<string, SDKSession>();
@@ -141,12 +158,68 @@ function touchActivity(session: SDKSession): void {
 }
 
 
+/**
+ * Build a per-session MCP server exposing `display_artifact`. The handler
+ * validates the path is inside the workspace, persists the artifact record,
+ * and pushes a socket event to the chat room so the UI can render a card.
+ */
+function buildArtifactsMcpServer(session: SDKSession) {
+  const workspaceRoot = path.resolve(session.projectPath);
+  return createSdkMcpServer({
+    name: 'claw_artifacts',
+    version: '1.0.0',
+    tools: [
+      tool(
+        'display_artifact',
+        'Surface a file or image to the user as an artifact card in the chat. Use this for any file the user should view or download (reports, generated images, exported data). Pass a path relative to the workspace root, or an absolute path inside it. Image extensions (.png, .jpg, .jpeg, .gif, .webp, .svg) render inline; other types render as a clickable file card.',
+        {
+          path: z.string().describe('Path to the file. Relative to the workspace root, or absolute path inside it.'),
+          label: z.string().optional().describe('Optional human-friendly title shown on the card. Defaults to the filename.'),
+        },
+        async (args: { path: string; label?: string }) => {
+          const inputPath = args.path;
+          const abs = path.isAbsolute(inputPath) ? inputPath : path.resolve(workspaceRoot, inputPath);
+          if (!abs.startsWith(workspaceRoot)) {
+            return { content: [{ type: 'text' as const, text: `Error: path is outside the workspace root: ${inputPath}` }] };
+          }
+          if (!fs.existsSync(abs)) {
+            return { content: [{ type: 'text' as const, text: `Error: file not found: ${inputPath}` }] };
+          }
+          let stat: fs.Stats;
+          try {
+            stat = fs.statSync(abs);
+          } catch (err: any) {
+            return { content: [{ type: 'text' as const, text: `Error: cannot stat file: ${err?.message || 'unknown'}` }] };
+          }
+          if (!stat.isFile()) {
+            return { content: [{ type: 'text' as const, text: `Error: path is not a file: ${inputPath}` }] };
+          }
+          const relPath = path.relative(workspaceRoot, abs);
+          const filename = path.basename(abs);
+          const artifact = projectManager.createArtifact(session.chatId, {
+            path: relPath,
+            label: args.label || null,
+            size: stat.size,
+            messageId: session.currentAssistantMsgId || null,
+          });
+          session.io.to(`claude:${session.chatId}`).emit('chat:artifact', {
+            chatId: session.chatId,
+            artifact,
+          });
+          return { content: [{ type: 'text' as const, text: `Displayed ${filename} (${stat.size} bytes)` }] };
+        },
+      ),
+    ],
+  });
+}
+
 function initSession(
   chatId: string,
   projectId: string,
   projectPath: string,
   io: SocketIOServer,
   sdkSessionId?: string,
+  options?: InitSessionOptions,
 ): void {
   // End existing session if any
   endSession(chatId);
@@ -165,6 +238,7 @@ function initSession(
     questionResolvers: new Map(),
     queryStartTime: null,
     lastActivityAt: Date.now(),
+    withArtifacts: !!options?.withArtifacts,
   };
 
   if (sdkSessionId) {
@@ -299,6 +373,8 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
 
   // Create a partial assistant message for streaming
   const assistantMsgId = `assistant-${Date.now()}`;
+  // Anchor any artifacts emitted during this turn to the message being built.
+  session.currentAssistantMsgId = assistantMsgId;
   let currentContent: ContentBlock[] = [];
 
   const partialMessage: SDKChatMessage = {
@@ -314,10 +390,24 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
   // Try with resume first, fall back to fresh conversation if resume fails
   let useResume = !!session.sdkSessionId;
 
+  // Build the artifacts MCP server lazily — only sessions that opted in get it.
+  // Each session gets its own instance so the closure can resolve paths against
+  // its own workspace and emit on the right room.
+  const artifactsMcp = session.withArtifacts ? buildArtifactsMcpServer(session) : null;
+
+  const allowedToolNames = [
+    'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch',
+    ...(artifactsMcp ? ['mcp__claw_artifacts__display_artifact'] : []),
+  ];
+
+  const artifactsSystemPrompt = artifactsMcp
+    ? '\n\nWhen you produce a file, image, or any artifact the user should see (a generated chart, a finished report, a downloaded asset), call the `display_artifact` tool with the file\'s path (relative to the workspace root) so it appears as a card in the chat. Use this for anything the user might want to view or download. Image files (.png, .jpg, .gif, .webp, .svg) render inline.'
+    : '';
+
   for (let attempt = 0; attempt < 2; attempt++) {
     const queryOptions: any = {
       cwd: session.projectPath,
-      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],
+      allowedTools: allowedToolNames,
       abortController: session.abortController,
       includePartialMessages: true,
       canUseTool,
@@ -327,7 +417,7 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: `\n\nIMPORTANT: Your project root directory is ${session.projectPath}. All files you create, read, or modify MUST be within this directory. When the user refers to "root directory", "project root", or "here", they mean ${session.projectPath}. Never create files outside this directory.`,
+        append: `\n\nIMPORTANT: Your project root directory is ${session.projectPath}. All files you create, read, or modify MUST be within this directory. When the user refers to "root directory", "project root", or "here", they mean ${session.projectPath}. Never create files outside this directory.${artifactsSystemPrompt}`,
       },
       stderr: (data: string) => {
         console.error(`[sdk:${chatId}:stderr] ${data}`);
@@ -337,6 +427,10 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
         }
       },
     };
+
+    if (artifactsMcp) {
+      queryOptions.mcpServers = { claw_artifacts: artifactsMcp };
+    }
 
     if (useResume && session.sdkSessionId) {
       queryOptions.resume = session.sdkSessionId;

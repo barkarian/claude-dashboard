@@ -498,10 +498,11 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     // Use explicit adapter if provided, otherwise fall back to project default (then global default)
     const { resolveDefaultAdapter } = await import('../services/database.ts');
     let chatAdapter = adapter || project.defaultAdapter || resolveDefaultAdapter();
-    // Defense-in-depth: simple-mode workspaces always use the SDK adapter for new chats,
-    // even if the client requests something else. Existing chats keep their own adapter.
+    // Defense-in-depth: simple-mode workspaces always use the claw-chat adapter
+    // (SDK + display_artifact tool) for new chats, even if the client requests
+    // something else. Existing chats keep their own adapter.
     if (project.mode === 'simple') {
-      chatAdapter = 'claude-agent-sdk';
+      chatAdapter = 'claw-chat';
     }
 
     // Validate adapter is registered
@@ -699,6 +700,17 @@ router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: st
   } catch (err) {
     console.error('Error deleting chat:', err);
     res.status(500).json({ error: 'Failed to delete chat' });
+  }
+});
+
+// Chat artifacts (display_artifact tool output) — list for a given chat
+router.get('/:id/chats/:chatId/artifacts', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const artifacts = projectManager.listArtifactsByChat(req.params.chatId);
+    res.json({ artifacts });
+  } catch (err) {
+    console.error('Error listing chat artifacts:', err);
+    res.status(500).json({ error: 'Failed to list artifacts' });
   }
 });
 

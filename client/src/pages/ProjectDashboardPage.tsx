@@ -29,12 +29,12 @@ import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
   const { project } = useProject();
-  // Simple-mode workspaces are pinned to the SDK adapter regardless of any
-  // historical defaultAdapter setting. Existing chats keep their own adapter
-  // resolution inside ChatViewShell — this only governs the *project-level*
-  // view selection for the new-chat flow.
+  // Simple-mode workspaces are pinned to the claw-chat adapter (SDK + artifacts)
+  // regardless of any historical defaultAdapter setting. Existing chats keep
+  // their own adapter resolution inside ChatViewShell — this only governs the
+  // *project-level* view selection for the new-chat flow.
   const adapterId = project?.mode === 'simple'
-    ? 'claude-agent-sdk'
+    ? 'claw-chat'
     : (project?.defaultAdapter || 'claude-agent-sdk');
 
   // Use adapter registry if the adapter is registered (new plugin system)
