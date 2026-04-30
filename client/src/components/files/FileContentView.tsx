@@ -5,7 +5,14 @@ import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useTheme } from '../../context/ThemeContext.tsx';
 import { buildDownloadUrl, downloadProjectFile } from '../../utils/downloadFile.ts';
+import { usePreviewInfo } from '../../hooks/usePreviewInfo.ts';
 import MarkdownRenderer from '../chat/blocks/MarkdownRenderer.tsx';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../ui/dropdown-menu.tsx';
 
 const SIZE_WARN_BYTES = 2 * 1024 * 1024; // 2 MB
 
@@ -53,6 +60,24 @@ function isPlainTextByExtension(filePath: string): boolean {
 function isMarkdownByExtension(filePath: string): boolean {
   const ext = getExtension(filePath);
   return ext === 'md' || ext === 'markdown' || ext === 'mdown';
+}
+
+const OFFICE_HTML_EXTS = new Set(['docx', 'xlsx', 'xls']);
+const OFFICE_THUMB_EXTS = new Set(['pptx']);
+const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'm4v']);
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac']);
+
+function isOfficeHtmlByExtension(filePath: string): boolean {
+  return OFFICE_HTML_EXTS.has(getExtension(filePath));
+}
+function isOfficeThumbByExtension(filePath: string): boolean {
+  return OFFICE_THUMB_EXTS.has(getExtension(filePath));
+}
+function isVideoByExtension(filePath: string): boolean {
+  return VIDEO_EXTS.has(getExtension(filePath));
+}
+function isAudioByExtension(filePath: string): boolean {
+  return AUDIO_EXTS.has(getExtension(filePath));
 }
 
 function looksBinary(content: string): boolean {
@@ -109,11 +134,20 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   const [largeFileSize, setLargeFileSize] = useState<number | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
+  // Image quality toggle: "compressed" uses the cached preview JPEG, "full" hits
+  // the original. We default to compressed for big images so opening the
+  // preview is fast on mobile/tunnel; user can flip to full for fidelity.
+  const [imageQuality, setImageQuality] = useState<'compressed' | 'full'>('compressed');
   const binaryByExt = isBinaryByExtension(filePath);
   const imageByExt = isImageByExtension(filePath);
   const inlineByExt = isInlinePreviewExtension(filePath);
   const isMarkdown = isMarkdownByExtension(filePath);
   const isPlainText = isPlainTextByExtension(filePath);
+  const isOfficeHtml = isOfficeHtmlByExtension(filePath);
+  const isOfficeThumb = isOfficeThumbByExtension(filePath);
+  const isVideo = isVideoByExtension(filePath);
+  const isAudio = isAudioByExtension(filePath);
+  const previewInfo = usePreviewInfo(projectId, filePath);
 
   const fetchContent = useCallback(() => {
     if (!socket) return;
@@ -185,8 +219,8 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   const isBinary = binaryByExt || (content !== null && looksBinary(content));
   const isEmpty = fileSize === 0 || (content !== null && content.length === 0);
 
-  const handleDownload = useCallback(() => {
-    downloadProjectFile(projectId, filePath).catch((err) => {
+  const handleDownload = useCallback((opts: { variant?: 'preview' } = {}) => {
+    downloadProjectFile(projectId, filePath, opts).catch((err) => {
       console.error('Download failed:', err);
     });
   }, [projectId, filePath]);
@@ -226,16 +260,68 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
             </button>
           </div>
         )}
-        <button
-          onClick={handleDownload}
-          className="flex-shrink-0 p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
-          title="Download"
-          aria-label="Download file"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-        </button>
+        {imageByExt && previewInfo.available && (
+          <div className="flex-shrink-0 flex gap-0.5 p-0.5 bg-bg rounded-md">
+            <button
+              type="button"
+              onClick={() => setImageQuality('compressed')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                imageQuality === 'compressed' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Compressed
+            </button>
+            <button
+              type="button"
+              onClick={() => setImageQuality('full')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                imageQuality === 'full' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Full
+            </button>
+          </div>
+        )}
+        {previewInfo.available ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex-shrink-0 p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+                title="Download"
+                aria-label="Download file"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleDownload({ variant: 'preview' })}>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium">Compressed</span>
+                  <span className="text-[10px] text-text-muted">Smaller, lower quality</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownload()}>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium">Original</span>
+                  <span className="text-[10px] text-text-muted">{formatSize(previewInfo.originalSize ?? fileSize ?? 0)}</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button
+            onClick={() => handleDownload()}
+            className="flex-shrink-0 p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+            title="Download"
+            aria-label="Download file"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -281,7 +367,11 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
         ) : imageByExt ? (
           <div className="flex flex-col items-center gap-3 p-4">
             <img
-              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              src={
+                imageQuality === 'compressed' && previewInfo.available
+                  ? `${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`
+                  : `${buildDownloadUrl(projectId, filePath)}&inline=1`
+              }
               alt={filePath}
               className="max-w-full h-auto rounded-lg bg-bg-surface"
               style={{ WebkitTouchCallout: 'default', touchAction: 'manipulation' }}
@@ -291,11 +381,51 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
             </p>
           </div>
         ) : inlineByExt ? (
+          // PDFs: native browser PDF viewer streams the original directly.
           <iframe
             src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
             title={filePath}
             className="w-full h-full border-0 bg-bg-surface"
           />
+        ) : isOfficeHtml ? (
+          // Word / Excel: server renders a sandboxed HTML preview via mammoth/xlsx.
+          <iframe
+            src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
+            title={filePath}
+            className="w-full h-full border-0 bg-bg-surface"
+            sandbox=""
+          />
+        ) : isOfficeThumb ? (
+          // PowerPoint: server extracts the embedded thumbnail (single slide preview).
+          // Real preview would require LibreOffice — out of scope; user can download.
+          <div className="flex flex-col items-center gap-3 p-4">
+            <img
+              src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
+              alt={`${filePath} thumbnail`}
+              className="max-w-full h-auto rounded-lg bg-bg-surface"
+            />
+            <p className="text-text-dim text-xs text-center">
+              Slide thumbnail. Download the file for the full presentation.
+            </p>
+          </div>
+        ) : isVideo ? (
+          // Browser streams the original via HTTP range requests — no transcoding.
+          <div className="flex items-center justify-center bg-black">
+            <video
+              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              controls
+              playsInline
+              className="max-w-full max-h-full"
+            />
+          </div>
+        ) : isAudio ? (
+          <div className="flex flex-col items-center gap-3 p-6">
+            <audio
+              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              controls
+              className="w-full max-w-md"
+            />
+          </div>
         ) : isBinary ? (
           <div className="flex flex-col items-center gap-4 pt-16 px-6 text-center">
             <svg className="w-10 h-10 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -308,7 +438,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
               </p>
             </div>
             <button
-              onClick={handleDownload}
+              onClick={() => handleDownload()}
               className="px-4 py-2 text-sm rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors font-medium inline-flex items-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

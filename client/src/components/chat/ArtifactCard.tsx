@@ -12,19 +12,30 @@
  * FileContentView (the same viewer the Files tab uses) — no
  * target="_blank" so Tauri / Capacitor stay in-app.
  *
- * Download goes through downloadProjectFile which already handles
- * Capacitor Share on native + <a download> on the web.
+ * Download button is a dropdown when previewService can produce a
+ * compressed/HTML variant (Compressed vs Original). Plain button when
+ * there's no preview to offer.
+ *
+ * Both go through downloadProjectFile which already handles Capacitor
+ * Share on native + <a download> on the web.
  */
 
 import { useState } from 'react';
 import type { ChatArtifact } from '../../../../shared/types/models.ts';
 import { buildDownloadUrl, downloadProjectFile } from '../../utils/downloadFile.ts';
+import { usePreviewInfo } from '../../hooks/usePreviewInfo.ts';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog.tsx';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../ui/dropdown-menu.tsx';
 import FileContentView from '../files/FileContentView.tsx';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp']);
@@ -46,19 +57,79 @@ interface ArtifactCardProps {
   projectId: string;
 }
 
+const DOWNLOAD_ICON = (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+  </svg>
+);
+
 export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps) {
   const filename = artifact.path.split('/').pop() || artifact.path;
   const label = artifact.label || filename;
-  const inlineUrl = `${buildDownloadUrl(projectId, artifact.path)}&inline=1`;
   const sizeLabel = formatSize(artifact.size);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const previewInfo = usePreviewInfo(projectId, artifact.path);
 
-  function handleDownload(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    downloadProjectFile(projectId, artifact.path).catch((err) => {
+  // For images we serve the compressed preview as the inline thumbnail —
+  // saves bandwidth on mobile/tunnel and matches the "low quality by default"
+  // UX. Click → dialog → user can flip to full quality there.
+  const inlineUrl = isImage(artifact.path)
+    ? `${buildDownloadUrl(projectId, artifact.path, { variant: 'preview' })}&inline=1`
+    : `${buildDownloadUrl(projectId, artifact.path)}&inline=1`;
+
+  function doDownload(opts: { variant?: 'preview' } = {}) {
+    downloadProjectFile(projectId, artifact.path, opts).catch((err) => {
       console.error('Artifact download failed:', err);
     });
+  }
+
+  // The download affordance — single button when there's nothing to choose,
+  // dropdown when previewService can build a compressed/HTML variant.
+  function DownloadAffordance({ className }: { className?: string }) {
+    if (previewInfo.available) {
+      return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={className}
+              title="Download"
+              aria-label={`Download ${label}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {DOWNLOAD_ICON}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuItem onClick={() => doDownload({ variant: 'preview' })}>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">Compressed</span>
+                <span className="text-[10px] text-text-muted">Smaller, lower quality</span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => doDownload()}>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">Original</span>
+                <span className="text-[10px] text-text-muted">
+                  {sizeLabel || formatSize(previewInfo.originalSize)}
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); doDownload(); }}
+        className={className}
+        title="Download"
+        aria-label={`Download ${label}`}
+      >
+        {DOWNLOAD_ICON}
+      </button>
+    );
   }
 
   if (isImage(artifact.path)) {
@@ -78,15 +149,9 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
               loading="lazy"
             />
           </button>
-          <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs">
-            <span className="truncate text-text-muted" title={artifact.path}>{label}</span>
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="flex-shrink-0 ml-2 text-primary hover:underline"
-            >
-              Download
-            </button>
+          <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs gap-2">
+            <span className="truncate text-text-muted flex-1" title={artifact.path}>{label}</span>
+            <DownloadAffordance className="flex-shrink-0 p-1 rounded text-text-muted hover:text-text hover:bg-bg-hover transition-colors" />
           </div>
         </div>
 
@@ -109,7 +174,6 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
   }
 
   // Generic file card. Click anywhere → in-app preview dialog (FileContentView).
-  // Download icon → downloadProjectFile (Capacitor Share on native, anchor on web).
   return (
     <>
       <div className="my-2 flex items-stretch rounded-lg border border-border bg-bg-surface max-w-md overflow-hidden">
@@ -130,21 +194,11 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
             </div>
           </div>
         </button>
-        <button
-          type="button"
-          onClick={handleDownload}
-          className="flex-shrink-0 flex items-center justify-center px-3 border-l border-border text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-          title="Download"
-          aria-label={`Download ${label}`}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-        </button>
+        <DownloadAffordance className="flex-shrink-0 flex items-center justify-center px-3 border-l border-border text-text-dim hover:text-text hover:bg-bg-hover transition-colors" />
       </div>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-3xl p-0 sm:max-w-3xl">
+        <DialogContent className="max-w-3xl p-0 sm:max-w-3xl [&>button]:hidden">
           <DialogHeader className="sr-only">
             <DialogTitle>{label}</DialogTitle>
           </DialogHeader>

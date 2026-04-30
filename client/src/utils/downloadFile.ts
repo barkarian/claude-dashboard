@@ -11,8 +11,15 @@ function basename(filePath: string): string {
   return filePath.split('/').pop() || 'download';
 }
 
-export function buildDownloadUrl(projectId: string, filePath: string): string {
-  return `${getApiBase()}/api/projects/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
+export interface DownloadUrlOptions {
+  /** Request the cached compressed/HTML preview built by previewService. */
+  variant?: 'preview';
+}
+
+export function buildDownloadUrl(projectId: string, filePath: string, options: DownloadUrlOptions = {}): string {
+  let url = `${getApiBase()}/api/projects/${projectId}/files/download?path=${encodeURIComponent(filePath)}`;
+  if (options.variant) url += `&variant=${encodeURIComponent(options.variant)}`;
+  return url;
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -42,9 +49,36 @@ function blobToBase64(blob: Blob): Promise<string> {
  *
  * Web fallback: <a download>.
  */
-export async function downloadProjectFile(projectId: string, filePath: string): Promise<void> {
-  const url = buildDownloadUrl(projectId, filePath);
-  const name = basename(filePath);
+export async function downloadProjectFile(
+  projectId: string,
+  filePath: string,
+  options: DownloadUrlOptions = {},
+): Promise<void> {
+  // If the user asked for the compressed preview but the server can't build
+  // one (e.g. PPTX without embedded thumbnail), the endpoint returns 404 —
+  // auto-fall back to the original so the user gets *something* and we don't
+  // mislead with the "Compressed/Original" UI.
+  if (options.variant === 'preview') {
+    try {
+      const head = await fetch(buildDownloadUrl(projectId, filePath, options), {
+        method: 'HEAD',
+        credentials: 'include',
+      });
+      if (head.status === 404) {
+        toast.message('No preview available — downloading the original instead.');
+        return downloadProjectFile(projectId, filePath, {});
+      }
+    } catch {
+      // Network or other failure — let the main path retry/error normally.
+    }
+  }
+
+  const url = buildDownloadUrl(projectId, filePath, options);
+  const original = basename(filePath);
+  // Preview downloads get a `.preview` suffix so they don't overwrite the
+  // original on disk. The browser uses the server's Content-Disposition for
+  // the actual extension; this `name` is only the Capacitor share filename.
+  const name = options.variant === 'preview' ? `${original}.preview` : original;
   const native = isCapacitorNative();
 
   if (native) {

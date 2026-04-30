@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
+import { getOrBuildPreview, getPreviewInfo } from '../services/previewService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
@@ -369,12 +370,18 @@ function mimeForFile(filename: string): string {
 }
 
 // File download (binary-safe, streams the file with a correct MIME type).
-// Query: ?path=<relative>&inline=1 — with inline=1 we omit Content-Disposition
-// so the response can be used as an <img>/<video>/iframe src.
+// Query:
+//   ?path=<relative>          — relative file path inside the workspace.
+//   &inline=1                 — omit Content-Disposition so the response can
+//                               be used as an <img>/<video>/iframe src.
+//   &variant=preview          — serve the cached compressed/HTML preview
+//                               built by previewService (falls back to
+//                               original when no previewer matches).
 router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const filePath = req.query.path as string;
     const inline = req.query.inline === '1';
+    const variant = (req.query.variant as string | undefined)?.toLowerCase();
     if (!filePath) {
       return res.status(400).json({ error: 'path query parameter is required' });
     }
@@ -388,6 +395,31 @@ router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Resp
       return res.status(404).json({ error: 'File not found' });
     }
     const basename = path.basename(fullPath);
+
+    // Preview variant: hand off to the preview service. If we can't build one
+    // for this file (e.g. PPTX with no embedded thumbnail), return 404 so the
+    // client knows to fall back — DON'T silently serve the original, that
+    // misleads the "Compressed (X KB) / Original (Y MB)" UI.
+    if (variant === 'preview') {
+      const preview = await getOrBuildPreview(projectPath, fullPath);
+      if (!preview) {
+        return res.status(404).json({ error: 'No preview available for this file' });
+      }
+      if (!inline) {
+        const ext = preview.mime.startsWith('text/html') ? 'html' : 'jpg';
+        const previewName = `${basename}.preview.${ext}`;
+        res.setHeader('Content-Disposition', `attachment; filename="${previewName.replace(/"/g, '\\"')}"`);
+      }
+      res.setHeader('Content-Type', preview.mime);
+      const stream = fs.createReadStream(preview.path);
+      stream.pipe(res);
+      stream.on('error', (err) => {
+        console.error('Preview stream error:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream preview' });
+      });
+      return;
+    }
+
     const mime = mimeForFile(basename);
     if (!inline) {
       res.setHeader('Content-Disposition', `attachment; filename="${basename.replace(/"/g, '\\"')}"`);
@@ -404,6 +436,27 @@ router.get('/:id/files/download', async (req: Request<{ id: string }>, res: Resp
   } catch (err: any) {
     console.error('Error downloading file:', err);
     res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
+// Preview metadata — does this file have a compressed/HTML preview available?
+// The client uses this to decide whether to show a "Compressed/Full" toggle in
+// the viewer or a quality dropdown on the download button.
+router.get('/:id/files/preview-info', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+    if (!filePath) {
+      return res.status(400).json({ error: 'path query parameter is required' });
+    }
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const fullPath = path.resolve(path.join(projectPath, filePath));
+    if (!fullPath.startsWith(path.resolve(projectPath))) {
+      return res.status(403).json({ error: 'Path traversal detected' });
+    }
+    res.json(getPreviewInfo(fullPath));
+  } catch (err) {
+    console.error('preview-info error:', err);
+    res.status(500).json({ error: 'Failed to fetch preview info' });
   }
 });
 
