@@ -5,6 +5,7 @@ import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useTheme } from '../../context/ThemeContext.tsx';
 import { buildDownloadUrl, downloadProjectFile } from '../../utils/downloadFile.ts';
+import MarkdownRenderer from '../chat/blocks/MarkdownRenderer.tsx';
 
 const SIZE_WARN_BYTES = 2 * 1024 * 1024; // 2 MB
 
@@ -41,6 +42,17 @@ function isImageByExtension(filePath: string): boolean {
 
 function isInlinePreviewExtension(filePath: string): boolean {
   return INLINE_PREVIEW_EXTENSIONS.has(getExtension(filePath));
+}
+
+/** Plain-text extensions: render as <pre>, no syntax highlighter, no line numbers. */
+function isPlainTextByExtension(filePath: string): boolean {
+  return getExtension(filePath) === 'txt';
+}
+
+/** Markdown — gets a Rendered/Source toggle (default: rendered). */
+function isMarkdownByExtension(filePath: string): boolean {
+  const ext = getExtension(filePath);
+  return ext === 'md' || ext === 'markdown' || ext === 'mdown';
 }
 
 function looksBinary(content: string): boolean {
@@ -96,9 +108,12 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
   const [loading, setLoading] = useState(true);
   const [largeFileSize, setLargeFileSize] = useState<number | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
+  const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
   const binaryByExt = isBinaryByExtension(filePath);
   const imageByExt = isImageByExtension(filePath);
   const inlineByExt = isInlinePreviewExtension(filePath);
+  const isMarkdown = isMarkdownByExtension(filePath);
+  const isPlainText = isPlainTextByExtension(filePath);
 
   const fetchContent = useCallback(() => {
     if (!socket) return;
@@ -189,6 +204,28 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
           Back
         </button>
         <span className="font-mono text-xs text-text-dim truncate flex-1">{filePath}</span>
+        {isMarkdown && content !== null && (
+          <div className="flex-shrink-0 flex gap-0.5 p-0.5 bg-bg rounded-md">
+            <button
+              type="button"
+              onClick={() => setMdView('rendered')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                mdView === 'rendered' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Rendered
+            </button>
+            <button
+              type="button"
+              onClick={() => setMdView('source')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                mdView === 'source' ? 'bg-primary text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Source
+            </button>
+          </div>
+        )}
         <button
           onClick={handleDownload}
           className="flex-shrink-0 p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
@@ -280,6 +317,16 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
               Download
             </button>
           </div>
+        ) : isMarkdown && mdView === 'rendered' ? (
+          // Markdown rendered preview — reuses the same renderer as chat messages.
+          <div className="px-4 py-3 max-w-3xl mx-auto">
+            <MarkdownRenderer text={content || ''} />
+          </div>
+        ) : isMarkdown || isPlainText ? (
+          // Markdown source view, or plain .txt — no line numbers, no syntax highlighting.
+          <pre className="px-4 py-3 text-xs whitespace-pre-wrap break-words font-mono text-text">
+            {content || ''}
+          </pre>
         ) : (
           <SyntaxHighlighter
             language={language}
