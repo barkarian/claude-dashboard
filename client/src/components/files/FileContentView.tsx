@@ -365,52 +365,71 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
             <p className="text-text-muted text-sm">This file is empty</p>
           </div>
         ) : imageByExt ? (
-          <div className="flex flex-col items-center gap-3 p-4">
-            <img
-              src={
-                imageQuality === 'compressed' && previewInfo.available
-                  ? `${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`
-                  : `${buildDownloadUrl(projectId, filePath)}&inline=1`
-              }
-              alt={filePath}
-              className="max-w-full h-auto rounded-lg bg-bg-surface"
-              style={{ WebkitTouchCallout: 'default', touchAction: 'manipulation' }}
-            />
-            <p className="text-text-dim text-xs text-center">
-              Long-press the image to save it to Photos, or tap Download above.
+          // Fit the image into the viewport by default (object-contain inside
+          // a height-bounded flex container). Pinch-zoom is allowed on the
+          // image surface; when the user zooms in the inner div scrolls so
+          // they can pan left/right and up/down.
+          <div className="h-full flex flex-col">
+            <div
+              className="flex-1 flex items-center justify-center overflow-auto min-h-0 p-2"
+              style={{ touchAction: 'pinch-zoom' }}
+            >
+              <img
+                src={
+                  imageQuality === 'compressed' && previewInfo.available
+                    ? `${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`
+                    : `${buildDownloadUrl(projectId, filePath)}&inline=1`
+                }
+                alt={filePath}
+                className="max-w-full max-h-full object-contain rounded-lg bg-bg-surface"
+                style={{ WebkitTouchCallout: 'default' }}
+              />
+            </div>
+            <p className="flex-shrink-0 text-text-dim text-xs text-center pb-2 px-2">
+              Pinch to zoom · long-press to save · download via the toolbar above.
             </p>
           </div>
         ) : inlineByExt ? (
           // PDFs: native browser PDF viewer streams the original directly.
-          <iframe
-            src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
-            title={filePath}
-            className="w-full h-full border-0 bg-bg-surface"
-          />
+          // The viewer brings its own page-fit + zoom controls.
+          <div className="h-full">
+            <iframe
+              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              title={filePath}
+              className="w-full h-full border-0 bg-bg-surface"
+            />
+          </div>
         ) : isOfficeHtml ? (
           // Word / Excel: server renders a sandboxed HTML preview via mammoth/xlsx.
-          <iframe
-            src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
-            title={filePath}
-            className="w-full h-full border-0 bg-bg-surface"
-            sandbox=""
-          />
+          <div className="h-full">
+            <iframe
+              src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
+              title={filePath}
+              className="w-full h-full border-0 bg-bg-surface"
+              sandbox=""
+            />
+          </div>
         ) : isOfficeThumb ? (
           // PowerPoint: server extracts the embedded thumbnail (single slide preview).
           // Real preview would require LibreOffice — out of scope; user can download.
-          <div className="flex flex-col items-center gap-3 p-4">
-            <img
-              src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
-              alt={`${filePath} thumbnail`}
-              className="max-w-full h-auto rounded-lg bg-bg-surface"
-            />
-            <p className="text-text-dim text-xs text-center">
+          <div className="h-full flex flex-col">
+            <div
+              className="flex-1 flex items-center justify-center overflow-auto min-h-0 p-2"
+              style={{ touchAction: 'pinch-zoom' }}
+            >
+              <img
+                src={`${buildDownloadUrl(projectId, filePath, { variant: 'preview' })}&inline=1`}
+                alt={`${filePath} thumbnail`}
+                className="max-w-full max-h-full object-contain rounded-lg bg-bg-surface"
+              />
+            </div>
+            <p className="flex-shrink-0 text-text-dim text-xs text-center pb-2 px-2">
               Slide thumbnail. Download the file for the full presentation.
             </p>
           </div>
         ) : isVideo ? (
           // Browser streams the original via HTTP range requests — no transcoding.
-          <div className="flex items-center justify-center bg-black">
+          <div className="h-full flex items-center justify-center bg-black">
             <video
               src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
               controls
@@ -419,7 +438,7 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
             />
           </div>
         ) : isAudio ? (
-          <div className="flex flex-col items-center gap-3 p-6">
+          <div className="h-full flex items-center justify-center p-6">
             <audio
               src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
               controls
