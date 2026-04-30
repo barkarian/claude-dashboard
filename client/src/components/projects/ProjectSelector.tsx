@@ -59,14 +59,14 @@ export default function ProjectSelector({ onSelect }: ProjectSelectorProps) {
 
   return (
     <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-      <div className="text-sm font-medium text-text-muted">Select a project</div>
+      <div className="text-sm font-medium text-text-muted">Select a workspace</div>
 
       <Input
         ref={inputRef}
         type="text"
         value={search}
         onChange={(e) => handleSearch(e.target.value)}
-        placeholder="Search projects..."
+        placeholder="Search workspaces..."
       />
 
       {loading ? (

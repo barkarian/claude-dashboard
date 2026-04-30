@@ -8,6 +8,14 @@
  */
 export type ChatAdapter = string;
 
+/**
+ * Workspace mode controls visible UI surfaces.
+ * - 'simple' — consumer surface: Chats + Files tabs, claude-agent-sdk only,
+ *              no path breadcrumb, no context-window % indicator.
+ * - 'dev'    — power surface: Scripts tab visible, all adapters available.
+ */
+export type ProjectMode = 'simple' | 'dev';
+
 export interface Script {
   id: string;
   label: string;
@@ -50,6 +58,9 @@ export interface Project {
   /** Ordered list of adapter IDs for the project. Index 0 is the default. */
   adapterOrder: ChatAdapter[] | null;
   aiNamingEnabled: 'none' | 'on';
+  mode: ProjectMode;
+  pinned: boolean;
+  pinnedAt: string | null;
   scripts: Script[];
   chats: Chat[];
 }
@@ -62,6 +73,9 @@ export interface ProjectSummary {
   createdAt: string;
   scriptsCount: number;
   chatsCount: number;
+  mode: ProjectMode;
+  pinned: boolean;
+  pinnedAt: string | null;
 }
 
 export interface GitHubRepo {

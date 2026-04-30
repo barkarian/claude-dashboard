@@ -14,10 +14,11 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '../ui/dropdown-menu.tsx';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
+import StatusPill from './StatusPill.tsx';
 import type { ContextUsage } from '../../../../shared/types/session.ts';
 
 interface HeaderProps {
-  // Simple mode
+  // Simple mode (page title)
   title?: string;
   backTo?: string;
   actions?: ReactNode;
@@ -39,6 +40,8 @@ interface HeaderProps {
   onProjectSettings?: () => void;
   chatActions?: ReactNode;
   projectActions?: ReactNode;
+  /** Workspace is in 'simple' mode — hide power-user surfaces (path breadcrumb, context %). */
+  simpleMode?: boolean;
 }
 
 function formatTokens(n: number): string {
@@ -141,6 +144,7 @@ export default function Header({
   onProjectSettings,
   chatActions,
   projectActions,
+  simpleMode,
 }: HeaderProps) {
   const navigate = useNavigate();
   const { toggleSidebar: _toggleSidebar } = useSidebar();
@@ -202,7 +206,10 @@ export default function Header({
             )}
             <h2 className="text-sm font-semibold truncate">{title}</h2>
           </div>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          <div className="flex items-center gap-2">
+            <StatusPill />
+            {actions}
+          </div>
         </div>
       </header>
     );
@@ -227,14 +234,15 @@ export default function Header({
             onClick={onProjectSettings}
             className="min-w-0 text-left hover:bg-bg-hover rounded-md px-1.5 py-0.5 -mx-1.5 -my-0.5 transition-colors cursor-pointer"
             style={{ maxWidth: '50vw' }}
-            title="Project settings"
+            title="Workspace settings"
           >
             <h2 className="text-sm font-semibold truncate leading-tight">{projectName}</h2>
-            {projectPath && <TruncatedPath path={projectPath} />}
+            {projectPath && !simpleMode && <TruncatedPath path={projectPath} />}
           </button>
         </div>
 
         <div className="flex items-center gap-1">
+          <StatusPill />
           {projectActions}
           {onNewChat ? (
             <button
@@ -304,7 +312,7 @@ export default function Header({
                     </svg>
                   </button>
                 )}
-                {contextUsage && <ContextUsageBadge usage={contextUsage} />}
+                {contextUsage && !simpleMode && <ContextUsageBadge usage={contextUsage} />}
               </>
             )}
           </div>

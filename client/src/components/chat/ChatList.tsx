@@ -625,12 +625,15 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         )}
       </div>
 
-      {/* Adapter picker sheet */}
+      {/* Adapter picker sheet — mode controls which adapters are offered. */}
       <NewChatPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         onSelect={handlePickerSelect}
-        enabledAdapters={adapterInfos.filter(a => a.enabled).map(a => ({ metadata: a.metadata }))}
+        enabledAdapters={adapterInfos
+          .filter(a => a.enabled)
+          .filter(a => project?.mode === 'dev' || a.metadata.id === 'claude-agent-sdk')
+          .map(a => ({ metadata: a.metadata }))}
         adapterOrder={project?.adapterOrder ?? null}
         onReorder={handleAdapterReorder}
       />

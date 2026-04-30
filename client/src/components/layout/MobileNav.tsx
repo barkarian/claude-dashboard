@@ -14,6 +14,7 @@ interface MobileNavProps {
   scriptCount?: number;
   changeCount?: number;
   processesWithPorts?: RunningProcess[];
+  mode?: 'simple' | 'dev';
 }
 
 function isAwaitingStatus(status: ActiveChat['status']): boolean {
@@ -21,7 +22,7 @@ function isAwaitingStatus(status: ActiveChat['status']): boolean {
     status === 'plan-awaiting' || status === 'permission-awaiting';
 }
 
-export default function MobileNav({ projectId, currentTab, scriptCount = 0, changeCount = 0, processesWithPorts = [] }: MobileNavProps) {
+export default function MobileNav({ projectId, currentTab, scriptCount = 0, changeCount = 0, processesWithPorts = [], mode }: MobileNavProps) {
   const navigate = useNavigate();
   const { isDesktop } = useAuth();
   const [showPortsPopover, setShowPortsPopover] = useState(false);
@@ -104,7 +105,8 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
   }
 
   // Project mode: Chats | Scripts & Ports (N) | Changes (N)
-  const tabs = [
+  // Simple-mode workspaces hide the Scripts tab — non-technical users don't need it.
+  const allTabs = [
     {
       key: 'chats',
       label: 'Chats',
@@ -136,6 +138,7 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
       count: changeCount,
     },
   ];
+  const tabs = mode === 'simple' ? allTabs.filter(t => t.key !== 'scripts') : allTabs;
 
   return (
     <nav className="flex-shrink-0 bg-bg-surface border-t border-border pb-2 safe-area-inset-bottom">

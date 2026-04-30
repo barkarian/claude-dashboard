@@ -5,21 +5,18 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db, { resolveDefaultAdapter } from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary, Script, Chat, ChatHistoryEntry, ChatAdapter, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
 // === Project Methods ===
 
-function listProjects(): ProjectSummary[] {
-  const rows = db.prepare(`
-    SELECT
-      p.id, p.name, p.path, p.repo, p.created_at,
-      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
-      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
-    FROM projects p
-    ORDER BY p.created_at DESC
-  `).all() as any[];
+const PROJECT_SUMMARY_COLUMNS = `
+  p.id, p.name, p.path, p.repo, p.created_at, p.mode, p.pinned, p.pinned_at,
+  (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
+  (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+`;
 
-  return rows.map(r => ({
+function mapRowToSummary(r: any): ProjectSummary {
+  return {
     id: r.id,
     name: r.name,
     path: r.path,
@@ -27,33 +24,32 @@ function listProjects(): ProjectSummary[] {
     createdAt: r.created_at,
     scriptsCount: r.scriptsCount,
     chatsCount: r.chatsCount,
-  }));
+    mode: (r.mode as ProjectMode) || 'simple',
+    pinned: !!r.pinned,
+    pinnedAt: r.pinned_at || null,
+  };
+}
+
+function listProjects(): ProjectSummary[] {
+  const rows = db.prepare(`
+    SELECT ${PROJECT_SUMMARY_COLUMNS}
+    FROM projects p
+    ORDER BY p.created_at DESC
+  `).all() as any[];
+  return rows.map(mapRowToSummary);
 }
 
 function listProjectsPaginated(limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
   const { total } = db.prepare('SELECT COUNT(*) as total FROM projects').get() as any;
 
   const rows = db.prepare(`
-    SELECT
-      p.id, p.name, p.path, p.repo, p.created_at,
-      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
-      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+    SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
     ORDER BY p.created_at DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
 
-  const projects = rows.map(r => ({
-    id: r.id,
-    name: r.name,
-    path: r.path,
-    repo: r.repo || null,
-    createdAt: r.created_at,
-    scriptsCount: r.scriptsCount,
-    chatsCount: r.chatsCount,
-  }));
-
-  return { projects, total };
+  return { projects: rows.map(mapRowToSummary), total };
 }
 
 function searchProjectsPaginated(search: string, limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
@@ -64,27 +60,24 @@ function searchProjectsPaginated(search: string, limit: number = 20, offset: num
   ).get(pattern, pattern) as any;
 
   const rows = db.prepare(`
-    SELECT
-      p.id, p.name, p.path, p.repo, p.created_at,
-      (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
-      (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+    SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
     WHERE p.name LIKE ? OR p.path LIKE ?
     ORDER BY p.created_at DESC
     LIMIT ? OFFSET ?
   `).all(pattern, pattern, limit, offset) as any[];
 
-  const projects = rows.map(r => ({
-    id: r.id,
-    name: r.name,
-    path: r.path,
-    repo: r.repo || null,
-    createdAt: r.created_at,
-    scriptsCount: r.scriptsCount,
-    chatsCount: r.chatsCount,
-  }));
+  return { projects: rows.map(mapRowToSummary), total };
+}
 
-  return { projects, total };
+function listPinnedProjects(): ProjectSummary[] {
+  const rows = db.prepare(`
+    SELECT ${PROJECT_SUMMARY_COLUMNS}
+    FROM projects p
+    WHERE p.pinned = 1
+    ORDER BY p.pinned_at DESC, p.created_at DESC
+  `).all() as any[];
+  return rows.map(mapRowToSummary);
 }
 
 function parseAdapterOrder(raw: unknown): ChatAdapter[] | null {
@@ -114,6 +107,9 @@ function getProject(projectId: string): Project | null {
     defaultAdapter: (row.default_adapter as ChatAdapter) || resolveDefaultAdapter(),
     adapterOrder: parseAdapterOrder(row.adapter_order),
     aiNamingEnabled: (row.ai_naming_enabled as 'none' | 'on') || 'none',
+    mode: (row.mode as ProjectMode) || 'simple',
+    pinned: !!row.pinned,
+    pinnedAt: row.pinned_at || null,
     scripts,
     chats,
   };
@@ -154,6 +150,9 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     defaultAdapter,
     adapterOrder: null,
     aiNamingEnabled: 'none',
+    mode: 'simple',
+    pinned: false,
+    pinnedAt: null,
     scripts: [],
     chats: [],
   };
@@ -184,12 +183,15 @@ function registerProject(name: string, projectPath: string): Project {
     defaultAdapter,
     adapterOrder: null,
     aiNamingEnabled: 'none',
+    mode: 'simple',
+    pinned: false,
+    pinnedAt: null,
     scripts: [],
     chats: [],
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; adapterOrder?: ChatAdapter[] | null; aiNamingEnabled?: 'none' | 'on' }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; adapterOrder?: ChatAdapter[] | null; aiNamingEnabled?: 'none' | 'on'; mode?: ProjectMode; pinned?: boolean }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -218,6 +220,16 @@ function updateProject(projectId: string, updates: { name?: string; path?: strin
   }
   if (updates.aiNamingEnabled !== undefined) {
     db.prepare('UPDATE projects SET ai_naming_enabled = ? WHERE id = ?').run(updates.aiNamingEnabled, projectId);
+  }
+  if (updates.mode !== undefined) {
+    db.prepare('UPDATE projects SET mode = ? WHERE id = ?').run(updates.mode, projectId);
+  }
+  if (updates.pinned !== undefined) {
+    if (updates.pinned) {
+      db.prepare("UPDATE projects SET pinned = 1, pinned_at = datetime('now') WHERE id = ?").run(projectId);
+    } else {
+      db.prepare('UPDATE projects SET pinned = 0, pinned_at = NULL WHERE id = ?').run(projectId);
+    }
   }
 
   return getProject(projectId);
@@ -632,6 +644,7 @@ export default {
   listProjects,
   listProjectsPaginated,
   searchProjectsPaginated,
+  listPinnedProjects,
   getProject,
   createProject,
   registerProject,

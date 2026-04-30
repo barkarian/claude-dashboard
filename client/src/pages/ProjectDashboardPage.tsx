@@ -29,7 +29,13 @@ import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
   const { project } = useProject();
-  const adapterId = project?.defaultAdapter || 'claude-agent-sdk';
+  // Simple-mode workspaces are pinned to the SDK adapter regardless of any
+  // historical defaultAdapter setting. Existing chats keep their own adapter
+  // resolution inside ChatViewShell — this only governs the *project-level*
+  // view selection for the new-chat flow.
+  const adapterId = project?.mode === 'simple'
+    ? 'claude-agent-sdk'
+    : (project?.defaultAdapter || 'claude-agent-sdk');
 
   // Use adapter registry if the adapter is registered (new plugin system)
   if (getClientAdapter(adapterId)) {
@@ -285,6 +291,7 @@ export default function ProjectDashboardPage() {
         projectActions={project ? (
           <DesktopRecordingControls projectId={id!} />
         ) : undefined}
+        simpleMode={project?.mode === 'simple'}
       />
 
       {project && (
@@ -298,9 +305,13 @@ export default function ProjectDashboardPage() {
           defaultAdapter={project.defaultAdapter || 'claude-agent-sdk'}
           adapterOrder={project.adapterOrder ?? null}
           aiNamingEnabled={project.aiNamingEnabled || 'none'}
+          pinned={project.pinned ?? false}
+          mode={project.mode ?? 'simple'}
           onShellChanged={refreshProject}
           onAdapterChanged={refreshProject}
           onAiNamingChanged={refreshProject}
+          onPinChanged={refreshProject}
+          onModeChanged={refreshProject}
         />
       )}
 
@@ -311,8 +322,8 @@ export default function ProjectDashboardPage() {
       ) : !project ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <h3 className="text-lg font-medium text-text mb-1">Project not found</h3>
-            <p className="text-text-muted">This project may have been deleted</p>
+            <h3 className="text-lg font-medium text-text mb-1">Workspace not found</h3>
+            <p className="text-text-muted">This workspace may have been deleted</p>
           </div>
         </div>
       ) : dirExists === false ? (
@@ -354,6 +365,7 @@ export default function ProjectDashboardPage() {
           scriptCount={scriptCount}
           changeCount={totalChangeCount}
           processesWithPorts={processesWithPorts}
+          mode={project?.mode}
         />
       )}
     </div>

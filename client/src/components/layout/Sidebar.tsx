@@ -339,6 +339,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'pinned' | 'recent'>('recent');
   const offsetRef = useRef(0);
 
   // Search state
@@ -366,11 +367,23 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
   async function loadInitial() {
     try {
+      // Pins-XOR-Recents: if any workspace is pinned, show only pins.
+      // Otherwise fall back to the paginated recent list.
+      const pinnedData = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?pinned=1`);
+      const pins = pinnedData.projects || [];
+      if (pins.length > 0) {
+        setProjects(pins);
+        offsetRef.current = pins.length;
+        setHasMore(false);
+        setDisplayMode('pinned');
+        return;
+      }
       const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0`);
       const fetched = data.projects || [];
       setProjects(fetched);
       offsetRef.current = fetched.length;
       setHasMore(fetched.length < (data.total || 0));
+      setDisplayMode('recent');
     } catch {
       // ignore
     }
@@ -437,7 +450,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       return 0;
     });
   }, [baseProjects, activeChats]);
-  const showInfiniteScroll = !sidebarSearch.trim();
+  const showInfiniteScroll = !sidebarSearch.trim() && displayMode === 'recent';
 
   // Auto-expand projects that have active chats
   useEffect(() => {
@@ -466,35 +479,25 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* All Projects link */}
+        {/* Catalog — Apps + Services entry point */}
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={location.pathname === '/'} className="text-base h-10 md:text-sm md:h-8">
-                <NavLink to="/" end className="flex items-center gap-3">
+              <SidebarMenuButton asChild isActive={location.pathname.startsWith('/catalog')} className="text-base h-10 md:text-sm md:h-8">
+                <NavLink to="/catalog" className="flex items-center gap-3">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                   </svg>
-                  <span>All Projects</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={location.pathname === '/my-computer'} className="text-base h-10 md:text-sm md:h-8">
-                <NavLink to="/my-computer" className="flex items-center gap-3">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
-                  </svg>
-                  <span>My Computer</span>
+                  <span>Catalog</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Projects list */}
+        {/* Workspaces list — Pinned XOR Recent (never both) */}
         <SidebarGroup>
-          <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Projects</SidebarGroupLabel>
+          <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">{displayMode === 'pinned' ? 'Pinned' : 'Recent'}</SidebarGroupLabel>
           <SidebarGroupContent>
             <PullToRefresh onRefresh={loadInitial} disabled={isChatDragActive}>
             {/* Search input */}
@@ -503,7 +506,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 type="text"
                 value={sidebarSearch}
                 onChange={(e) => handleSidebarSearch(e.target.value)}
-                placeholder="Search projects..."
+                placeholder="Search workspaces..."
                 className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-2 pr-7 text-sm md:text-xs md:py-1.5 text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
               />
               {sidebarSearch && (
@@ -626,10 +629,16 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               })}
 
               {sidebarSearch.trim() && !searchLoading && displayProjects.length === 0 && (
-                <li className="px-3 py-2 text-xs text-text-dim">No projects found</li>
+                <li className="px-3 py-2 text-xs text-text-dim">No workspaces found</li>
               )}
 
-              {/* Infinite scroll sentinel — only when not searching */}
+              {!sidebarSearch.trim() && displayProjects.length === 0 && (
+                <li className="px-3 py-3 text-xs text-text-muted leading-relaxed">
+                  No workspaces yet. Create one below to start chatting with Claude on a folder.
+                </li>
+              )}
+
+              {/* Infinite scroll sentinel — only when not searching and in recent mode */}
               {showInfiniteScroll && <li><div ref={sentinelRef} /></li>}
               {showInfiniteScroll && loadingMore && (
                 <li className="flex justify-center py-2">
@@ -637,12 +646,26 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 </li>
               )}
 
+              {/* "Browse all" — escape hatch when only pins are shown in the sidebar */}
+              {displayMode === 'pinned' && !sidebarSearch.trim() && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild className="text-text-muted text-sm h-9 md:text-xs md:h-8">
+                    <NavLink to="/" end className="flex items-center gap-3">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                      </svg>
+                      <span>Browse all workspaces</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
               <SidebarMenuItem>
                 <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted text-lg h-12 md:text-sm md:h-8">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
-                  <span>New Project</span>
+                  <span>New Workspace</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

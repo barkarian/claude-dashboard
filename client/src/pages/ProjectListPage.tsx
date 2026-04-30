@@ -143,12 +143,12 @@ export default function ProjectListPage() {
 
       <div className="flex-1 overflow-y-auto">
         <PullToRefresh onRefresh={() => loadProjects(true)} className="max-w-xl mx-auto w-full px-4 py-4 space-y-3">
-          {/* New Project button */}
+          {/* New Workspace button */}
           <Button onClick={openDrawer} variant="outline" className="w-full">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            New Project
+            New Workspace
           </Button>
 
           {/* Search input */}
@@ -167,7 +167,7 @@ export default function ProjectListPage() {
                     setSheetOpen(true);
                   }
                 }}
-                placeholder="Search projects..."
+                placeholder="Search workspaces..."
                 readOnly={isMobile}
                 className="w-full pl-9 pr-8 py-2 text-sm bg-bg-surface border border-border rounded-lg text-text placeholder:text-text-dim focus:outline-none focus:border-primary transition-colors"
               />
@@ -192,16 +192,16 @@ export default function ProjectListPage() {
               setSheetOpen(open);
               if (!open && !searchQuery) setSearchQuery('');
             }}
-            title="Search Projects"
+            title="Search Workspaces"
             searchValue={searchQuery}
             onSearchChange={setSearchQuery}
-            searchPlaceholder="Search projects..."
+            searchPlaceholder="Search workspaces..."
             loading={initialLoading}
             emptyContent={
               projects.length === 0 && searchQuery
-                ? <div className="py-4 text-sm text-text-muted text-center">No matching projects</div>
+                ? <div className="py-4 text-sm text-text-muted text-center">No matching workspaces</div>
                 : projects.length === 0
-                  ? <div className="py-4 text-sm text-text-muted text-center">No projects yet</div>
+                  ? <div className="py-4 text-sm text-text-muted text-center">No workspaces yet</div>
                   : undefined
             }
           >
@@ -240,12 +240,12 @@ export default function ProjectListPage() {
               <svg className="w-12 h-12 text-text-dim mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
               </svg>
-              <h3 className="text-text font-medium mb-1">No projects yet</h3>
-              <p className="text-text-muted text-sm mb-4">Create your first project to get started</p>
+              <h3 className="text-text font-medium mb-1">No workspaces yet</h3>
+              <p className="text-text-muted text-sm mb-4">Create your first workspace to get started</p>
             </div>
           ) : projects.length === 0 && searchQuery ? (
             <div className="text-center py-8">
-              <p className="text-text-muted text-sm">No matching projects</p>
+              <p className="text-text-muted text-sm">No matching workspaces</p>
             </div>
           ) : (
             <>

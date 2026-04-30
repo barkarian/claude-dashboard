@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button.tsx';
 import { Input } from '../components/ui/input.tsx';
 import { Label } from '../components/ui/label.tsx';
 import { Alert } from '../components/ui/alert.tsx';
+import { Switch } from '../components/ui/switch.tsx';
 import Header from '../components/layout/Header.tsx';
 import RepoSelector from '../components/projects/RepoSelector.tsx';
 import SetupTerminal from '../components/projects/SetupTerminal.tsx';
@@ -29,6 +30,9 @@ export default function NewProjectPage() {
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'new' | 'existing'>('new');
+  // Power-user options (collapsed by default — non-technical users never see them)
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [devWorkspace, setDevWorkspace] = useState(false);
   const isDesktop = isTauriDesktop();
 
   async function handleNativePickExisting() {
@@ -70,6 +74,7 @@ export default function NewProjectPage() {
         name: projectName,
         path: projectPath || undefined,
         repoUrl,
+        mode: devWorkspace ? 'dev' : 'simple',
       });
       setSetupSessionId(data.setupSessionId);
       setCreatedProjectId(data.project.id);
@@ -88,6 +93,7 @@ export default function NewProjectPage() {
       const data = await api.post<{ project: Project }>('/api/projects/register', {
         name: projectName,
         path: projectPath,
+        mode: devWorkspace ? 'dev' : 'simple',
       });
       setCreatedProjectId(data.project.id);
       setSetupDone(true);
@@ -98,9 +104,43 @@ export default function NewProjectPage() {
     }
   }
 
+  // Power-user options block — collapsed by default, shared between Step 1 and Step 2.
+  const advancedSection = (
+    <div className="pt-2">
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(s => !s)}
+        className="flex items-center gap-1 text-xs text-text-dim hover:text-text-muted transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        Power user options
+      </button>
+      {showAdvanced && (
+        <div className="mt-2 pl-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-text">Dev workspace</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Show the Scripts tab, file path breadcrumb, and adapter choice.
+            </p>
+          </div>
+          <Switch
+            checked={devWorkspace}
+            onCheckedChange={setDevWorkspace}
+            className="mt-1 flex-shrink-0"
+          />
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <Header title="New Project" backTo="/" />
+      <Header title="New Workspace" backTo="/" />
 
       <div className="flex-1 overflow-y-auto p-4 max-w-2xl mx-auto w-full">
         {step === 1 && (
@@ -163,7 +203,7 @@ export default function NewProjectPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-medium mb-2">Empty Project</h3>
+                  <h3 className="text-lg font-medium mb-2">Empty Workspace</h3>
                   <div className="flex gap-2">
                     <Input
                       type="text"
@@ -186,10 +226,10 @@ export default function NewProjectPage() {
             ) : (
               <div className="space-y-4">
                 <p className="text-sm text-text-muted">
-                  Register an existing directory on your filesystem as a project.
+                  Register an existing directory on your filesystem as a workspace.
                 </p>
                 <div>
-                  <Label>Project Name</Label>
+                  <Label>Workspace Name</Label>
                   <Input
                     type="text"
                     value={projectName}
@@ -224,6 +264,7 @@ export default function NewProjectPage() {
                 {error && (
                   <Alert variant="danger">{error}</Alert>
                 )}
+                {!setupDone && advancedSection}
                 {!setupDone ? (
                   <Button
                     onClick={handleRegister}
@@ -235,18 +276,18 @@ export default function NewProjectPage() {
                         <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                         Adding...
                       </>
-                    ) : 'Add Project'}
+                    ) : 'Add Workspace'}
                   </Button>
                 ) : (
                   <div className="space-y-4">
                     <Alert variant="success">
-                      Project added successfully!
+                      Workspace added successfully!
                     </Alert>
                     <Button
                       onClick={() => navigate(`/project/${createdProjectId}`)}
                       className="w-full"
                     >
-                      Open Project
+                      Open Workspace
                     </Button>
                   </div>
                 )}
@@ -258,7 +299,7 @@ export default function NewProjectPage() {
         {step === 2 && (
           <div className="space-y-4">
             <div>
-              <Label>Project Name</Label>
+              <Label>Workspace Name</Label>
               <Input
                 type="text"
                 value={projectName}
@@ -287,6 +328,8 @@ export default function NewProjectPage() {
               <Alert variant="danger">{error}</Alert>
             )}
 
+            {!setupDone && advancedSection}
+
             {!setupDone ? (
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={() => setStep(1)} disabled={creating}>
@@ -298,13 +341,13 @@ export default function NewProjectPage() {
                       <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                       Creating...
                     </>
-                  ) : 'Create Project'}
+                  ) : 'Create Workspace'}
                 </Button>
               </div>
             ) : (
               <div className="space-y-4">
                 <Alert variant="success">
-                  Project created successfully!
+                  Workspace created successfully!
                 </Alert>
                 <Button
                   onClick={() => navigate(`/project/${createdProjectId}`)}

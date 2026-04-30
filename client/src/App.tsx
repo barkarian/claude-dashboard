@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.tsx';
 import api from './utils/api.ts';
 import { ProjectProvider } from './context/ProjectContext.tsx';
@@ -11,13 +11,15 @@ import SettingsPage from './pages/SettingsPage.tsx';
 import BillingSuccessPage from './pages/BillingSuccessPage.tsx';
 import BillingCancelPage from './pages/BillingCancelPage.tsx';
 import MigrationPage from './pages/MigrationPage.tsx';
-import MyComputerPage from './pages/MyComputerPage.tsx';
+import CatalogPage from './pages/CatalogPage.tsx';
+import CatalogItemPage from './pages/CatalogItemPage.tsx';
 import AppSidebar, { type SidebarHandle } from './components/layout/Sidebar.tsx';
 import { NewProjectDrawerProvider } from './context/NewProjectDrawerContext.tsx';
 import { DesktopUpdateProvider } from './context/DesktopUpdateContext.tsx';
 import { SearchProvider } from './context/SearchContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import SearchOverlay from './components/ui/SearchOverlay.tsx';
+import CommandPalette from './components/ui/CommandPalette.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
 import { haptics } from './utils/haptics.ts';
@@ -343,7 +345,10 @@ export default function App() {
                       <Routes>
                         <Route path="/" element={<ProjectListPage />} />
                         <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="/my-computer" element={<MyComputerPage />} />
+                        <Route path="/catalog" element={<CatalogPage />} />
+                        <Route path="/catalog/:id" element={<CatalogItemPage />} />
+                        {/* Legacy: My Computer became the Local Computer service in the Catalog. */}
+                        <Route path="/my-computer" element={<Navigate to="/catalog/local-computer" replace />} />
                         <Route path="/billing/success" element={<BillingSuccessPage />} />
                         <Route path="/billing/cancel" element={<BillingCancelPage />} />
                         <Route path="/migrate" element={<MigrationPage />} />
@@ -352,6 +357,7 @@ export default function App() {
                     </main>
                   </div>
                   <NewProjectDrawer />
+                  <CommandPalette />
                   </SearchProvider>
                 </NewProjectDrawerProvider>
               </AppSidebarContext.Provider>

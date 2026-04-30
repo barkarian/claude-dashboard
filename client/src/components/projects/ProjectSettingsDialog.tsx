@@ -35,9 +35,13 @@ interface ProjectSettingsDialogProps {
   defaultAdapter: string;
   adapterOrder: string[] | null;
   aiNamingEnabled: 'none' | 'on';
+  pinned: boolean;
+  mode: 'simple' | 'dev';
   onShellChanged?: () => void;
   onAdapterChanged?: () => void;
   onAiNamingChanged?: () => void;
+  onPinChanged?: () => void;
+  onModeChanged?: () => void;
 }
 
 interface ShellPreference {
@@ -55,13 +59,53 @@ export default function ProjectSettingsDialog({
   shellOverride,
   adapterOrder,
   aiNamingEnabled,
+  pinned,
+  mode,
   onShellChanged,
   onAdapterChanged,
   onAiNamingChanged,
+  onPinChanged,
+  onModeChanged,
 }: ProjectSettingsDialogProps) {
   const navigate = useNavigate();
   const { refreshProjects } = useAppSidebar();
   const { adapters: adapterInfos } = useAdapterSettings();
+
+  // Pin state
+  const [pinning, setPinning] = useState(false);
+
+  // Mode state
+  const [localMode, setLocalMode] = useState<'simple' | 'dev'>(mode);
+  const [savingMode, setSavingMode] = useState(false);
+  const modeChanged = localMode !== mode;
+
+  async function handleSaveMode() {
+    if (!modeChanged) return;
+    setSavingMode(true);
+    try {
+      await api.patch(`/api/projects/${projectId}`, { mode: localMode });
+      toast.success(localMode === 'dev' ? 'Switched to Dev workspace' : 'Switched to Simple workspace');
+      onModeChanged?.();
+    } catch {
+      toast.error('Failed to update workspace mode');
+    } finally {
+      setSavingMode(false);
+    }
+  }
+
+  async function handleTogglePin() {
+    setPinning(true);
+    try {
+      await api.patch(`/api/projects/${projectId}`, { pinned: !pinned });
+      toast.success(!pinned ? 'Pinned to sidebar' : 'Unpinned');
+      onPinChanged?.();
+      refreshProjects();
+    } catch {
+      toast.error('Failed to update pin');
+    } finally {
+      setPinning(false);
+    }
+  }
 
   // Shell state
   const [shellPref, setShellPref] = useState<ShellPreference | null>(null);
@@ -82,11 +126,12 @@ export default function ProjectSettingsDialog({
     if (!open) return;
     setLocalShellOverride(shellOverride || '');
     setLocalAiNaming(aiNamingEnabled || 'none');
+    setLocalMode(mode);
     // Fetch account shell preference
     api.get<ShellPreference>('/api/shell-preference')
       .then(setShellPref)
       .catch(() => {});
-  }, [open, shellOverride, aiNamingEnabled]);
+  }, [open, shellOverride, aiNamingEnabled, mode]);
 
   async function handleSaveShell() {
     const newValue = localShellOverride || null;
@@ -135,7 +180,7 @@ export default function ProjectSettingsDialog({
     setDeleting(true);
     try {
       await api.delete(`/api/projects/${projectId}`, { deleteFolder });
-      toast.success(`Project "${projectName}" deleted`);
+      toast.success(`Workspace "${projectName}" deleted`);
       setShowDeleteConfirm(false);
       onOpenChange(false);
       refreshProjects();
@@ -154,7 +199,13 @@ export default function ProjectSettingsDialog({
   }
 
   const shellChanged = (localShellOverride || null) !== (shellOverride || null);
-  const enabledAdapters = adapterInfos.filter(a => a.enabled).map(a => ({ metadata: a.metadata }));
+  // Adapter list filtered by mode: simple workspaces only see claude-agent-sdk;
+  // dev workspaces see every enabled adapter. Filtered against the SAVED mode
+  // (not localMode) so adapters don't flicker on toggle before save.
+  const enabledAdapters = adapterInfos
+    .filter(a => a.enabled)
+    .filter(a => mode === 'dev' || a.metadata.id === 'claude-agent-sdk')
+    .map(a => ({ metadata: a.metadata }));
 
   return (
     <>
@@ -164,7 +215,7 @@ export default function ProjectSettingsDialog({
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent className="max-h-[90vh]">
           <DrawerHeader className="px-4 pb-2 pt-1">
-            <DrawerTitle className="text-base">Project Settings</DrawerTitle>
+            <DrawerTitle className="text-base">Workspace Settings</DrawerTitle>
             <DrawerDescription className="sr-only">Settings for {projectName}</DrawerDescription>
           </DrawerHeader>
 
@@ -182,8 +233,77 @@ export default function ProjectSettingsDialog({
               </div>
             </div>
 
-            {/* Chat adapters (reorder + default) */}
-            {enabledAdapters.length > 0 && (
+            {/* Pin to sidebar */}
+            <div className="border-t border-border pt-4">
+              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Sidebar</label>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-sm text-text">
+                  {pinned ? 'Pinned to sidebar' : 'Pin to sidebar'}
+                </p>
+                <Button
+                  size="sm"
+                  variant={pinned ? 'outline' : 'default'}
+                  onClick={handleTogglePin}
+                  disabled={pinning}
+                >
+                  {pinning ? '...' : pinned ? 'Unpin' : 'Pin'}
+                </Button>
+              </div>
+              <p className="text-xs text-text-muted mt-1">
+                {pinned
+                  ? 'This workspace stays at the top of the sidebar.'
+                  : 'Pinned workspaces show in the sidebar instead of recent ones.'}
+              </p>
+            </div>
+
+            {/* Workspace mode (Simple vs Dev) — placed above Chat Agents because mode controls which adapters appear below */}
+            <div className="border-t border-border pt-4">
+              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Mode</label>
+              <p className="text-xs text-text-muted mt-0.5 mb-2">
+                {localMode === 'simple'
+                  ? 'Clean Chats + Files surface. The agent uses the SDK adapter.'
+                  : 'Power surface — Scripts tab, file path breadcrumb, and adapter choice.'}
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setLocalMode('simple')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                      localMode === 'simple'
+                        ? 'bg-primary text-white'
+                        : 'text-text-muted hover:text-text'
+                    }`}
+                  >
+                    Simple
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLocalMode('dev')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                      localMode === 'dev'
+                        ? 'bg-primary text-white'
+                        : 'text-text-muted hover:text-text'
+                    }`}
+                  >
+                    Dev
+                  </button>
+                </div>
+                {modeChanged && (
+                  <Button size="sm" onClick={handleSaveMode} disabled={savingMode}>
+                    {savingMode ? 'Saving...' : 'Save'}
+                  </Button>
+                )}
+              </div>
+              {modeChanged && localMode === 'simple' && (
+                <p className="text-xs text-text-muted mt-2">
+                  Existing Dev chats keep working in this workspace; new chats use the Simple adapter.
+                </p>
+              )}
+            </div>
+
+            {/* Chat adapters (reorder + default) — only Dev mode surfaces the multi-adapter picker. */}
+            {mode === 'dev' && enabledAdapters.length > 1 && (
               <div className="border-t border-border pt-4">
                 <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Chat Agents</label>
                 <p className="text-xs text-text-muted mt-0.5 mb-3">
@@ -265,13 +385,13 @@ export default function ProjectSettingsDialog({
             <div className="border-t border-border pt-4">
               <label className="text-xs font-medium text-danger uppercase tracking-wider">Danger Zone</label>
               <p className="text-xs text-text-muted mt-0.5 mb-2">
-                Permanently delete this project and all its chats and scripts.
+                Permanently delete this workspace and all its chats and scripts.
               </p>
               <Button variant="danger" size="sm" onClick={openDeleteConfirm}>
                 <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                 </svg>
-                Delete Project
+                Delete Workspace
               </Button>
             </div>
           </div>
@@ -282,9 +402,9 @@ export default function ProjectSettingsDialog({
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete project</AlertDialogTitle>
+            <AlertDialogTitle>Delete workspace</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong className="text-text">"{projectName}"</strong>? This will remove all chats and scripts associated with this project. This action cannot be undone.
+              Are you sure you want to delete <strong className="text-text">"{projectName}"</strong>? This will remove all chats and scripts associated with this workspace. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -299,14 +419,14 @@ export default function ProjectSettingsDialog({
                 checked={deleteFolder}
                 onCheckedChange={(checked) => setDeleteFolder(checked === true)}
               />
-              <span className="text-sm text-text">Delete the project folder as well</span>
+              <span className="text-sm text-text">Delete the workspace folder as well</span>
             </label>
           ) : (
             <div className="flex items-center gap-2 py-2 px-3 rounded-md bg-warning/10 border border-warning/30">
               <svg className="w-4 h-4 text-warning flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
-              <span className="text-xs text-warning">This is an obsolete project — there is no directory linked to it.</span>
+              <span className="text-xs text-warning">This is an obsolete workspace — there is no directory linked to it.</span>
             </div>
           )}
 

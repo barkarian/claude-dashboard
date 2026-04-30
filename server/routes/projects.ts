@@ -23,8 +23,12 @@ router.get('/', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 0;
     const offset = parseInt(req.query.offset as string) || 0;
     const search = (req.query.search as string) || '';
+    const pinnedOnly = req.query.pinned === '1';
 
-    if (search && limit > 0) {
+    if (pinnedOnly) {
+      const projects = projectManager.listPinnedProjects();
+      res.json({ projects, total: projects.length });
+    } else if (search && limit > 0) {
       const result = projectManager.searchProjectsPaginated(search, limit, offset);
       res.json({ projects: result.projects, total: result.total });
     } else if (limit > 0) {
@@ -55,7 +59,7 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath, repoUrl, defaultAdapter } = req.body;
+    const { name, path: projectPath, repoUrl, defaultAdapter, mode } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
@@ -64,6 +68,11 @@ router.post('/', async (req: Request, res: Response) => {
     if (defaultAdapter && result.project) {
       projectManager.updateProject(result.project.id, { defaultAdapter });
       result.project.defaultAdapter = defaultAdapter;
+    }
+    // Set workspace mode if explicitly specified (otherwise column default 'simple' applies)
+    if ((mode === 'simple' || mode === 'dev') && result.project) {
+      projectManager.updateProject(result.project.id, { mode });
+      result.project.mode = mode;
     }
     res.status(201).json(result);
   } catch (err) {
@@ -75,7 +84,7 @@ router.post('/', async (req: Request, res: Response) => {
 // Register an existing directory as a project
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath, defaultAdapter } = req.body;
+    const { name, path: projectPath, defaultAdapter, mode } = req.body;
     if (!name || !projectPath) {
       return res.status(400).json({ error: 'Name and path are required' });
     }
@@ -87,6 +96,10 @@ router.post('/register', async (req: Request, res: Response) => {
     if (defaultAdapter) {
       projectManager.updateProject(project.id, { defaultAdapter });
       project.defaultAdapter = defaultAdapter;
+    }
+    if (mode === 'simple' || mode === 'dev') {
+      projectManager.updateProject(project.id, { mode });
+      project.mode = mode;
     }
     res.status(201).json({ project });
   } catch (err: any) {
@@ -102,6 +115,9 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     if (req.body.path !== undefined && (!req.body.path || !fs.existsSync(req.body.path))) {
       return res.status(400).json({ error: 'Path does not exist on disk' });
+    }
+    if (req.body.mode !== undefined && req.body.mode !== 'simple' && req.body.mode !== 'dev') {
+      return res.status(400).json({ error: "mode must be 'simple' or 'dev'" });
     }
     const project = projectManager.updateProject(req.params.id, req.body);
     res.json({ project });
@@ -481,7 +497,12 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     }
     // Use explicit adapter if provided, otherwise fall back to project default (then global default)
     const { resolveDefaultAdapter } = await import('../services/database.ts');
-    const chatAdapter = adapter || project.defaultAdapter || resolveDefaultAdapter();
+    let chatAdapter = adapter || project.defaultAdapter || resolveDefaultAdapter();
+    // Defense-in-depth: simple-mode workspaces always use the SDK adapter for new chats,
+    // even if the client requests something else. Existing chats keep their own adapter.
+    if (project.mode === 'simple') {
+      chatAdapter = 'claude-agent-sdk';
+    }
 
     // Validate adapter is registered
     const { adapterRegistry } = await import('../adapters/registry.ts');

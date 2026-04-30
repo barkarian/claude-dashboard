@@ -7,6 +7,7 @@ import { Button } from '../ui/button.tsx';
 import { Input } from '../ui/input.tsx';
 import { Label } from '../ui/label.tsx';
 import { Alert } from '../ui/alert.tsx';
+import { Switch } from '../ui/switch.tsx';
 import RepoSelector from './RepoSelector.tsx';
 import FolderBrowser from './FolderBrowser.tsx';
 import TruncatedPath from '../ui/truncated-path.tsx';
@@ -53,6 +54,9 @@ export default function NewProjectDrawer() {
   const [error, setError] = useState('');
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // Power-user options (collapsed by default — non-technical users never see them)
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [devWorkspace, setDevWorkspace] = useState(false);
 
   function reset() {
     setTab('existing');
@@ -69,6 +73,8 @@ export default function NewProjectDrawer() {
     setError('');
     setCreatedProjectId(null);
     setSuccess(false);
+    setShowAdvanced(false);
+    setDevWorkspace(false);
   }
 
   function handleOpenChange(open: boolean) {
@@ -133,6 +139,7 @@ export default function NewProjectDrawer() {
         name: projectName,
         path: projectPath,
         defaultAdapter,
+        mode: devWorkspace ? 'dev' : 'simple',
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -161,6 +168,7 @@ export default function NewProjectDrawer() {
         path: projectPath || undefined,
         repoUrl,
         defaultAdapter,
+        mode: devWorkspace ? 'dev' : 'simple',
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -191,6 +199,7 @@ export default function NewProjectDrawer() {
         path: fullPath,
         repoUrl: null,
         defaultAdapter,
+        mode: devWorkspace ? 'dev' : 'simple',
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -215,15 +224,15 @@ export default function NewProjectDrawer() {
         <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between mb-3 flex-shrink-0">
-            <DrawerTitle className="text-lg font-semibold">New Project</DrawerTitle>
+            <DrawerTitle className="text-lg font-semibold">New Workspace</DrawerTitle>
           </div>
 
           {/* Success state */}
           {success && createdProjectId ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-4">
-              <Alert variant="success">Project {tab === 'existing' ? 'added' : 'created'} successfully!</Alert>
+              <Alert variant="success">Workspace {tab === 'existing' ? 'added' : 'created'} successfully!</Alert>
               <Button onClick={handleOpenProject} className="w-full">
-                Open Project
+                Open Workspace
               </Button>
             </div>
           ) : (
@@ -277,7 +286,7 @@ export default function NewProjectDrawer() {
                     {selectedPath && (
                       <div className="space-y-3 pt-2 border-t border-border">
                         <div>
-                          <Label>Project Name</Label>
+                          <Label>Workspace Name</Label>
                           <Input
                             type="text"
                             value={projectName}
@@ -323,7 +332,7 @@ export default function NewProjectDrawer() {
                     {(selectedRepo || customUrl.trim()) && (
                       <div className="space-y-3 pt-2 border-t border-border">
                         <div>
-                          <Label>Project Name</Label>
+                          <Label>Workspace Name</Label>
                           <Input
                             type="text"
                             value={projectName}
@@ -352,7 +361,7 @@ export default function NewProjectDrawer() {
                 {tab === 'empty' && (
                   <div className="space-y-4">
                     <div>
-                      <Label>Project Name</Label>
+                      <Label>Workspace Name</Label>
                       <Input
                         type="text"
                         value={projectName}
@@ -362,7 +371,7 @@ export default function NewProjectDrawer() {
                             setEmptyFolderName(toFolderName(e.target.value));
                           }
                         }}
-                        placeholder="My New Project"
+                        placeholder="My New Workspace"
                       />
                     </div>
                     <div>
@@ -409,6 +418,38 @@ export default function NewProjectDrawer() {
                   <Alert variant="danger">{error}</Alert>
                 </div>
               )}
+
+              {/* Power user options — collapsed by default */}
+              <div className="flex-shrink-0 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(s => !s)}
+                  className="flex items-center gap-1 text-xs text-text-dim hover:text-text-muted transition-colors"
+                >
+                  <svg
+                    className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  Power user options
+                </button>
+                {showAdvanced && (
+                  <div className="mt-2 pl-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-text">Dev workspace</p>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        Show the Scripts tab, file path breadcrumb, and adapter choice.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={devWorkspace}
+                      onCheckedChange={setDevWorkspace}
+                      className="mt-1 flex-shrink-0"
+                    />
+                  </div>
+                )}
+              </div>
 
               {/* Sticky bottom action button */}
               <div className="flex-shrink-0 pt-3 border-t border-border mt-3">

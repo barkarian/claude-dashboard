@@ -265,6 +265,43 @@ try {
   // Column already exists — ignore
 }
 
+// Workspace mode (simple | dev). New rows default to 'simple'; existing rows
+// are backfilled to 'dev' once on first boot (gated by a settings flag below).
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'`);
+} catch {
+  // Column already exists — ignore
+}
+
+// Workspace-level pinning (distinct from the per-chat `pinned` column on chats).
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN pinned_at TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_pinned ON projects(pinned, pinned_at DESC)`);
+} catch {
+  // Already exists — ignore
+}
+
+// One-shot backfill: pre-existing workspaces keep the dev-mode UX they were
+// built with. Gated by a settings flag so it runs at most once per database.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.mode_backfill_at'").get();
+  if (!flag) {
+    db.prepare("UPDATE projects SET mode = 'dev'").run();
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.mode_backfill_at', ?)").run(new Date().toISOString());
+  }
+} catch {
+  // settings table not ready or projects table missing mode column — skip.
+}
+
 // --- Adapter settings (per-adapter key-value store) ---
 
 db.exec(`

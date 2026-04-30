@@ -1,10 +1,21 @@
 import { Router, type Request, type Response } from 'express';
 import { execSync, exec } from 'child_process';
 import config from '../config.ts';
+import { isServiceEnabled } from './services.ts';
 
 const router = Router();
 
 const PROTECTED_PORTS = new Set([config.port]);
+
+/** Block system endpoints when the user has disabled the Local Computer service in the Catalog. */
+function requireLocalComputer(_req: Request, res: Response, next: () => void) {
+  if (!isServiceEnabled('local-computer')) {
+    return res.status(403).json({ error: 'The Local Computer service is disabled. Enable it in the Catalog to use this feature.' });
+  }
+  next();
+}
+
+router.use(requireLocalComputer);
 
 interface PortEntry {
   port: number;
