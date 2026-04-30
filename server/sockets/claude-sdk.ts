@@ -48,7 +48,11 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
       // Pass persisted session ID if available (for resume) — prefer unified sessionId
       const savedSdkSessionId = chat?.sessionId || chat?.sdkSessionId || undefined;
-      sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSdkSessionId);
+      // Enable the display_artifact MCP tool when this chat is using the claw-chat
+      // adapter. The legacy sdk:* socket handlers don't go through the adapter
+      // orchestrator, so without this branch the tool would never load.
+      const withArtifacts = chat?.adapter === 'claw-chat';
+      sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSdkSessionId, { withArtifacts });
       socket.emit('sdk:status', { chatId, status: 'idle' });
 
       // Load history from JSONL session file (single source of truth for both CC and SDK)
