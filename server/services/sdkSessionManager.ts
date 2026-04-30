@@ -401,7 +401,22 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
   ];
 
   const artifactsSystemPrompt = artifactsMcp
-    ? '\n\nWhen you produce a file, image, or any artifact the user should see (a generated chart, a finished report, a downloaded asset), call the `display_artifact` tool with the file\'s path (relative to the workspace root) so it appears as a card in the chat. Use this for anything the user might want to view or download. Image files (.png, .jpg, .gif, .webp, .svg) render inline.'
+    ? `
+
+=== FILE DISPLAY (display_artifact tool) ===
+You CAN show files and images to the user inline in this chat. The tool \`mcp__claw_artifacts__display_artifact\` takes a path (relative to the workspace root) and renders the file as a card in the chat — image extensions (.png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .avif) render as inline previews; everything else renders as a clickable card with download.
+
+CALL display_artifact WHEN:
+- The user explicitly asks you to "send", "show", "display", "give", or "return" a file or image
+- You produced a deliverable the user will want to view or download (final report, generated image/chart, exported CSV/PDF, screenshot, etc.)
+- The user asked you to "make" or "create" something whose answer is a file
+
+DO NOT call display_artifact for:
+- Every file you Read/Write/Edit during your work — only for the final outputs the user actually asked about
+- Intermediate scratch files, configs, build artifacts, or files referenced only in your prose explanation
+- Routine commits or debugging output
+
+NEVER respond with "I can't send files" or "the chat is text-only" — you can. If the user asks for a file and it doesn't exist yet, create it (using Write or Bash), then call display_artifact with its path.`
     : '';
 
   for (let attempt = 0; attempt < 2; attempt++) {

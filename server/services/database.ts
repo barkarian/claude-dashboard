@@ -351,6 +351,27 @@ try {
   console.error('claw-chat seed migration failed:', err);
 }
 
+// One-shot: existing chats inside simple-mode workspaces still carry the old
+// 'claude-agent-sdk' adapter id (which doesn't load the display_artifact tool).
+// Flip them to 'claw-chat' so the artifacts feature works without users having
+// to recreate every chat. Dev workspaces are untouched. Gated by a flag.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.claw_chat_chat_backfill_at'").get();
+  if (!flag) {
+    db.prepare(`
+      UPDATE chats
+      SET adapter = 'claw-chat'
+      WHERE adapter = 'claude-agent-sdk'
+        AND project_id IN (SELECT id FROM projects WHERE mode = 'simple')
+    `).run();
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.claw_chat_chat_backfill_at', ?)"
+    ).run(new Date().toISOString());
+  }
+} catch (err) {
+  console.error('claw-chat chat-backfill migration failed:', err);
+}
+
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
   return row?.value;
