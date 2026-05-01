@@ -1,12 +1,15 @@
 import { Button } from '../ui/button.tsx';
+import { filesStrings } from '../../utils/modeStrings.ts';
+import type { ProjectMode } from '../../../../shared/types/models.ts';
 
 interface DiffActionsProps {
   filePath: string;
+  mode?: ProjectMode;
   onRevert?: () => void;
   onAccept?: () => void;
 }
 
-export default function DiffActions({ filePath, onRevert, onAccept }: DiffActionsProps) {
+export default function DiffActions({ filePath: _filePath, mode = 'dev', onRevert, onAccept }: DiffActionsProps) {
   return (
     <div className="flex items-center gap-2">
       {onRevert && (
@@ -19,7 +22,7 @@ export default function DiffActions({ filePath, onRevert, onAccept }: DiffAction
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
           </svg>
-          Revert
+          {filesStrings[mode].undoFile}
         </Button>
       )}
       {onAccept && (

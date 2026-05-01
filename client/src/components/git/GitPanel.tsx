@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '../ui/button.tsx';
 import { Input } from '../ui/input.tsx';
 import api from '../../utils/api.ts';
+import { timeAgo } from '../../utils/timeAgo.ts';
+import SetupSavingDrawer from '../files/SetupSavingDrawer.tsx';
 import type { GitInfo, GitRemote, GitLogEntry } from '../../../../shared/types/models.ts';
 
 interface GitPanelProps {
@@ -29,24 +31,10 @@ function formatRemoteUrl(url: string): { href: string | null; display: string } 
   return { href: null, display: url };
 }
 
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
 export default function GitPanel({ projectId, repoPath }: GitPanelProps) {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [showAddRemote, setShowAddRemote] = useState(false);
   const [remoteName, setRemoteName] = useState('');
   const [remoteUrl, setRemoteUrl] = useState('');
@@ -97,13 +85,9 @@ export default function GitPanel({ projectId, repoPath }: GitPanelProps) {
     return () => { if (ghTimerRef.current) clearTimeout(ghTimerRef.current); };
   }, [ghSearch, projectId]);
 
-  async function handleInit() {
-    try {
-      await api.post(`/api/projects/${projectId}/git-init`, { repoPath });
-      await loadGitInfo();
-    } catch (err) {
-      console.error('Failed to init git:', err);
-    }
+  function handleSetupComplete() {
+    setSetupOpen(false);
+    loadGitInfo();
   }
 
   async function handleAddRemote() {
@@ -143,15 +127,25 @@ export default function GitPanel({ projectId, repoPath }: GitPanelProps) {
   // No-repo state
   if (!gitInfo?.isRepo) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4">
-        <svg className="w-12 h-12 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
-        </svg>
-        <p className="text-sm text-text-muted">No git repository found</p>
-        <Button onClick={handleInit} size="sm">
-          Initialize Git Repository
-        </Button>
-      </div>
+      <>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4">
+          <svg className="w-12 h-12 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+          <p className="text-sm text-text-muted">No git repository found</p>
+          <Button onClick={() => setSetupOpen(true)} size="sm">
+            Initialize Git Repository
+          </Button>
+        </div>
+        <SetupSavingDrawer
+          open={setupOpen}
+          onOpenChange={setSetupOpen}
+          projectId={projectId}
+          repoPath={repoPath}
+          mode="dev"
+          onComplete={handleSetupComplete}
+        />
+      </>
     );
   }
 

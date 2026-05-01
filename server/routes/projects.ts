@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
+import { scanDir } from '../services/dirScan.ts';
 import { getOrBuildPreview, getPreviewInfo } from '../services/previewService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
@@ -283,12 +284,53 @@ router.get('/:id/git-info', async (req: Request<{ id: string }>, res: Response) 
   }
 });
 
-// Git init
+// Directory scan (for the source-control setup picker — exposes one level
+// of entries with sizes / file counts so the UI can let the user choose
+// which paths to exclude before running git init).
+router.get('/:id/dir-scan', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const projectPath = projectManager.getProjectPath(req.params.id);
+    const targetPath = resolveRepoPath(req, projectPath);
+    const relPath = (req.query.path as string) || '';
+    const result = await scanDir(targetPath, relPath);
+    res.json(result);
+  } catch (err) {
+    console.error('Error scanning dir:', err);
+    res.status(500).json({ error: 'Failed to scan directory' });
+  }
+});
+
+// Git init. Optionally accepts `gitignoreContent` (writes/appends `.gitignore`
+// before init) and `initialCommit` (makes an "Initial save" commit after init
+// so the user immediately sees a save in their list).
 router.post('/:id/git-init', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const projectPath = projectManager.getProjectPath(req.params.id);
     const targetPath = resolveRepoPath(req, projectPath);
+    const { gitignoreContent, initialCommit } = (req.body || {}) as { gitignoreContent?: string; initialCommit?: boolean };
+    const trimmed = typeof gitignoreContent === 'string' ? gitignoreContent.trim() : '';
+    if (trimmed) {
+      const gitignorePath = path.join(targetPath, '.gitignore');
+      let existing = '';
+      try {
+        existing = await fs.promises.readFile(gitignorePath, 'utf-8');
+      } catch {
+        // no existing .gitignore — fine
+      }
+      const next = existing
+        ? existing.replace(/\s*$/, '') + '\n\n# Added by Setup Saving\n' + trimmed + '\n'
+        : trimmed + '\n';
+      await fs.promises.writeFile(gitignorePath, next, 'utf-8');
+    }
     await gitService.init(targetPath);
+    if (initialCommit) {
+      try {
+        await gitService.commitAll(targetPath, 'Initial save');
+      } catch (commitErr) {
+        // Nothing to commit (empty dir, or everything was ignored) — fine.
+        console.warn('Initial save skipped:', (commitErr as Error).message);
+      }
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('Error initializing git:', err);

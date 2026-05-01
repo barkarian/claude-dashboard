@@ -78,6 +78,7 @@ export default function ProjectSettingsDialog({
   const [localMode, setLocalMode] = useState<'simple' | 'dev'>(mode);
   const [savingMode, setSavingMode] = useState(false);
   const modeChanged = localMode !== mode;
+  const [unpushedCount, setUnpushedCount] = useState(0);
 
   async function handleSaveMode() {
     if (!modeChanged) return;
@@ -131,7 +132,15 @@ export default function ProjectSettingsDialog({
     api.get<ShellPreference>('/api/shell-preference')
       .then(setShellPref)
       .catch(() => {});
-  }, [open, shellOverride, aiNamingEnabled, mode]);
+    // Fetch unpushed-count so we can warn before dev → simple
+    if (mode === 'dev') {
+      api.get<{ unpushedCount: number }>(`/api/projects/${projectId}/git-info`)
+        .then((data) => setUnpushedCount(data.unpushedCount ?? 0))
+        .catch(() => setUnpushedCount(0));
+    } else {
+      setUnpushedCount(0);
+    }
+  }, [open, shellOverride, aiNamingEnabled, mode, projectId]);
 
   async function handleSaveShell() {
     const newValue = localShellOverride || null;
@@ -298,6 +307,11 @@ export default function ProjectSettingsDialog({
               {modeChanged && localMode === 'simple' && (
                 <p className="text-xs text-text-muted mt-2">
                   Existing Dev chats keep working in this workspace; new chats use the Simple adapter.
+                </p>
+              )}
+              {modeChanged && localMode === 'simple' && unpushedCount > 0 && (
+                <p className="text-xs text-warning mt-2">
+                  You have {unpushedCount} unpushed change{unpushedCount !== 1 ? 's' : ''} that won't be visible in Simple mode. Push from the Git tab first if you want them on your remote.
                 </p>
               )}
             </div>
