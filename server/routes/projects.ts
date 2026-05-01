@@ -36,8 +36,11 @@ router.get('/', async (req: Request, res: Response) => {
       return res.json({ project });
     }
     if (homeMode === 'if-exists') {
+      // Sidebar-friendly summary (with chatsCount). Returning a full Project
+      // here would make `home.chatsCount` undefined on the client and the
+      // sidebar's "show Home row" check would always fail.
       const id = projectManager.getHomeProjectId();
-      const project = id ? projectManager.getProject(id) : null;
+      const project = id ? projectManager.getProjectSummary(id) : null;
       return res.json({ project });
     }
 

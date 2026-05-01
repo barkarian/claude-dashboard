@@ -103,14 +103,12 @@ interface ChatRowProps {
   onMouseEnter: (e: React.MouseEvent) => void;
   onMouseLeave: () => void;
   onContextMenuNative: (e: React.MouseEvent) => void;
-  onDismiss: () => void;
 }
 
 function ChatRow({
   chat, isActive, onSelect, onTouchStart, onTouchEndCancel,
-  onMouseEnter, onMouseLeave, onContextMenuNative, onDismiss,
+  onMouseEnter, onMouseLeave, onContextMenuNative,
 }: ChatRowProps) {
-  const isDismissible = chat.isDismissible;
   // Category emoji acts as the inline marker. Falls back to the live status
   // dot when the chat is uncategorised. Idle (lazy-fetched) chats with no
   // category get a plain neutral dot.
@@ -137,19 +135,9 @@ function ChatRow({
       >
         {marker}
         <span className="truncate flex-1 text-left">{chat.label}</span>
-        {isDismissible ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onDismiss(); }}
-            className="flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-            aria-label="Dismiss"
-          >
-            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        ) : (
+        {chat.status !== 'idle' && (
           <span className="flex-shrink-0 text-[9px] opacity-70">
-            {chat.status === 'idle' ? '' : statusLabel(chat.status as ActiveChat['status'])}
+            {statusLabel(chat.status as ActiveChat['status'])}
           </span>
         )}
       </button>
@@ -177,9 +165,6 @@ interface SidebarChatRow {
   categoryId: string | null;
   categoryEmoji: string | null;
   lastActivityAt: string;
-  /** True when the chat is "seen"/"new" (came from the live tracker and the
-   * user can clear it). False for plain idle chats fetched lazily. */
-  isDismissible: boolean;
 }
 
 /** Merge live tracker chats with lazy-fetched idle chats. Tracker entries
@@ -194,7 +179,6 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
       categoryId: f.categoryId,
       categoryEmoji: f.category?.emoji ?? null,
       lastActivityAt: f.lastActivityAt || f.createdAt,
-      isDismissible: false,
     });
   }
   for (const t of tracker) {
@@ -205,7 +189,6 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
       categoryId: t.categoryId,
       categoryEmoji: t.categoryEmoji,
       lastActivityAt: t.lastActivityAt,
-      isDismissible: t.status === 'seen' || t.status === 'new',
     });
   }
   return [...byId.values()].sort(
@@ -380,14 +363,26 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }
   }
 
-  // Track which project accordions are expanded
+  // Track which project accordions are expanded.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Per-project "bypass the 3+actionable cap" flag. Set when the user clicks
+  // "Show more chats". Cleared whenever the project is collapsed so re-open
+  // returns to the default 3-chat view.
+  const [showAllChats, setShowAllChats] = useState<Set<string>>(new Set());
 
   const toggleExpanded = useCallback((projectId: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
-      if (next.has(projectId)) next.delete(projectId);
-      else {
+      if (next.has(projectId)) {
+        next.delete(projectId);
+        // Reset cap-bypass when collapsing.
+        setShowAllChats(s => {
+          if (!s.has(projectId)) return s;
+          const n = new Set(s);
+          n.delete(projectId);
+          return n;
+        });
+      } else {
         next.add(projectId);
         // Lazy-fetch the project's chat list the first time it expands so
         // the user sees idle chats too, not just the actionable tracker set.
@@ -624,17 +619,66 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </button>
         </div>
 
-        {/* Expanded chat list: live tracker chats + lazy-fetched real chats. */}
+        {/* Expanded chat list. Default cap = max(3, deepest non-idle + 1) so
+            anything actionable always stays visible; quiet chats past that
+            collapse behind "Show more". User can lift the cap explicitly,
+            and "Show fewer" reapplies it. */}
         {hasAnyChats && isExpanded && (() => {
           const trackerChats = projectActive?.chats ?? [];
           const fetched = chatsByProject[project.id]?.chats ?? [];
           const total = chatsByProject[project.id]?.total ?? trackerChats.length;
           const merged = mergeProjectChats(trackerChats, fetched);
           const isLoading = chatsLoadingProject.has(project.id);
-          const hasMore = fetched.length < total;
+          const showAll = showAllChats.has(project.id);
+
+          // Deepest non-idle entry (working / awaiting / unread / seen / new).
+          let deepestNonIdle = -1;
+          for (let i = 0; i < merged.length; i++) {
+            if (merged[i].status !== 'idle') deepestNonIdle = i;
+          }
+          const cap = Math.max(3, deepestNonIdle + 1);
+          const visible = showAll ? merged : merged.slice(0, cap);
+          const hiddenInCap = !showAll && merged.length > cap;
+          const hasMoreOnServer = fetched.length < total;
+          // Show "Show more" if either there are merged chats hidden by the
+          // cap, or there's more on the server we haven't fetched yet.
+          const canShowMore = hiddenInCap || hasMoreOnServer;
+          // Show "Show fewer" only when bypass is active AND the cap would
+          // actually hide something — otherwise it's a no-op button.
+          const canShowFewer = showAll && merged.length > cap;
+
+          function handleShowMore() {
+            // First click reveals chats hidden by the cap. After that,
+            // each click pages forward on the server.
+            if (hiddenInCap) {
+              setShowAllChats(prev => {
+                const next = new Set(prev);
+                next.add(project.id);
+                return next;
+              });
+              // If the bypass is going to immediately demand more (we've
+              // shown everything fetched), kick off a fetch right away.
+              if (!hasMoreOnServer) return;
+              if (merged.length >= fetched.length) fetchProjectChats(project.id, true);
+              return;
+            }
+            if (hasMoreOnServer) {
+              fetchProjectChats(project.id, true);
+            }
+          }
+
+          function handleShowFewer() {
+            setShowAllChats(prev => {
+              if (!prev.has(project.id)) return prev;
+              const next = new Set(prev);
+              next.delete(project.id);
+              return next;
+            });
+          }
+
           return (
             <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
-              {merged.map((chat) => (
+              {visible.map((chat) => (
                 <ChatRow
                   key={chat.chatId}
                   chat={chat}
@@ -648,9 +692,6 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
                   onMouseLeave={handleChatMouseLeave}
                   onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
-                  onDismiss={() => {
-                    api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
-                  }}
                 />
               ))}
               {isLoading && (
@@ -658,13 +699,23 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   <div className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full" />
                 </li>
               )}
-              {!isLoading && hasMore && (
+              {!isLoading && canShowMore && (
                 <li>
                   <button
-                    onClick={() => fetchProjectChats(project.id, true)}
+                    onClick={handleShowMore}
                     className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
                   >
                     Show more chats
+                  </button>
+                </li>
+              )}
+              {!isLoading && canShowFewer && (
+                <li>
+                  <button
+                    onClick={handleShowFewer}
+                    className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                  >
+                    Show fewer
                   </button>
                 </li>
               )}
@@ -988,8 +1039,23 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
             <AlertDialogAction
               onClick={() => {
                 if (sidebarDeleteTarget) {
+                  const { projectId: pid, chat: target } = sidebarDeleteTarget;
                   haptics.notificationError();
-                  api.delete(`/api/projects/${sidebarDeleteTarget.projectId}/chats/${sidebarDeleteTarget.chat.chatId}`).catch(() => {});
+                  // Optimistic local prune so the row vanishes immediately —
+                  // the server tracker drops it via the DELETE response, but
+                  // the lazy-fetched chatsByProject cache is local and would
+                  // otherwise keep showing the row until reload.
+                  setChatsByProject(prev => {
+                    const entry = prev[pid];
+                    if (!entry) return prev;
+                    const filtered = entry.chats.filter(c => c.id !== target.chatId);
+                    if (filtered.length === entry.chats.length) return prev;
+                    return {
+                      ...prev,
+                      [pid]: { chats: filtered, total: Math.max(0, entry.total - 1) },
+                    };
+                  });
+                  api.delete(`/api/projects/${pid}/chats/${target.chatId}`).catch(() => {});
                 }
                 setSidebarDeleteTarget(null);
               }}

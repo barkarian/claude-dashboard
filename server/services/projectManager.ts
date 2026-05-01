@@ -123,6 +123,19 @@ function getHomeProjectId(): string | null {
   return row?.id ?? null;
 }
 
+/** Lightweight one-row project summary (with chatsCount + scriptsCount).
+ * Used by the sidebar's Home row, which only needs counts not the full
+ * chat history that getProject() returns. */
+function getProjectSummary(projectId: string): ProjectSummary | null {
+  const row = db.prepare(`
+    SELECT ${PROJECT_SUMMARY_COLUMNS}
+    FROM projects p
+    WHERE p.id = ?
+  `).get(projectId) as any;
+  if (!row) return null;
+  return mapRowToSummary(row);
+}
+
 function listPinnedProjects(): ProjectSummary[] {
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
@@ -843,6 +856,7 @@ export default {
   listPinnedProjects,
   getOrCreateHomeProject,
   getHomeProjectId,
+  getProjectSummary,
   isHomePath,
   getProject,
   createProject,
