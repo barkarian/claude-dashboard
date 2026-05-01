@@ -5,7 +5,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db, { resolveDefaultAdapter } from './database.ts';
 import gitService from './gitService.ts';
-import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, ChatCategory, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
 // === Project Methods ===
 
@@ -94,8 +94,10 @@ function getProject(projectId: string): Project | null {
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
   if (!row) return null;
 
+  ensureDefaultCategory(projectId);
   const scripts = listScripts(projectId);
   const chats = listChatsWithHistory(projectId);
+  const categories = listCategories(projectId);
 
   return {
     id: row.id,
@@ -112,6 +114,7 @@ function getProject(projectId: string): Project | null {
     pinnedAt: row.pinned_at || null,
     scripts,
     chats,
+    categories,
   };
 }
 
@@ -140,6 +143,8 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
   db.prepare('INSERT INTO projects (id, name, path, repo, created_at, default_adapter) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, name, targetPath, repoUrl || null, now, defaultAdapter);
 
+  ensureDefaultCategory(id);
+
   const project: Project = {
     id,
     name,
@@ -155,6 +160,7 @@ async function createProject(name: string, projectPath?: string, repoUrl?: strin
     pinnedAt: null,
     scripts: [],
     chats: [],
+    categories: listCategories(id),
   };
 
   return { project, setupSessionId: uuidv4() };
@@ -173,6 +179,8 @@ function registerProject(name: string, projectPath: string): Project {
   db.prepare('INSERT INTO projects (id, name, path, repo, created_at, default_adapter) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, name, projectPath, null, now, defaultAdapter);
 
+  ensureDefaultCategory(id);
+
   return {
     id,
     name,
@@ -188,6 +196,7 @@ function registerProject(name: string, projectPath: string): Project {
     pinnedAt: null,
     scripts: [],
     chats: [],
+    categories: listCategories(id),
   };
 }
 
@@ -328,69 +337,74 @@ function getScript(scriptId: string): Script | null {
 
 // === Chat Methods ===
 
-// Pinned-activity ordering: every chat has an "effective activity date".
-// - Un-dragged chats: the live last_activity_at.
-// - Dragged chats: the timestamp the user implicitly picked by dropping the
-//   chat between two neighbours (stored in sort_order as ms since epoch).
-// Higher timestamp = higher in the list. Fresher real activity therefore
-// naturally overtakes older pinned anchors.
-const CHAT_ORDER_CLAUSE = `ORDER BY favorite DESC,
-  COALESCE(sort_order,
-           CAST(strftime('%s', COALESCE(last_activity_at, created_at)) AS REAL) * 1000) DESC`;
+// Activity-only ordering: newest message first. Categories are markers, not
+// pins — they no longer float chats to the top.
+const CHAT_SELECT = `
+  SELECT c.*,
+    cat.id   AS cat_id,
+    cat.name AS cat_name,
+    cat.emoji AS cat_emoji,
+    cat.is_default AS cat_is_default,
+    cat.sort_order AS cat_sort_order,
+    cat.created_at AS cat_created_at
+  FROM chats c
+  LEFT JOIN chat_categories cat ON c.category_id = cat.id
+`;
+const CHAT_ORDER_CLAUSE = `ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC`;
 
 function listChats(projectId: string): Chat[] {
-  const rows = db.prepare(`SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
-  return rows.map(r => ({
-    id: r.id,
-    label: r.label,
-    description: r.description || null,
-    createdAt: r.created_at,
-    lastActivityAt: r.last_activity_at || r.created_at,
-    history: [],
-    sdkSessionId: r.sdk_session_id || null,
-    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
-    ccConversationId: r.cc_conversation_id || null,
-    sessionId: r.session_id || null,
-    draftMessage: r.draft_message || null,
-    stashedInput: r.stashed_input || null,
-    unread: !!r.unread,
-    favorite: !!r.favorite,
-    sortOrder: typeof r.sort_order === 'number' ? r.sort_order : null,
-  }));
+  const rows = db.prepare(`${CHAT_SELECT} WHERE c.project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
+  return rows.map(r => mapRowToChatLite(r));
 }
 
-function listChatsPaginated(projectId: string, opts: { limit?: number; offset?: number; search?: string } = {}): { chats: Chat[]; total: number } {
+function listChatsPaginated(
+  projectId: string,
+  opts: { limit?: number; offset?: number; search?: string; categoryIds?: string[] } = {},
+): { chats: Chat[]; total: number } {
   const limit = opts.limit ?? 20;
   const offset = opts.offset ?? 0;
+  const filters: string[] = ['c.project_id = ?'];
+  const params: any[] = [projectId];
 
   if (opts.search) {
+    filters.push('(c.label LIKE ? OR c.description LIKE ?)');
     const pattern = `%${opts.search}%`;
-
-    const { total } = db.prepare(
-      'SELECT COUNT(*) as total FROM chats WHERE project_id = ? AND (label LIKE ? OR description LIKE ?)'
-    ).get(projectId, pattern, pattern) as any;
-
-    const rows = db.prepare(
-      `SELECT * FROM chats WHERE project_id = ? AND (label LIKE ? OR description LIKE ?) ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
-    ).all(projectId, pattern, pattern, limit, offset) as any[];
-
-    return { chats: rows.map(r => mapRowToChat(r)), total };
+    params.push(pattern, pattern);
+  }
+  if (opts.categoryIds && opts.categoryIds.length > 0) {
+    const placeholders = opts.categoryIds.map(() => '?').join(',');
+    filters.push(`c.category_id IN (${placeholders})`);
+    params.push(...opts.categoryIds);
   }
 
+  const where = filters.join(' AND ');
   const { total } = db.prepare(
-    'SELECT COUNT(*) as total FROM chats WHERE project_id = ?'
-  ).get(projectId) as any;
+    `SELECT COUNT(*) as total FROM chats c WHERE ${where}`
+  ).get(...params) as any;
 
   const rows = db.prepare(
-    `SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
-  ).all(projectId, limit, offset) as any[];
+    `${CHAT_SELECT} WHERE ${where} ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset) as any[];
 
   return { chats: rows.map(r => mapRowToChat(r)), total };
 }
 
 function listChatsWithHistory(projectId: string): Chat[] {
-  const chatRows = db.prepare(`SELECT * FROM chats WHERE project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
+  const chatRows = db.prepare(`${CHAT_SELECT} WHERE c.project_id = ? ${CHAT_ORDER_CLAUSE}`).all(projectId) as any[];
   return chatRows.map(r => mapRowToChat(r));
+}
+
+function rowToCategory(r: any): ChatCategory | null {
+  if (!r.cat_id) return null;
+  return {
+    id: r.cat_id,
+    projectId: r.project_id,
+    name: r.cat_name,
+    emoji: r.cat_emoji,
+    isDefault: !!r.cat_is_default,
+    sortOrder: r.cat_sort_order ?? 0,
+    createdAt: r.cat_created_at,
+  };
 }
 
 function mapRowToChat(r: any): Chat {
@@ -408,8 +422,28 @@ function mapRowToChat(r: any): Chat {
     draftMessage: r.draft_message || null,
     stashedInput: r.stashed_input || null,
     unread: !!r.unread,
-    favorite: !!r.favorite,
-    sortOrder: typeof r.sort_order === 'number' ? r.sort_order : null,
+    categoryId: r.category_id || null,
+    category: rowToCategory(r),
+  };
+}
+
+function mapRowToChatLite(r: any): Chat {
+  return {
+    id: r.id,
+    label: r.label,
+    description: r.description || null,
+    createdAt: r.created_at,
+    lastActivityAt: r.last_activity_at || r.created_at,
+    history: [],
+    sdkSessionId: r.sdk_session_id || null,
+    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    ccConversationId: r.cc_conversation_id || null,
+    sessionId: r.session_id || null,
+    draftMessage: r.draft_message || null,
+    stashedInput: r.stashed_input || null,
+    unread: !!r.unread,
+    categoryId: r.category_id || null,
+    category: rowToCategory(r),
   };
 }
 
@@ -432,13 +466,13 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     draftMessage: null,
     stashedInput: null,
     unread: false,
-    favorite: false,
-    sortOrder: null,
+    categoryId: null,
+    category: null,
   };
 }
 
 function getChat(chatId: string): Chat | null {
-  const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
+  const row = db.prepare(`${CHAT_SELECT} WHERE c.id = ?`).get(chatId) as any;
   if (!row) return null;
   return mapRowToChat(row);
 }
@@ -481,46 +515,121 @@ function markChatDismissed(chatId: string): void {
   db.prepare('UPDATE chats SET pinned = 0 WHERE id = ?').run(chatId);
 }
 
-function setChatFavorite(chatId: string, favorite: boolean): void {
-  db.prepare('UPDATE chats SET favorite = ? WHERE id = ?').run(favorite ? 1 : 0, chatId);
+function setChatCategory(chatId: string, categoryId: string | null): void {
+  if (categoryId === null) {
+    db.prepare('UPDATE chats SET category_id = NULL WHERE id = ?').run(chatId);
+    return;
+  }
+  // Validate the category exists and belongs to the same project as the chat.
+  const chat = db.prepare('SELECT project_id FROM chats WHERE id = ?').get(chatId) as { project_id: string } | undefined;
+  if (!chat) throw new Error('Chat not found');
+  const cat = db.prepare('SELECT project_id FROM chat_categories WHERE id = ?').get(categoryId) as { project_id: string } | undefined;
+  if (!cat) throw new Error('Category not found');
+  if (cat.project_id !== chat.project_id) throw new Error('Category belongs to a different project');
+  db.prepare('UPDATE chats SET category_id = ? WHERE id = ?').run(categoryId, chatId);
 }
 
-/**
- * Freeze `chatId`'s effective activity date so it sits between `prevId`
- * (newer neighbour) and `nextId` (older neighbour) after the drop.
- *
- *   - Both neighbours → midpoint of their effective dates.
- *   - Drop to top    → nextId.effective + 60s (tiny buffer so the next real
- *                      activity still wins naturally).
- *   - Drop to bottom → prevId.effective − 60s.
- *
- * Neighbours are never mutated. Un-dragged chats keep sort_order = NULL and
- * continue to follow their live last_activity_at.
- */
-const DRAG_EDGE_BUFFER_MS = 60_000;
+// === Category Methods ===
 
-function reorderChat(projectId: string, chatId: string, prevId: string | null, nextId: string | null): void {
-  const effective = (id: string): number => {
-    const row = db.prepare('SELECT sort_order, last_activity_at, created_at FROM chats WHERE id = ? AND project_id = ?').get(id, projectId) as any;
-    if (!row) throw new Error(`Chat ${id} not found in project ${projectId}`);
-    if (typeof row.sort_order === 'number') return row.sort_order;
-    return new Date(row.last_activity_at || row.created_at).getTime();
-  };
-
-  let newOrder: number;
-  if (prevId && nextId) {
-    newOrder = (effective(prevId) + effective(nextId)) / 2;
-  } else if (nextId) {
-    // Drop to top: slightly newer than the current top of the list.
-    newOrder = effective(nextId) + DRAG_EDGE_BUFFER_MS;
-  } else if (prevId) {
-    // Drop to bottom: slightly older than the current bottom.
-    newOrder = effective(prevId) - DRAG_EDGE_BUFFER_MS;
-  } else {
-    // Lone chat in the project — pin it to "now".
-    newOrder = Date.now();
+function ensureDefaultCategory(projectId: string): ChatCategory {
+  const existing = db.prepare(
+    'SELECT * FROM chat_categories WHERE project_id = ? AND is_default = 1 LIMIT 1'
+  ).get(projectId) as any;
+  if (existing) {
+    return {
+      id: existing.id,
+      projectId: existing.project_id,
+      name: existing.name,
+      emoji: existing.emoji,
+      isDefault: !!existing.is_default,
+      sortOrder: existing.sort_order ?? 0,
+      createdAt: existing.created_at,
+    };
   }
-  db.prepare('UPDATE chats SET sort_order = ? WHERE id = ? AND project_id = ?').run(newOrder, chatId, projectId);
+  const id = `${projectId}-favorites-${uuidv4().slice(0, 8)}`;
+  db.prepare(
+    "INSERT INTO chat_categories (id, project_id, name, emoji, is_default, sort_order) VALUES (?, ?, 'Favorites', '⭐', 1, 0)"
+  ).run(id, projectId);
+  const row = db.prepare('SELECT * FROM chat_categories WHERE id = ?').get(id) as any;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    emoji: row.emoji,
+    isDefault: !!row.is_default,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+  };
+}
+
+function listCategories(projectId: string): ChatCategory[] {
+  ensureDefaultCategory(projectId);
+  const rows = db.prepare(
+    'SELECT * FROM chat_categories WHERE project_id = ? ORDER BY is_default DESC, sort_order ASC, created_at ASC'
+  ).all(projectId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    projectId: r.project_id,
+    name: r.name,
+    emoji: r.emoji,
+    isDefault: !!r.is_default,
+    sortOrder: r.sort_order ?? 0,
+    createdAt: r.created_at,
+  }));
+}
+
+function getCategory(categoryId: string): ChatCategory | null {
+  const r = db.prepare('SELECT * FROM chat_categories WHERE id = ?').get(categoryId) as any;
+  if (!r) return null;
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    name: r.name,
+    emoji: r.emoji,
+    isDefault: !!r.is_default,
+    sortOrder: r.sort_order ?? 0,
+    createdAt: r.created_at,
+  };
+}
+
+function createCategory(projectId: string, name: string, emoji: string): ChatCategory {
+  const trimmedName = name.trim();
+  const trimmedEmoji = emoji.trim();
+  if (!trimmedName) throw new Error('Category name required');
+  if (!trimmedEmoji) throw new Error('Category emoji required');
+  const id = uuidv4();
+  const next = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM chat_categories WHERE project_id = ?'
+  ).get(projectId) as { next: number };
+  db.prepare(
+    'INSERT INTO chat_categories (id, project_id, name, emoji, is_default, sort_order) VALUES (?, ?, ?, ?, 0, ?)'
+  ).run(id, projectId, trimmedName, trimmedEmoji, next.next);
+  return getCategory(id)!;
+}
+
+function updateCategory(categoryId: string, updates: { name?: string; emoji?: string }): ChatCategory | null {
+  const row = db.prepare('SELECT * FROM chat_categories WHERE id = ?').get(categoryId) as any;
+  if (!row) return null;
+  if (updates.name !== undefined) {
+    const trimmed = updates.name.trim();
+    if (!trimmed) throw new Error('Category name required');
+    db.prepare('UPDATE chat_categories SET name = ? WHERE id = ?').run(trimmed, categoryId);
+  }
+  if (updates.emoji !== undefined) {
+    const trimmed = updates.emoji.trim();
+    if (!trimmed) throw new Error('Category emoji required');
+    db.prepare('UPDATE chat_categories SET emoji = ? WHERE id = ?').run(trimmed, categoryId);
+  }
+  return getCategory(categoryId);
+}
+
+function deleteCategory(categoryId: string): void {
+  const row = db.prepare('SELECT is_default FROM chat_categories WHERE id = ?').get(categoryId) as { is_default: number } | undefined;
+  if (!row) return;
+  if (row.is_default) throw new Error('Cannot delete the default Favorites category');
+  // Clear the foreign key on any chats pointing at this category.
+  db.prepare('UPDATE chats SET category_id = NULL WHERE category_id = ?').run(categoryId);
+  db.prepare('DELETE FROM chat_categories WHERE id = ?').run(categoryId);
 }
 
 function deleteChat(chatId: string): void {
@@ -704,12 +813,18 @@ export default {
   markChatUnread,
   markChatRead,
   markChatDismissed,
-  setChatFavorite,
-  reorderChat,
+  setChatCategory,
   touchChatActivity,
   deleteChat,
   addMessage,
   getChatMessages,
+  // Categories
+  ensureDefaultCategory,
+  listCategories,
+  getCategory,
+  createCategory,
+  updateCategory,
+  deleteCategory,
   // Artifacts
   createArtifact,
   listArtifactsByChat,

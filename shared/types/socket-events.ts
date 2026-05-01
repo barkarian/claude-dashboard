@@ -150,9 +150,10 @@ export interface ActiveChat {
   /** UnifiedStatus for live sessions, 'unread' for unseen replies, 'seen' for read-but-not-dismissed, 'new' for just-created chats */
   status: UnifiedStatus | 'unread' | 'seen' | 'new';
   projectId: string;
-  favorite: boolean;
-  sortOrder: number | null;
-  /** ISO timestamp of the chat's last activity — used as the secondary sort key (newest first). */
+  /** Category emoji + id for inline marker rendering. Null = uncategorised. */
+  categoryId: string | null;
+  categoryEmoji: string | null;
+  /** ISO timestamp of the chat's last activity — primary sort key (newest first). */
   lastActivityAt: string;
 }
 

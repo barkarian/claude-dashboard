@@ -507,10 +507,13 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     const limit = parseInt(req.query.limit as string) || 0;
     const offset = parseInt(req.query.offset as string) || 0;
     const search = (req.query.search as string) || '';
+    // categoryIds=cat-1,cat-2 → multi-select filter
+    const rawCats = (req.query.categoryIds as string) || '';
+    const categoryIds = rawCats ? rawCats.split(',').map(s => s.trim()).filter(Boolean) : undefined;
 
-    // Clean up empty SDK chats (only on first page / no search — avoid during paginated browsing).
+    // Clean up empty SDK chats (only on first page / no search/filter — avoid during paginated browsing).
     // Skip claude-code chats: they don't use chat_messages and get a session_id on start.
-    if (offset === 0 && !search) {
+    if (offset === 0 && !search && !categoryIds) {
       const allChats = projectManager.listChats(req.params.id);
       const emptyChats = allChats.filter(c =>
         c.label === 'New Chat'
@@ -525,7 +528,7 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     }
 
     if (limit > 0) {
-      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined });
+      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined, categoryIds });
       res.json({ chats: result.chats, total: result.total });
     } else {
       const updatedChats = projectManager.listChats(req.params.id);
@@ -650,32 +653,78 @@ router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId
   }
 });
 
-router.put('/:id/chats/:chatId/favorite', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+// Set/clear the category for a chat. Body: { categoryId: string | null }.
+router.put('/:id/chats/:chatId/category', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     const chat = projectManager.getChat(req.params.chatId);
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
-    const favorite = !!req.body?.favorite;
-    projectManager.setChatFavorite(req.params.chatId, favorite);
+    const categoryId = req.body?.categoryId ?? null;
+    projectManager.setChatCategory(req.params.chatId, categoryId);
     activeChatsTracker.refreshChatMeta(req.params.chatId, req.params.id);
-    res.json({ success: true, favorite });
-  } catch (err) {
-    console.error('Error toggling chat favorite:', err);
-    res.status(500).json({ error: 'Failed to toggle favorite' });
+    const updated = projectManager.getChat(req.params.chatId);
+    res.json({ success: true, chat: updated });
+  } catch (err: any) {
+    console.error('Error setting chat category:', err);
+    res.status(400).json({ error: err.message || 'Failed to set category' });
   }
 });
 
-router.put('/:id/chats/:chatId/order', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+// === Categories ===
+
+router.get('/:id/categories', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const chat = projectManager.getChat(req.params.chatId);
-    if (!chat) return res.status(404).json({ error: 'Chat not found' });
-    const prevId = req.body?.prevId ?? null;
-    const nextId = req.body?.nextId ?? null;
-    projectManager.reorderChat(req.params.id, req.params.chatId, prevId, nextId);
-    activeChatsTracker.refreshChatMeta(req.params.chatId, req.params.id);
-    res.json({ success: true });
+    const categories = projectManager.listCategories(req.params.id);
+    res.json({ categories });
   } catch (err) {
-    console.error('Error reordering chat:', err);
-    res.status(500).json({ error: 'Failed to reorder chat' });
+    console.error('Error listing categories:', err);
+    res.status(500).json({ error: 'Failed to list categories' });
+  }
+});
+
+router.post('/:id/categories', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { name, emoji } = req.body || {};
+    if (!name || !emoji) {
+      return res.status(400).json({ error: 'name and emoji are required' });
+    }
+    const project = projectManager.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const category = projectManager.createCategory(req.params.id, String(name), String(emoji));
+    res.status(201).json({ category });
+  } catch (err: any) {
+    console.error('Error creating category:', err);
+    res.status(400).json({ error: err.message || 'Failed to create category' });
+  }
+});
+
+router.patch('/:id/categories/:catId', async (req: Request<{ id: string; catId: string }>, res: Response) => {
+  try {
+    const cat = projectManager.getCategory(req.params.catId);
+    if (!cat || cat.projectId !== req.params.id) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    const updated = projectManager.updateCategory(req.params.catId, {
+      name: req.body?.name,
+      emoji: req.body?.emoji,
+    });
+    res.json({ category: updated });
+  } catch (err: any) {
+    console.error('Error updating category:', err);
+    res.status(400).json({ error: err.message || 'Failed to update category' });
+  }
+});
+
+router.delete('/:id/categories/:catId', async (req: Request<{ id: string; catId: string }>, res: Response) => {
+  try {
+    const cat = projectManager.getCategory(req.params.catId);
+    if (!cat || cat.projectId !== req.params.id) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    projectManager.deleteCategory(req.params.catId);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting category:', err);
+    res.status(400).json({ error: err.message || 'Failed to delete category' });
   }
 });
 

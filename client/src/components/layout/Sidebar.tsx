@@ -1,22 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type TouchEvent as ReactTouchEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import {
-  DndContext,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
@@ -44,7 +27,7 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from '../ui/alert-dialog.tsx';
 import { haptics } from '../../utils/haptics.ts';
-import type { Chat, ProjectSummary } from '../../../../shared/types/models.ts';
+import type { Chat, ChatCategory, ProjectSummary } from '../../../../shared/types/models.ts';
 import { useProject } from '../../context/ProjectContext.tsx';
 import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
@@ -110,10 +93,8 @@ function badgeCount(chats: ActiveChat[]): number {
   return chats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status)).length;
 }
 
-interface SortableChatRowProps {
+interface ChatRowProps {
   chat: ActiveChat;
-  projectId: string;
-  projectPath: string;
   isActive: boolean;
   isDismissible: boolean;
   onSelect: () => void;
@@ -125,25 +106,19 @@ interface SortableChatRowProps {
   onDismiss: () => void;
 }
 
-function SortableChatRow({
+function ChatRow({
   chat, isActive, isDismissible, onSelect, onTouchStart, onTouchEndCancel,
   onMouseEnter, onMouseLeave, onContextMenuNative, onDismiss,
-}: SortableChatRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: chat.chatId });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-  const starOrDot = chat.favorite ? (
-    <svg className="w-3 h-3 flex-shrink-0 text-warning" fill="currentColor" viewBox="0 0 20 20">
-      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" />
-    </svg>
+}: ChatRowProps) {
+  // Category emoji acts as the inline marker. Falls back to the live status
+  // dot when the chat is uncategorised.
+  const marker = chat.categoryEmoji ? (
+    <span className="text-[13px] leading-none flex-shrink-0" aria-hidden>{chat.categoryEmoji}</span>
   ) : (
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
   );
   return (
-    <li ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <li>
       <button
         onClick={onSelect}
         onTouchStart={onTouchStart}
@@ -156,7 +131,7 @@ function SortableChatRow({
           isActive ? 'bg-bg-hover text-text' : 'text-text-dim'
         }`}
       >
-        {starOrDot}
+        {marker}
         <span className="truncate flex-1 text-left">{chat.label}</span>
         {isDismissible ? (
           <button
@@ -175,6 +150,10 @@ function SortableChatRow({
     </li>
   );
 }
+
+// How many active chats to show per project before collapsing the rest behind
+// "Show more". Keeps the sidebar readable when many chats are categorised.
+const ACTIVE_CHATS_PAGE_SIZE = 8;
 
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
@@ -201,36 +180,36 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     if (isMobile && !openMobile) setSidebarCtx(null);
   }, [openMobile, isMobile]);
 
-  const [isChatDragActive, setIsChatDragActive] = useState(false);
+  // Per-project categories are fetched lazily (only when the popover opens for
+  // a chat in that project). Cached so back-to-back menus reuse the same list.
+  const [categoriesByProject, setCategoriesByProject] = useState<Record<string, ChatCategory[]>>({});
+  const fetchProjectCategories = useCallback(async (projectId: string): Promise<ChatCategory[]> => {
+    if (categoriesByProject[projectId]) return categoriesByProject[projectId];
+    try {
+      const data = await api.get<{ categories: ChatCategory[] }>(`/api/projects/${projectId}/categories`);
+      const cats = data.categories || [];
+      setCategoriesByProject(prev => ({ ...prev, [projectId]: cats }));
+      return cats;
+    } catch {
+      return [];
+    }
+  }, [categoriesByProject]);
 
-  // MouseSensor + TouchSensor split: mouse drag on desktop, long-press drag on
-  // mobile. PointerSensor would swallow quick finger swipes and block the
-  // global edge-swipe gesture that opens this sidebar.
-  const dndSensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleChatDragEnd(projectId: string, chats: ActiveChat[], e: DragEndEvent) {
-    setIsChatDragActive(false);
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const ids = chats.map(c => c.chatId);
-    const oldIndex = ids.indexOf(active.id as string);
-    const newIndex = ids.indexOf(over.id as string);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const reordered = [...ids];
-    const [moved] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, moved);
-    const prevId = newIndex > 0 ? reordered[newIndex - 1] : null;
-    const nextId = newIndex < reordered.length - 1 ? reordered[newIndex + 1] : null;
-    api.put(`/api/projects/${projectId}/chats/${moved}/order`, { prevId, nextId }).catch(() => {});
+  function setChatCategory(projectId: string, chatId: string, categoryId: string | null) {
+    api.put(`/api/projects/${projectId}/chats/${chatId}/category`, { categoryId }).catch(() => {});
   }
 
-  function toggleChatFavorite(projectId: string, chatId: string, next: boolean) {
-    api.put(`/api/projects/${projectId}/chats/${chatId}/favorite`, { favorite: next }).catch(() => {});
-  }
+  // Per-project "show all chats" toggle. Defaults to collapsed; clicking
+  // "Show more" expands that project's list to the full active set.
+  const [expandedAllChats, setExpandedAllChats] = useState<Set<string>>(new Set());
+  const toggleShowAllChats = useCallback((projectId: string) => {
+    setExpandedAllChats(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  }, []);
 
   // Cleanup hover timers
   useEffect(() => () => {
@@ -243,6 +222,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     sidebarLongPress.current = setTimeout(() => {
       haptics.impactLight();
       setSidebarCtx({ chat, projectId, projectPath, x: touch.clientX, y: touch.clientY, trigger: 'longpress' });
+      fetchProjectCategories(projectId);
     }, 500);
   }
   function handleSidebarChatTouchEndCancel() {
@@ -260,6 +240,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     hoverShowRef.current = setTimeout(() => {
       setSidebarCtx({ chat, projectId, projectPath, x: rect.right + 4, y: rect.top, trigger: 'hover' });
+      fetchProjectCategories(projectId);
       hoverShowRef.current = null;
     }, 150);
   }
@@ -499,7 +480,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         <SidebarGroup>
           <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">{displayMode === 'pinned' ? 'Pinned' : 'Recent'}</SidebarGroupLabel>
           <SidebarGroupContent>
-            <PullToRefresh onRefresh={loadInitial} disabled={isChatDragActive}>
+            <PullToRefresh onRefresh={loadInitial}>
             {/* Search input */}
             <div className="px-2 pb-2 relative">
               <input
@@ -581,49 +562,61 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                       </button>
                     </div>
 
-                    {/* Expanded: active chats list */}
-                    {count > 0 && isExpanded && (
-                      <DndContext
-                        sensors={dndSensors}
-                        collisionDetection={closestCenter}
-                        onDragStart={() => setIsChatDragActive(true)}
-                        onDragCancel={() => setIsChatDragActive(false)}
-                        onDragEnd={(e) => handleChatDragEnd(project.id, projectActive.chats, e)}
-                      >
-                        <SortableContext
-                          items={projectActive.chats.map(c => c.chatId)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
-                            {projectActive.chats.map((chat) => {
-                              const isDismissible = chat.status === 'seen' || chat.status === 'new';
-                              return (
-                                <SortableChatRow
-                                  key={chat.chatId}
-                                  chat={chat}
-                                  projectId={project.id}
-                                  projectPath={project.path}
-                                  isActive={location.pathname.includes(chat.chatId)}
-                                  isDismissible={isDismissible}
-                                  onSelect={() => {
-                                    setOpenMobile(false);
-                                    navigate(`/project/${project.id}/chats/${chat.chatId}`);
-                                  }}
-                                  onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
-                                  onTouchEndCancel={handleSidebarChatTouchEndCancel}
-                                  onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
-                                  onMouseLeave={handleChatMouseLeave}
-                                  onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
-                                  onDismiss={() => {
-                                    api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
-                                  }}
-                                />
-                              );
-                            })}
-                          </ul>
-                        </SortableContext>
-                      </DndContext>
-                    )}
+                    {/* Expanded: active chats list (paginated, drag removed). */}
+                    {count > 0 && isExpanded && (() => {
+                      const showAll = expandedAllChats.has(project.id);
+                      const visible = showAll
+                        ? projectActive.chats
+                        : projectActive.chats.slice(0, ACTIVE_CHATS_PAGE_SIZE);
+                      const hiddenCount = projectActive.chats.length - visible.length;
+                      return (
+                        <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
+                          {visible.map((chat) => {
+                            const isDismissible = chat.status === 'seen' || chat.status === 'new';
+                            return (
+                              <ChatRow
+                                key={chat.chatId}
+                                chat={chat}
+                                isActive={location.pathname.includes(chat.chatId)}
+                                isDismissible={isDismissible}
+                                onSelect={() => {
+                                  setOpenMobile(false);
+                                  navigate(`/project/${project.id}/chats/${chat.chatId}`);
+                                }}
+                                onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
+                                onTouchEndCancel={handleSidebarChatTouchEndCancel}
+                                onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
+                                onMouseLeave={handleChatMouseLeave}
+                                onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
+                                onDismiss={() => {
+                                  api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
+                                }}
+                              />
+                            );
+                          })}
+                          {hiddenCount > 0 && (
+                            <li>
+                              <button
+                                onClick={() => toggleShowAllChats(project.id)}
+                                className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                              >
+                                Show {hiddenCount} more
+                              </button>
+                            </li>
+                          )}
+                          {showAll && projectActive.chats.length > ACTIVE_CHATS_PAGE_SIZE && (
+                            <li>
+                              <button
+                                onClick={() => toggleShowAllChats(project.id)}
+                                className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                              >
+                                Show fewer
+                              </button>
+                            </li>
+                          )}
+                        </ul>
+                      );
+                    })()}
                   </SidebarMenuItem>
                 );
               })}
@@ -798,15 +791,21 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </div>
         ) : undefined}
         items={sidebarCtx ? [
-          {
-            label: sidebarCtx.chat.favorite ? 'Unfavorite' : 'Set as favorite',
-            icon: sidebarCtx.chat.favorite ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.32-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
-            ) : (
-              <svg className="w-4 h-4 text-warning" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" /></svg>
-            ),
-            onAction: () => toggleChatFavorite(sidebarCtx.projectId, sidebarCtx.chat.chatId, !sidebarCtx.chat.favorite),
-          },
+          // Category picker — flat list of project categories. Click to assign,
+          // click the current one to remove. Falls back to a placeholder while
+          // the cache loads to keep the menu rendered consistently.
+          ...((categoriesByProject[sidebarCtx.projectId] || []).map(cat => ({
+            label: `${cat.emoji}  ${cat.name}${sidebarCtx.chat.categoryId === cat.id ? '  ✓' : ''}`,
+            onAction: () => {
+              const next = sidebarCtx.chat.categoryId === cat.id ? null : cat.id;
+              setChatCategory(sidebarCtx.projectId, sidebarCtx.chat.chatId, next);
+            },
+          }))),
+          ...(sidebarCtx.chat.categoryId ? [{
+            label: 'Remove category',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            onAction: () => setChatCategory(sidebarCtx.projectId, sidebarCtx.chat.chatId, null),
+          }] : []),
           ...(sidebarCtx.chat.status === 'unread' ? [] : [{
             label: 'Set as unread',
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,

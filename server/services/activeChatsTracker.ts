@@ -33,8 +33,8 @@ interface TrackedChat {
   seen: boolean;
   /** True when the chat was just created and has no messages yet */
   fresh: boolean;
-  favorite: boolean;
-  sortOrder: number | null;
+  categoryId: string | null;
+  categoryEmoji: string | null;
   lastActivityAt: string;
 }
 
@@ -85,8 +85,8 @@ function onSessionStateChange(
         unread: false,
         seen: false,
         fresh: false,
-        favorite: info.favorite,
-        sortOrder: info.sortOrder,
+        categoryId: info.categoryId,
+        categoryEmoji: info.categoryEmoji,
         lastActivityAt: info.lastActivityAt,
       });
     }
@@ -121,8 +121,8 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
       unread: true,
       seen: false,
       fresh: false,
-      favorite: info?.favorite ?? false,
-      sortOrder: info?.sortOrder ?? null,
+      categoryId: info?.categoryId ?? null,
+      categoryEmoji: info?.categoryEmoji ?? null,
       lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
     });
   }
@@ -142,26 +142,35 @@ function onChatCreated(chatId: string, projectId: string, label: string): void {
     unread: false,
     seen: false,
     fresh: true,
-    favorite: info?.favorite ?? false,
-    sortOrder: info?.sortOrder ?? null,
+    categoryId: info?.categoryId ?? null,
+    categoryEmoji: info?.categoryEmoji ?? null,
     lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
   });
   scheduleBroadcast();
 }
 
-/** Refresh favorite + sortOrder for a tracked chat after an API mutation. */
+/** Refresh category + activity for a tracked chat after an API mutation. */
 function refreshChatMeta(chatId: string, projectId: string): void {
   const existing = tracked.get(chatId);
   const info = getChatInfo(chatId, projectId);
   if (existing && info) {
-    existing.favorite = info.favorite;
-    existing.sortOrder = info.sortOrder;
+    existing.categoryId = info.categoryId;
+    existing.categoryEmoji = info.categoryEmoji;
     existing.lastActivityAt = info.lastActivityAt;
+    // Categorised chats should be removable from the tracker once the user
+    // un-categorises them — drop if nothing else keeps them around.
+    if (
+      !info.categoryId
+      && !existing.unread && !existing.seen && !existing.fresh
+      && (!existing.sessionStatus || !INTERESTING_STATUSES.has(existing.sessionStatus))
+    ) {
+      tracked.delete(chatId);
+    }
     scheduleBroadcast();
     return;
   }
-  // Favorited chats should appear in the tracker even if they had no other state.
-  if (info?.favorite) {
+  // Categorised chats should appear in the tracker even if they had no other state.
+  if (info?.categoryId) {
     tracked.set(chatId, {
       chatId,
       label: info.label,
@@ -171,14 +180,15 @@ function refreshChatMeta(chatId: string, projectId: string): void {
       unread: false,
       seen: false,
       fresh: false,
-      favorite: true,
-      sortOrder: info.sortOrder,
+      categoryId: info.categoryId,
+      categoryEmoji: info.categoryEmoji,
       lastActivityAt: info.lastActivityAt,
     });
     scheduleBroadcast();
     return;
   }
-  // Not favorited and not tracked — nothing to do, but broadcast anyway in case client re-sorts.
+  // Uncategorised + untracked → nothing to do, but rebroadcast in case clients
+  // need to refresh display state for this chat.
   scheduleBroadcast();
 }
 
@@ -232,21 +242,37 @@ function getSnapshot(): GlobalActiveChats {
 
 // ── Internal ────────────────────────────────────────────────────────
 
-function getChatInfo(chatId: string, projectId: string): { label: string; projectName: string; favorite: boolean; sortOrder: number | null; lastActivityAt: string } | null {
+function getChatInfo(
+  chatId: string,
+  projectId: string,
+): { label: string; projectName: string; categoryId: string | null; categoryEmoji: string | null; lastActivityAt: string } | null {
   const chat = projectManager.getChat(chatId);
   const project = projectManager.getProject(projectId);
   if (!chat || !project) return null;
-  return { label: chat.label, projectName: project.name, favorite: chat.favorite, sortOrder: chat.sortOrder, lastActivityAt: chat.lastActivityAt };
+  return {
+    label: chat.label,
+    projectName: project.name,
+    categoryId: chat.categoryId,
+    categoryEmoji: chat.category?.emoji ?? null,
+    lastActivityAt: chat.lastActivityAt,
+  };
 }
 
-/** Load unread, pinned (seen), and favorited chats from DB on startup. */
+/** Load unread, pinned (seen), and categorised chats from DB on startup. */
 function loadFromDB(): void {
   const rows = db.prepare(`
-    SELECT c.id, c.label, c.project_id, c.unread, c.pinned, c.favorite, c.sort_order, c.last_activity_at, c.created_at, p.name as project_name
+    SELECT c.id, c.label, c.project_id, c.unread, c.pinned, c.category_id,
+           cat.emoji AS category_emoji,
+           c.last_activity_at, c.created_at, p.name as project_name
     FROM chats c
     JOIN projects p ON c.project_id = p.id
-    WHERE c.unread = 1 OR c.pinned = 1 OR c.favorite = 1
-  `).all() as Array<{ id: string; label: string; project_id: string; unread: number; pinned: number; favorite: number; sort_order: number | null; last_activity_at: string | null; created_at: string; project_name: string }>;
+    LEFT JOIN chat_categories cat ON c.category_id = cat.id
+    WHERE c.unread = 1 OR c.pinned = 1 OR c.category_id IS NOT NULL
+  `).all() as Array<{
+    id: string; label: string; project_id: string; unread: number; pinned: number;
+    category_id: string | null; category_emoji: string | null;
+    last_activity_at: string | null; created_at: string; project_name: string;
+  }>;
 
   for (const row of rows) {
     const lastActivityAt = row.last_activity_at || row.created_at;
@@ -254,8 +280,8 @@ function loadFromDB(): void {
     if (existing) {
       if (row.unread) existing.unread = true;
       if (row.pinned && !row.unread) existing.seen = true;
-      existing.favorite = !!row.favorite;
-      existing.sortOrder = typeof row.sort_order === 'number' ? row.sort_order : null;
+      existing.categoryId = row.category_id;
+      existing.categoryEmoji = row.category_emoji;
       existing.lastActivityAt = lastActivityAt;
     } else {
       tracked.set(row.id, {
@@ -267,8 +293,8 @@ function loadFromDB(): void {
         unread: !!row.unread,
         seen: !!row.pinned && !row.unread,
         fresh: false,
-        favorite: !!row.favorite,
-        sortOrder: typeof row.sort_order === 'number' ? row.sort_order : null,
+        categoryId: row.category_id,
+        categoryEmoji: row.category_emoji,
         lastActivityAt,
       });
     }
@@ -306,8 +332,8 @@ function buildSnapshot(): GlobalActiveChats {
       label: t.label,
       status: displayStatus,
       projectId: t.projectId,
-      favorite: t.favorite,
-      sortOrder: t.sortOrder,
+      categoryId: t.categoryId,
+      categoryEmoji: t.categoryEmoji,
       lastActivityAt: t.lastActivityAt,
     });
     byProject[t.projectId].count++;
@@ -325,16 +351,11 @@ function buildSnapshot(): GlobalActiveChats {
     }
   }
 
-  // Pinned-activity sort (mirrors server SQL): effective = sort_order ?? epoch(activity).
-  // Higher timestamp wins, so dragged anchors and real activity live on the same
-  // date line — fresher messages naturally overtake older pinned anchors.
+  // Activity-only sort: newest message first. Categories no longer float to top.
   for (const projectChats of Object.values(byProject)) {
-    projectChats.chats.sort((a, b) => {
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-      const aEff = a.sortOrder ?? new Date(a.lastActivityAt).getTime();
-      const bEff = b.sortOrder ?? new Date(b.lastActivityAt).getTime();
-      return bEff - aEff;
-    });
+    projectChats.chats.sort(
+      (a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
+    );
   }
 
   return { byProject, totalCount, badgeCount };

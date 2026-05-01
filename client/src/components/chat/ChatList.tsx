@@ -1,26 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useContext, createContext, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  DndContext,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-  type DragEndEvent,
-  type DraggableAttributes,
-} from '@dnd-kit/core';
-import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.ts';
@@ -43,11 +24,12 @@ import ContextMenu from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
-import type { Project, Chat } from '../../../../shared/types/models.ts';
+import type { Project, Chat, ChatCategory } from '../../../../shared/types/models.ts';
 import type { SessionStateContext } from '../../../../shared/types/session.ts';
 import { getClientAdapter, listClientAdapters } from '../../adapters/registry.ts';
 import { useAdapterSettings } from '../../hooks/useAdapterSettings.ts';
 import NewChatPicker from './NewChatPicker.tsx';
+import CategoryManager from './CategoryManager.tsx';
 
 const PAGE_SIZE = 20;
 
@@ -119,9 +101,7 @@ interface ChatListProps {
   sessionStates?: Record<string, SessionStateContext>;
 }
 
-interface SortableChatCardProps {
-  chat: Chat;
-  isMobile: boolean;
+interface ChatCardProps {
   children: ReactNode;
   onClick: () => void;
   onMouseEnter?: (e: React.MouseEvent) => void;
@@ -131,84 +111,35 @@ interface SortableChatCardProps {
   onLongPressEnd?: () => void;
 }
 
-/**
- * Exposes dnd-kit sortable bindings to a descendant <MobileDragHandle />.
- * Lets us keep `useSortable` in one component while the handle itself
- * renders deep inside the Card alongside the rest of the row's actions.
- */
-interface DragHandleBindings {
-  setActivatorNodeRef: ((el: HTMLElement | null) => void) | undefined;
-  attributes: DraggableAttributes;
-  listeners: SyntheticListenerMap | undefined;
-}
-const DragHandleContext = createContext<DragHandleBindings | null>(null);
-
-function SortableChatCard({
-  chat, isMobile, children, onClick, onMouseEnter, onMouseLeave,
+function ChatCard({
+  children, onClick, onMouseEnter, onMouseLeave,
   onLongPressStart, onLongPressMove, onLongPressEnd,
-}: SortableChatCardProps) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: chat.id });
-  // `user-select / -webkit-touch-callout: none` keep iOS from stealing the long-press
-  // for its native text-selection popover. Keep touch-action as `manipulation` on
-  // the card body so normal vertical scrolling works — the drag handle has its own
-  // touch-action: none so only that tiny target blocks native pan while dragging.
+}: ChatCardProps) {
+  // `user-select / -webkit-touch-callout: none` keep iOS from stealing the
+  // long-press for its native text-selection popover.
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
     WebkitUserSelect: 'none' as const,
     userSelect: 'none' as const,
     WebkitTouchCallout: 'none' as const,
     touchAction: 'manipulation' as const,
   };
-  // On desktop: attach dnd-kit listeners to the whole card so mouse-drag works
-  // from anywhere. On mobile: listeners live ONLY on <MobileDragHandle /> (via
-  // context + setActivatorNodeRef), so card-body gestures (tap, scroll, swipe
-  // to reveal sidebar) don't arm the sortable.
-  const dragBindings: DragHandleBindings = { setActivatorNodeRef, attributes, listeners };
-  const outerProps = isMobile ? {} : { ...attributes, ...listeners };
   return (
-    <DragHandleContext.Provider value={dragBindings}>
-      <div
-        ref={setNodeRef}
-        style={style}
-        {...outerProps}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        <Card
-          className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
-          onClick={onClick}
-          onTouchStart={onLongPressStart}
-          onTouchMove={onLongPressMove}
-          onTouchEnd={onLongPressEnd}
-          onTouchCancel={onLongPressEnd}
-        >
-          {children}
-        </Card>
-      </div>
-    </DragHandleContext.Provider>
-  );
-}
-
-/** Mobile-only drag handle rendered inside the card's action cluster. */
-function MobileDragHandle() {
-  const ctx = useContext(DragHandleContext);
-  if (!ctx) return null;
-  return (
-    <button
-      ref={ctx.setActivatorNodeRef}
-      {...ctx.attributes}
-      {...(ctx.listeners ?? {})}
-      onClick={(e) => e.stopPropagation()}
-      aria-label="Reorder chat"
-      className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded text-text-dim active:bg-bg-hover transition-colors cursor-grab active:cursor-grabbing"
-      style={{ touchAction: 'none' }}
+    <div
+      style={style}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
-      </svg>
-    </button>
+      <Card
+        className="text-left w-full hover-hover:border-border-light transition-all group cursor-pointer"
+        onClick={onClick}
+        onTouchStart={onLongPressStart}
+        onTouchMove={onLongPressMove}
+        onTouchEnd={onLongPressEnd}
+        onTouchCancel={onLongPressEnd}
+      >
+        {children}
+      </Card>
+    </div>
   );
 }
 
@@ -275,16 +206,21 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const [loadingMore, setLoadingMore] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
+  // Categories — fetched on mount and refreshed when the manager mutates them.
+  const [categories, setCategories] = useState<ChatCategory[]>([]);
+  const [activeCategoryIds, setActiveCategoryIds] = useState<string[]>([]);
+  const [managerOpen, setManagerOpen] = useState(false);
+
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch chats (initial or on search change)
+  // Fetch chats (initial or on search/filter change)
   useEffect(() => {
     loadChats(true);
-  }, [projectId, debouncedSearch]);
+  }, [projectId, debouncedSearch, activeCategoryIds.join(',')]);
 
   async function loadChats(reset: boolean) {
     const currentOffset = reset ? 0 : offsetRef.current;
@@ -296,8 +232,11 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
     try {
       const searchParam = debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : '';
+      const catParam = activeCategoryIds.length > 0
+        ? `&categoryIds=${encodeURIComponent(activeCategoryIds.join(','))}`
+        : '';
       const data = await api.get<{ chats: Chat[]; total: number }>(
-        `/api/projects/${projectId}/chats?limit=${PAGE_SIZE}&offset=${currentOffset}${searchParam}`
+        `/api/projects/${projectId}/chats?limit=${PAGE_SIZE}&offset=${currentOffset}${searchParam}${catParam}`
       );
       const newChats = data.chats || [];
       if (reset) {
@@ -332,7 +271,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     if (!loadingMore && hasMore) {
       loadChats(false);
     }
-  }, [loadingMore, hasMore, projectId, debouncedSearch]);
+  }, [loadingMore, hasMore, projectId, debouncedSearch, activeCategoryIds.join(',')]);
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
@@ -546,45 +485,33 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     longPressOrigin.current = null;
   }
 
-  function handleToggleFavorite(chat: Chat) {
-    const next = !chat.favorite;
-    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, favorite: next } : c));
-    api.put(`/api/projects/${projectId}/chats/${chat.id}/favorite`, { favorite: next }).catch(() => {
+  // Fetch categories on project change.
+  useEffect(() => {
+    let cancelled = false;
+    api.get<{ categories: ChatCategory[] }>(`/api/projects/${projectId}/categories`)
+      .then(data => { if (!cancelled) setCategories(data.categories || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  function handleSetChatCategory(chat: Chat, categoryId: string | null) {
+    const targetCat = categoryId ? categories.find(c => c.id === categoryId) ?? null : null;
+    // Optimistic local update.
+    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, categoryId, category: targetCat } : c));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/category`, { categoryId }).catch(() => {
       // Revert on error
-      setChats(prev => prev.map(c => c.id === chat.id ? { ...c, favorite: !next } : c));
+      setChats(prev => prev.map(c => c.id === chat.id ? { ...c, categoryId: chat.categoryId, category: chat.category } : c));
     });
   }
 
-  const [isChatDragActive, setIsChatDragActive] = useState(false);
+  function toggleCategoryFilter(categoryId: string) {
+    setActiveCategoryIds(prev =>
+      prev.includes(categoryId) ? prev.filter(id => id !== categoryId) : [...prev, categoryId]
+    );
+  }
 
-  // Drag on mobile is initiated ONLY from the dedicated MobileDragHandle (which has
-  // touch-action: none). With an explicit handle there's no ambiguity with taps,
-  // scrolls, or edge-swipes, so a distance-only activation is enough on both
-  // platforms: any >6px movement from the handle arms the drag immediately.
-  const dndSensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleChatDragEnd(e: DragEndEvent) {
-    setIsChatDragActive(false);
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const ids = chats.map(c => c.id);
-    const oldIndex = ids.indexOf(active.id as string);
-    const newIndex = ids.indexOf(over.id as string);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const reordered = [...chats];
-    const [moved] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, moved);
-    setChats(reordered);
-    const prevId = newIndex > 0 ? reordered[newIndex - 1].id : null;
-    const nextId = newIndex < reordered.length - 1 ? reordered[newIndex + 1].id : null;
-    api.put(`/api/projects/${projectId}/chats/${moved.id}/order`, { prevId, nextId }).catch(() => {
-      // Refetch on error to restore truth.
-      loadChats(true);
-    });
+  function clearCategoryFilter() {
+    setActiveCategoryIds([]);
   }
 
   // Determine which chats are in 'seen' state (read but not dismissed from tracker)
@@ -602,7 +529,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const showSearch = chats.length > 0 || searchQuery;
 
   return (
-    <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3" disabled={isChatDragActive}>
+    <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3">
       <div className="flex gap-1">
         {adaptersLoading ? (
           <div className="h-9 w-full rounded-md border border-border bg-transparent" />
@@ -669,6 +596,49 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               </svg>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Category filter chips. "All" clears the filter; each category toggles
+          itself in/out of the active filter set. The "+" button opens the
+          manager modal. */}
+      {(showSearch || categories.length > 0) && (
+        <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5">
+          <button
+            onClick={clearCategoryFilter}
+            className={`flex-shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              activeCategoryIds.length === 0
+                ? 'bg-primary/15 text-primary border-primary/30'
+                : 'border-border text-text-dim hover:text-text hover:bg-bg-hover'
+            }`}
+          >
+            All
+          </button>
+          {categories.map(cat => {
+            const active = activeCategoryIds.includes(cat.id);
+            return (
+              <button
+                key={cat.id}
+                onClick={() => toggleCategoryFilter(cat.id)}
+                className={`flex-shrink-0 flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  active
+                    ? 'bg-primary/15 text-primary border-primary/30'
+                    : 'border-border text-text-dim hover:text-text hover:bg-bg-hover'
+                }`}
+              >
+                <span aria-hidden>{cat.emoji}</span>
+                <span>{cat.name}</span>
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setManagerOpen(true)}
+            className="flex-shrink-0 text-xs px-2 py-1 rounded-full border border-dashed border-border text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+            aria-label="Manage categories"
+            title="Manage categories"
+          >
+            +
+          </button>
         </div>
       )}
 
@@ -783,17 +753,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
           <p className="text-text-muted text-sm">No matching chats</p>
         </div>
       ) : (
-        <DndContext
-          sensors={dndSensors}
-          collisionDetection={closestCenter}
-          // Keep auto-scroll on: with touch-action locked during drag, dnd-kit is
-          // now the only thing that scrolls the container, so it can "help" when
-          // the finger reaches the top/bottom edge without the browser fighting it.
-          onDragStart={() => setIsChatDragActive(true)}
-          onDragCancel={() => setIsChatDragActive(false)}
-          onDragEnd={handleChatDragEnd}
-        >
-        <SortableContext items={chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
         <>
           {chats.map((chat) => {
             const isSeen = seenChatIds.has(chat.id);
@@ -809,9 +768,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                   }
               )}
             >
-            <SortableChatCard
-              chat={chat}
-              isMobile={isMobile}
+            <ChatCard
               onClick={() => goToChat(chat.id)}
               onMouseEnter={(e) => handleRowMouseEnter(e, chat)}
               onMouseLeave={handleRowMouseLeave}
@@ -820,13 +777,10 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               onLongPressEnd={handleRowLongPressEnd}
             >
               <div className="flex items-center justify-between gap-2">
-                {isMobile && <MobileDragHandle />}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    {chat.favorite ? (
-                      <svg className="flex-shrink-0 w-3 h-3 text-warning" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" />
-                      </svg>
+                    {chat.category ? (
+                      <span className="flex-shrink-0 text-[13px] leading-none" aria-hidden>{chat.category.emoji}</span>
                     ) : unreadIds.has(chat.id) ? (
                       <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
                     ) : isSeen ? (
@@ -926,7 +880,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                   </svg>
                 </div>
               </div>
-            </SortableChatCard>
+            </ChatCard>
             </SwipeableRow>
             );
           })}
@@ -939,8 +893,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             </div>
           )}
         </>
-        </SortableContext>
-        </DndContext>
       )}
 
       {/* Delete confirmation dialog */}
@@ -1016,14 +968,18 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>,
             onAction: () => setInfoChat(hoverCtx.chat),
           }] : []),
+          // Category picker — flat list. Click the active one to clear it.
+          ...categories.map(cat => ({
+            label: `${cat.emoji}  ${cat.name}${hoverCtx.chat.categoryId === cat.id ? '  ✓' : ''}`,
+            onAction: () => {
+              const next = hoverCtx.chat.categoryId === cat.id ? null : cat.id;
+              handleSetChatCategory(hoverCtx.chat, next);
+            },
+          })),
           {
-            label: hoverCtx.chat.favorite ? 'Unfavorite' : 'Set as favorite',
-            icon: hoverCtx.chat.favorite ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.32-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
-            ) : (
-              <svg className="w-4 h-4 text-warning" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.175c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.05 9.394c-.783-.57-.38-1.81.588-1.81h4.175a1 1 0 00.95-.69l1.286-3.967z" /></svg>
-            ),
-            onAction: () => handleToggleFavorite(hoverCtx.chat),
+            label: 'Manage categories…',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+            onAction: () => setManagerOpen(true),
           },
           ...(!unreadIds.has(hoverCtx.chat.id) ? [{
             label: 'Set as unread',
@@ -1055,6 +1011,19 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             },
           ] : []),
         ] : []}
+      />
+
+      <CategoryManager
+        open={managerOpen}
+        onOpenChange={(open) => {
+          setManagerOpen(open);
+          // Re-fetch chats when the manager closes — a deleted category
+          // would otherwise leave stale `category` objects on local rows.
+          if (!open) loadChats(true);
+        }}
+        projectId={projectId}
+        categories={categories}
+        onChange={setCategories}
       />
     </PullToRefresh>
   );

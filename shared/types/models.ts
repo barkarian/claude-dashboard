@@ -29,6 +29,16 @@ export interface ChatHistoryEntry {
   id?: string;
 }
 
+export interface ChatCategory {
+  id: string;
+  projectId: string;
+  name: string;
+  emoji: string;
+  isDefault: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface Chat {
   id: string;
   label: string;
@@ -43,8 +53,8 @@ export interface Chat {
   draftMessage: string | null;
   stashedInput: string | null;
   unread: boolean;
-  favorite: boolean;
-  sortOrder: number | null;
+  categoryId: string | null;
+  category: ChatCategory | null;
 }
 
 export interface Project {
@@ -63,6 +73,7 @@ export interface Project {
   pinnedAt: string | null;
   scripts: Script[];
   chats: Chat[];
+  categories: ChatCategory[];
 }
 
 /**

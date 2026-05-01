@@ -251,10 +251,73 @@ try {
 }
 
 // Add favorite column to chats (1 = starred). Distinct from `pinned` which is the active-chats tracker flag.
+// Superseded by chat_categories (below) — kept for migration backfill, no longer read by the app.
 try {
   db.exec(`ALTER TABLE chats ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`);
 } catch {
   // Column already exists — ignore
+}
+
+// Per-project chat categories (labels with an emoji). Each project has a built-in
+// "Favorites" category (is_default=1, undeletable) and may have any number of
+// custom categories. Each chat may belong to at most one category.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_categories (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_categories_project ON chat_categories(project_id);
+`);
+
+// Chat → category pointer. NULL = uncategorised. Cleared automatically if the
+// category row is deleted (ON DELETE SET NULL would be cleaner but SQLite ALTER
+// can't add a FK; we handle deletion in the route handler).
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN category_id TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_chats_category ON chats(category_id)`);
+} catch {
+  // Already exists — ignore
+}
+
+// One-shot: seed a default "Favorites" category in every existing project and
+// migrate the legacy `favorite` boolean to a category_id pointer. Gated by a
+// settings flag so it runs at most once per database.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.favorites_to_categories_at'").get();
+  if (!flag) {
+    const projects = db.prepare('SELECT id FROM projects').all() as Array<{ id: string }>;
+    const insertCat = db.prepare(
+      "INSERT INTO chat_categories (id, project_id, name, emoji, is_default, sort_order) VALUES (?, ?, 'Favorites', '⭐', 1, 0)"
+    );
+    const updateChats = db.prepare(
+      'UPDATE chats SET category_id = ? WHERE project_id = ? AND favorite = 1 AND category_id IS NULL'
+    );
+    const tx = db.transaction(() => {
+      for (const p of projects) {
+        const existing = db.prepare(
+          'SELECT id FROM chat_categories WHERE project_id = ? AND is_default = 1'
+        ).get(p.id) as { id: string } | undefined;
+        const catId = existing?.id ?? `${p.id}-favorites-${Math.random().toString(36).slice(2, 10)}`;
+        if (!existing) insertCat.run(catId, p.id);
+        updateChats.run(catId, p.id);
+      }
+      db.prepare(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.favorites_to_categories_at', ?)"
+      ).run(new Date().toISOString());
+    });
+    tx();
+  }
+} catch (err) {
+  console.error('favorites→categories migration failed:', err);
 }
 
 // Add sort_order column to scripts (INTEGER). User-picked ordering per project;
