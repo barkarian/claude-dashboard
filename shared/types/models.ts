@@ -3,14 +3,14 @@
 /**
  * Chat adapter identifier. Open string type so new adapters can be registered
  * without modifying this file. Known built-in values:
- * - 'claude-code'      — Claude Code terminal (PTY + JSONL watcher)
- * - 'claude-agent-sdk' — Claude Agent SDK (message-based API)
+ * - 'claude-code' — Claude Code terminal (PTY + JSONL watcher)
+ * - 'claw-chat'   — message-based chat (Agent SDK + display_artifact tool)
  */
 export type ChatAdapter = string;
 
 /**
  * Workspace mode controls visible UI surfaces.
- * - 'simple' — consumer surface: Chats + Files tabs, claude-agent-sdk only,
+ * - 'simple' — consumer surface: Chats + Files tabs, claw-chat only,
  *              no path breadcrumb, no context-window % indicator.
  * - 'dev'    — power surface: Scripts tab visible, all adapters available.
  */

@@ -127,14 +127,14 @@ try {
 
 // Add default_adapter column to projects
 try {
-  db.exec(`ALTER TABLE projects ADD COLUMN default_adapter TEXT DEFAULT 'claude-agent-sdk'`);
+  db.exec(`ALTER TABLE projects ADD COLUMN default_adapter TEXT DEFAULT 'claw-chat'`);
 } catch {
   // Column already exists — ignore
 }
 
 // Add adapter column to chats
 try {
-  db.exec(`ALTER TABLE chats ADD COLUMN adapter TEXT DEFAULT 'claude-agent-sdk'`);
+  db.exec(`ALTER TABLE chats ADD COLUMN adapter TEXT DEFAULT 'claw-chat'`);
 } catch {
   // Column already exists — ignore
 }
@@ -433,6 +433,25 @@ try {
   }
 } catch (err) {
   console.error('claw-chat chat-backfill migration failed:', err);
+}
+
+// One-shot: claude-agent-sdk has been retired in favor of claw-chat (which is
+// a functional superset — same SDK session manager, plus the display_artifact
+// MCP tool). Flip every remaining reference: dev-mode chats, per-project
+// default_adapter, and the global default_adapter setting. Gated by a flag.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.sdk_retire_at'").get();
+  if (!flag) {
+    db.prepare(`UPDATE chats SET adapter = 'claw-chat' WHERE adapter = 'claude-agent-sdk'`).run();
+    db.prepare(`UPDATE projects SET default_adapter = 'claw-chat' WHERE default_adapter = 'claude-agent-sdk'`).run();
+    db.prepare(`UPDATE settings SET value = 'claw-chat' WHERE key = 'default_adapter' AND value = 'claude-agent-sdk'`).run();
+    db.prepare(`DELETE FROM adapter_settings WHERE adapter_id = 'claude-agent-sdk'`).run();
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.sdk_retire_at', ?)"
+    ).run(new Date().toISOString());
+  }
+} catch (err) {
+  console.error('claude-agent-sdk retirement migration failed:', err);
 }
 
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {

@@ -14,7 +14,6 @@ interface AppCard {
 }
 
 const APPS: AppCard[] = [
-  { id: 'claude-agent-sdk', name: 'Claude Agent SDK', description: 'In-process chat — the default for Simple workspaces.', installed: true },
   { id: 'claude-code', name: 'Claude Code', description: 'Terminal-style chat. Surfaced in Dev workspaces.', installed: true },
   { id: 'google-drive', name: 'Google Drive', description: 'Let the agent read and write files in your Drive.', installed: false, comingSoon: true },
   { id: 'email', name: 'Email me results', description: 'Receive completed work directly in your inbox.', installed: false, comingSoon: true },

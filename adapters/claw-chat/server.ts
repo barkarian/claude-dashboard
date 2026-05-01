@@ -1,14 +1,8 @@
 /**
- * claw-chat server adapter.
- *
- * Identical wire protocol to the claude-agent-sdk adapter — same SDK session
- * manager, same socket events. The only behavioral difference is that
- * sessions are started with `withArtifacts: true`, which attaches the
+ * claw-chat server adapter — message-based chat backed by the Claude Agent
+ * SDK session manager, with `withArtifacts: true` attaching the
  * `display_artifact` MCP tool. The model can call that tool to surface
  * files/images as cards in the chat UI (rendered by SDKChatView).
- *
- * v1: this file intentionally duplicates SDKAdapter wiring so the diff is
- * easy to read. v2 should extract a shared base.
  */
 
 import { EventEmitter } from 'node:events';

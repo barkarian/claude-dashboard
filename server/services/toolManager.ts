@@ -35,14 +35,6 @@ const TOOLS = [
     installCommand: 'npm install -g @anthropic-ai/claude-code',
   },
   {
-    id: 'claude-agent-sdk',
-    name: 'Claude Agent SDK',
-    description: 'Build custom AI agents with the Claude Agent SDK',
-    binary: 'claude-agent',
-    // The SDK is an npm package, check via npm list
-    installCommand: 'npm install -g @anthropic-ai/claude-code-agent-sdk',
-  },
-  {
     id: 'opencode',
     name: 'Open Code',
     description: 'Open-source AI coding assistant CLI',
@@ -76,38 +68,10 @@ async function getVersion(binary: string): Promise<string | null> {
   }
 }
 
-/** Check for npm global package (for SDK which may not have a binary) */
-async function checkNpmGlobal(packageName: string): Promise<{ installed: boolean; version?: string }> {
-  try {
-    const { stdout } = await execFileAsync('npm', ['list', '-g', packageName, '--depth=0', '--json'], { timeout: 15000 });
-    const data = JSON.parse(stdout);
-    const deps = data.dependencies || {};
-    if (deps[packageName]) {
-      return { installed: true, version: deps[packageName].version };
-    }
-    return { installed: false };
-  } catch {
-    return { installed: false };
-  }
-}
-
 /** Detect a single tool */
 async function detect(toolId: string): Promise<ToolInfo> {
   const tool = TOOLS.find(t => t.id === toolId);
   if (!tool) throw new Error(`Unknown tool: ${toolId}`);
-
-  // For claude-agent-sdk, check via npm since it's a library
-  if (toolId === 'claude-agent-sdk') {
-    const npmCheck = await checkNpmGlobal('@anthropic-ai/claude-code-agent-sdk');
-    return {
-      id: tool.id,
-      name: tool.name,
-      description: tool.description,
-      installed: npmCheck.installed,
-      version: npmCheck.version,
-      installCommand: tool.installCommand,
-    };
-  }
 
   // For tools with binaries, use which + --version
   const binaryPath = await which(tool.binary);

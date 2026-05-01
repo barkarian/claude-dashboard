@@ -135,8 +135,8 @@ router.get('/:id/check-auth', async (req, res) => {
     return;
   }
 
-  if (id === 'claude-agent-sdk' || id === 'claw-chat') {
-    // claw-chat is the Agent SDK + display_artifact tool; same auth requirements.
+  if (id === 'claw-chat') {
+    // claw-chat = Agent SDK + display_artifact tool.
     // API key in settings → env var → keychain.
     const provider = settings.api_provider || 'anthropic';
     if (provider === 'openrouter') {
@@ -198,8 +198,7 @@ router.post('/auto-detect', async (_req, res) => {
       const envKey = process.env.ANTHROPIC_API_KEY;
       authenticated = !!(keychainToken || envKey);
       source = keychainToken ? 'oauth' : envKey ? 'env' : undefined;
-    } else if (id === 'claude-agent-sdk' || id === 'claw-chat') {
-      // claw-chat reuses the same auth as the SDK adapter.
+    } else if (id === 'claw-chat') {
       const envKey = process.env.ANTHROPIC_API_KEY;
       const keychainToken = await readClaudeKeychainToken();
       authenticated = !!(envKey || keychainToken);

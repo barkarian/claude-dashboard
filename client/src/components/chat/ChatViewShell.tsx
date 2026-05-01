@@ -53,7 +53,7 @@ export default function ChatViewShell({ projectId }: ChatViewShellProps) {
   // Determine which adapter to use:
   // 1. The chat's own adapter field (if set and registered)
   // 2. Fall back to the project's default adapter
-  const adapterId = chat?.adapter || project?.defaultAdapter || 'claude-agent-sdk';
+  const adapterId = chat?.adapter || project?.defaultAdapter || 'claw-chat';
   const adapterEntry = chat ? getClientAdapter(adapterId) : null;
 
   // Register search handler from adapter (bridges adapter SearchHandler to context SearchHandler)

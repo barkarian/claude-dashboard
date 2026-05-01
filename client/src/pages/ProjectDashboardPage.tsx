@@ -13,10 +13,7 @@ import MobileNav from '../components/layout/MobileNav.tsx';
 import ScriptList from '../components/scripts/ScriptList.tsx';
 import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
-import SDKChatView from '../components/chat/SDKChatView.tsx';
-import ClaudeCodeChatView from '../components/chat/ClaudeCodeChatView.tsx';
 import ChatViewShell from '../components/chat/ChatViewShell.tsx';
-import { getClientAdapter } from '../adapters/registry.ts';
 import FilesPage from '../components/files/FilesPage.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
@@ -28,25 +25,7 @@ import { setProjectNavState, clearProjectNavState } from '../utils/projectNavSta
 import type { Chat } from '../../../shared/types/models.ts';
 
 function ChatViewRouter({ projectId }: { projectId: string }) {
-  const { project } = useProject();
-  // Simple-mode workspaces are pinned to the claw-chat adapter (SDK + artifacts)
-  // regardless of any historical defaultAdapter setting. Existing chats keep
-  // their own adapter resolution inside ChatViewShell — this only governs the
-  // *project-level* view selection for the new-chat flow.
-  const adapterId = project?.mode === 'simple'
-    ? 'claw-chat'
-    : (project?.defaultAdapter || 'claude-agent-sdk');
-
-  // Use adapter registry if the adapter is registered (new plugin system)
-  if (getClientAdapter(adapterId)) {
-    return <ChatViewShell projectId={projectId} />;
-  }
-
-  // Legacy fallback for unregistered adapters
-  if (adapterId === 'claude-code') {
-    return <ClaudeCodeChatView projectId={projectId} />;
-  }
-  return <SDKChatView projectId={projectId} />;
+  return <ChatViewShell projectId={projectId} />;
 }
 
 export default function ProjectDashboardPage() {
@@ -302,7 +281,7 @@ export default function ProjectDashboardPage() {
           projectName={project.name}
           projectPath={project.path}
           shellOverride={project.shellOverride}
-          defaultAdapter={project.defaultAdapter || 'claude-agent-sdk'}
+          defaultAdapter={project.defaultAdapter || 'claw-chat'}
           adapterOrder={project.adapterOrder ?? null}
           aiNamingEnabled={project.aiNamingEnabled || 'none'}
           pinned={project.pinned ?? false}

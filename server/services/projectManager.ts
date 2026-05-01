@@ -482,7 +482,7 @@ function mapRowToChat(r: any): Chat {
     lastActivityAt: r.last_activity_at || r.created_at,
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
-    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    adapter: (r.adapter as ChatAdapter) || 'claw-chat',
     ccConversationId: r.cc_conversation_id || null,
     sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
@@ -502,7 +502,7 @@ function mapRowToChatLite(r: any): Chat {
     lastActivityAt: r.last_activity_at || r.created_at,
     history: [],
     sdkSessionId: r.sdk_session_id || null,
-    adapter: (r.adapter as ChatAdapter) || 'claude-agent-sdk',
+    adapter: (r.adapter as ChatAdapter) || 'claw-chat',
     ccConversationId: r.cc_conversation_id || null,
     sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
@@ -516,7 +516,7 @@ function mapRowToChatLite(r: any): Chat {
 function createChat(projectId: string, label?: string, adapter?: ChatAdapter): Chat {
   const id = uuidv4();
   const now = new Date().toISOString();
-  const chatAdapter = adapter || 'claude-agent-sdk';
+  const chatAdapter = adapter || 'claw-chat';
   db.prepare('INSERT INTO chats (id, project_id, label, adapter, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, projectId, label || 'New Chat', chatAdapter, now, now);
   return {
     id,
