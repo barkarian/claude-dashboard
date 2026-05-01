@@ -9,7 +9,7 @@
  * input, overlays, and search are owned by the adapter's ChatView.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSocket } from '../../context/SocketContext.tsx';
@@ -25,16 +25,30 @@ interface ChatViewShellProps {
 export default function ChatViewShell({ projectId }: ChatViewShellProps) {
   const { chatId } = useParams<{ chatId: string }>();
   const location = useLocation();
-  const { project } = useProject();
+  const { project, refreshProject } = useProject();
   const { socket } = useSocket();
   const sessionStates = useSessionStates(projectId);
   const { registerHandler, unregisterHandler } = useSearch();
   const currentHandlerRef = useRef<ContextSearchHandler | null>(null);
+  const refreshAttemptedRef = useRef<string | null>(null);
 
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
 
   // Find the chat object
   const chat = project?.chats?.find(c => c.id === chatId);
+
+  // Handle the new-chat race: a chat just created (e.g. via the New Agent
+  // dialog) might not be in the loaded project.chats yet — especially when
+  // the user was already on the destination project, so loadProject didn't
+  // re-fire. Trigger a single silent refresh; the optimistic insert in
+  // NewAgentDialog usually beats us, this is the safety net.
+  useEffect(() => {
+    if (!chatId || !project || project.id !== projectId) return;
+    if (chat) return;
+    if (refreshAttemptedRef.current === chatId) return;
+    refreshAttemptedRef.current = chatId;
+    refreshProject();
+  }, [chatId, project, projectId, chat, refreshProject]);
 
   // Determine which adapter to use:
   // 1. The chat's own adapter field (if set and registered)
@@ -61,10 +75,21 @@ export default function ChatViewShell({ projectId }: ChatViewShellProps) {
     }
   }, [registerHandler, unregisterHandler]);
 
-  if (!chatId || !chat) {
+  if (!chatId) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted">
         Select a chat to start
+      </div>
+    );
+  }
+  if (!chat) {
+    // chatId is set but the project hasn't surfaced this chat yet — likely
+    // a brand-new chat racing the project refetch. Show a spinner; the
+    // refresh effect above will pull it in.
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-text-muted gap-2">
+        <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+        <p className="text-xs">Loading chat…</p>
       </div>
     );
   }

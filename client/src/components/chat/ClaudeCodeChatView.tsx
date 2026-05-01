@@ -177,26 +177,33 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   }, [status]);
 
   // autoSend: New Agent dialog stashes the typed prompt as the chat's draft
-  // and sets this flag. Once the CC terminal is running and the JSONL session
-  // is idle (claude code prompt is ready), inject the prompt + Enter once.
+  // and sets this flag. CC is terminal-driven, so we have to wait for the
+  // ACTUAL prompt input to be live: terminalUIMode.mode === 'free-prompt'.
+  // The 'none' fallback is unsafe — during the "trust folder" Y/N screen
+  // mode is also 'none' with sessionState undefined, and our keystrokes
+  // would be consumed as confirmation. We also debounce ~600ms: the mode
+  // must stay free-prompt for that long before we fire (cleanup cancels
+  // mid-transition firings). The latch flips inside the timer so a flaky
+  // mode bounce doesn't lock us out.
   const autoSendRequested = !!(location.state as { autoSend?: boolean } | null)?.autoSend;
   const autoSentRef = useRef(false);
+  const uiMode = terminalUIMode.mode;
   useEffect(() => {
     if (!autoSendRequested || autoSentRef.current) return;
     if (status !== 'running') return;
-    // Wait until the JSONL session reports idle so the prompt isn't typed
-    // before claude code is ready to accept it.
-    if (sessionState?.status && sessionState.status !== 'idle') return;
+    if (uiMode !== 'free-prompt') return;
     const text = chat?.draftMessage?.trim();
     if (!text) return;
-    autoSentRef.current = true;
-    // Small delay lets the terminal fully mount its prompt UI before paste.
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      // Re-guard at fire time in case the latch was already set elsewhere.
+      if (autoSentRef.current) return;
+      autoSentRef.current = true;
       handleSend(text + '\r');
       clearDraft();
       navigate(location.pathname, { replace: true, state: { isNewChat } });
-    }, 300);
-  }, [autoSendRequested, status, sessionState?.status, chat?.draftMessage, handleSend, clearDraft, navigate, location.pathname, isNewChat]);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [autoSendRequested, status, uiMode, chat?.draftMessage, handleSend, clearDraft, navigate, location.pathname, isNewChat]);
 
   const handleArrow = useCallback((data: string) => {
     write(data);

@@ -1,30 +1,29 @@
 /**
  * NewAgentDialog — global "spin up an agent" command box.
  *
- * Big prompt textarea on top, project + adapter selectors below. Submit
- * creates a chat with the selected adapter in the chosen project (creating
- * the Home workspace lazily when needed) and pre-fills the chat's draft
- * with the typed prompt so the chat page lands ready-to-send.
+ * UI: workspace pill at the top-left, single rounded prompt block below
+ * with an inline agent picker pill at the bottom. Submit with ⌘↵ or the
+ * send button. Mirrors the GPT-style command bar.
  *
- * Triggered by Cmd+N or the Catalog page's "New Agent" button.
+ * Behaviour: creates a chat in the chosen project (Home is get-or-create,
+ * "+ New project" hands off to the new-workspace flow), saves the typed
+ * prompt as the chat's draft, optimistically injects it into ProjectContext
+ * so the routed view can find it, asks the sidebar to refetch (so a freshly-
+ * created Home shows up immediately), then navigates with state.autoSend so
+ * the chat view fires the message once the session is ready.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '../ui/dialog.tsx';
-import { Button } from '../ui/button.tsx';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog.tsx';
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
 import api from '../../utils/api.ts';
 import { useAdapterSettings } from '../../hooks/useAdapterSettings.ts';
 import { useNewAgentDialog } from '../../context/NewAgentContext.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
+import { useProject } from '../../context/ProjectContext.tsx';
+import { useAppSidebar } from '../../context/SidebarContext.tsx';
 import type { Chat, Project, ProjectSummary } from '../../../../shared/types/models.ts';
 
 const HOME_OPTION = '__home__';
@@ -36,28 +35,29 @@ export default function NewAgentDialog() {
   const { open, initialText, closeDialog } = useNewAgentDialog();
   const { adapters, enabledIds } = useAdapterSettings();
   const { openDrawer: openNewProjectDrawer } = useNewProjectDrawer();
+  const { setProject } = useProject();
+  const { refreshProjects } = useAppSidebar();
 
   const [prompt, setPrompt] = useState('');
   const [projectChoice, setProjectChoice] = useState<string>(HOME_OPTION);
   const [adapterChoice, setAdapterChoice] = useState<string>('');
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Pick a sensible default adapter: prefer claw-chat (Chat) when enabled,
-  // otherwise the first enabled one.
   const defaultAdapter = useMemo(() => {
     if (enabledIds.includes(PREFERRED_ADAPTER)) return PREFERRED_ADAPTER;
     return enabledIds[0] ?? '';
   }, [enabledIds]);
 
-  // Reset/seed the form whenever the dialog opens.
+  // Reset/seed whenever the dialog opens.
   useEffect(() => {
     if (!open) return;
     setPrompt(initialText);
     setProjectChoice(HOME_OPTION);
     setAdapterChoice(defaultAdapter);
-    // Focus + caret-at-end after the modal mounts.
     setTimeout(() => {
       const ta = textareaRef.current;
       if (ta) {
@@ -67,8 +67,7 @@ export default function NewAgentDialog() {
     }, 50);
   }, [open, initialText, defaultAdapter]);
 
-  // Load projects for the picker the first time the dialog opens. Cheap
-  // enough — just the summary list, not chat content.
+  // Load projects for the picker the first time the dialog opens.
   useEffect(() => {
     if (!open || projects.length > 0) return;
     api.get<{ projects: ProjectSummary[] }>('/api/projects')
@@ -80,9 +79,16 @@ export default function NewAgentDialog() {
     () => adapters.filter(a => a.enabled).map(a => ({
       id: a.metadata.id,
       label: a.metadata.displayName || a.metadata.id,
+      shortLabel: a.metadata.shortLabel,
     })),
     [adapters],
   );
+
+  const selectedAdapter = adapterOptions.find(a => a.id === adapterChoice);
+
+  const projectLabel = projectChoice === HOME_OPTION
+    ? 'Home'
+    : projects.find(p => p.id === projectChoice)?.name ?? 'Workspace';
 
   async function handleSubmit() {
     const text = prompt.trim();
@@ -95,15 +101,12 @@ export default function NewAgentDialog() {
       return;
     }
     if (projectChoice === NEW_PROJECT_OPTION) {
-      // Hand off to the existing new-project flow. The user can come back
-      // and trigger New Agent again with the new workspace.
       closeDialog();
       openNewProjectDrawer();
       return;
     }
     setSubmitting(true);
     try {
-      // 1. Resolve the project. Home is get-or-create.
       let projectId: string;
       if (projectChoice === HOME_OPTION) {
         const home = await api.get<{ project: Project }>('/api/projects?home=ensure');
@@ -112,17 +115,24 @@ export default function NewAgentDialog() {
         projectId = projectChoice;
       }
 
-      // 2. Create the chat with the chosen adapter.
       const chatRes = await api.post<{ chat: Chat }>(
         `/api/projects/${projectId}/chats`,
         { label: 'New Chat', adapter: adapterChoice },
       );
       const chat = chatRes.chat;
 
-      // 3. Stash the typed prompt as the chat's draft so the prompt input
-      //    pre-fills with it. The chat view sees state.autoSend=true and
-      //    fires the send once the session is ready.
+      const draftedChat = { ...chat, draftMessage: text };
       await api.put(`/api/projects/${projectId}/chats/${chat.id}/draft`, { text });
+
+      // Optimistically inject when we're already on the destination project.
+      setProject(prev => {
+        if (!prev || prev.id !== projectId) return prev;
+        const rest = prev.chats.filter(c => c.id !== chat.id);
+        return { ...prev, chats: [draftedChat, ...rest] };
+      });
+
+      // Re-fetch sidebar so a freshly-created Home shows its row.
+      refreshProjects();
 
       closeDialog();
       navigate(`/project/${projectId}/chats/${chat.id}`, {
@@ -137,81 +147,161 @@ export default function NewAgentDialog() {
   }
 
   function onPromptKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Cmd/Ctrl+Enter submits. Plain Enter still inserts a newline.
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit();
     }
   }
 
+  // Workspace picker entries: Home pinned, then existing (excluding any
+  // project named "Home" so we never list it twice), then the inline new-
+  // project shortcut.
+  const projectEntries = useMemo(() => {
+    const rest = projects.filter(p => p.name !== 'Home');
+    return [
+      { id: HOME_OPTION, label: 'Home', isHome: true },
+      ...rest.map(p => ({ id: p.id, label: p.name, isHome: false })),
+      { id: NEW_PROJECT_OPTION, label: '+ New project…', isHome: false, isNew: true as const },
+    ];
+  }, [projects]);
+
+  const canSubmit = !submitting && !!prompt.trim() && !!adapterChoice;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>New Agent</DialogTitle>
-          <DialogDescription>
-            Spin up an agent on any workspace. Prompt below, pick where it runs.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        className="max-w-2xl p-4 sm:p-5 gap-3 bg-bg-surface border-border"
+      >
+        {/* a11y: Radix requires a title; keep it visually hidden so the
+            command-bar layout matches the mock. */}
+        <DialogTitle className="sr-only">New Agent</DialogTitle>
+        <DialogDescription className="sr-only">
+          Pick a workspace and an agent, type a prompt, and send.
+        </DialogDescription>
 
-        <div className="space-y-3">
+        {/* Workspace pill — top-left */}
+        <div className="flex items-center gap-2">
+          <Popover open={projectMenuOpen} onOpenChange={setProjectMenuOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-sm font-medium text-text hover:text-primary transition-colors"
+              >
+                <span>{projectLabel}</span>
+                <svg className="w-3.5 h-3.5 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-56 p-1">
+              {projectEntries.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    if (p.id === NEW_PROJECT_OPTION) {
+                      setProjectMenuOpen(false);
+                      closeDialog();
+                      openNewProjectDrawer();
+                      return;
+                    }
+                    setProjectChoice(p.id);
+                    setProjectMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded text-sm hover:bg-bg-hover transition-colors ${
+                    projectChoice === p.id ? 'text-primary' : 'text-text'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+          {/* Tiny computer/laptop glyph as in the mock — purely decorative,
+              indicates "this runs on your machine". */}
+          <svg className="w-4 h-4 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
+          </svg>
+        </div>
+
+        {/* Prompt block: rounded card with textarea + bottom action bar */}
+        <div className="border border-border rounded-2xl bg-bg/40 px-3 pt-3 pb-2 focus-within:border-primary/60 transition-colors">
           <textarea
             ref={textareaRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={onPromptKeyDown}
-            placeholder="What should the agent do?"
-            rows={6}
-            className="w-full px-3 py-2.5 text-sm bg-bg border border-border rounded-lg text-text placeholder:text-text-dim focus:outline-none focus:border-primary transition-colors resize-y min-h-[120px]"
+            placeholder="Plan, Build, / for commands, @ for context"
+            rows={4}
+            className="w-full bg-transparent text-sm text-text placeholder:text-text-dim focus:outline-none resize-none min-h-[80px]"
           />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <label className="block">
-              <span className="block text-[11px] font-medium text-text-dim uppercase tracking-wider mb-1">Project</span>
-              <select
-                value={projectChoice}
-                onChange={(e) => setProjectChoice(e.target.value)}
-                className="w-full px-2.5 py-2 text-sm bg-bg-surface border border-border rounded-md text-text focus:outline-none focus:border-primary transition-colors"
-              >
-                <option value={HOME_OPTION}>🏠  Home</option>
-                {projects
-                  .filter(p => p.name !== 'Home') // already surfaced above
-                  .map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                <option value={NEW_PROJECT_OPTION}>+ New project…</option>
-              </select>
-            </label>
+          <div className="flex items-center gap-2 mt-1">
+            {/* + attach (placeholder — wired up later for file attachments) */}
+            <button
+              type="button"
+              disabled
+              title="Attach (coming soon)"
+              className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface border border-border flex items-center justify-center text-text-dim opacity-60 cursor-not-allowed"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
 
-            <label className="block">
-              <span className="block text-[11px] font-medium text-text-dim uppercase tracking-wider mb-1">Agent</span>
-              <select
-                value={adapterChoice}
-                onChange={(e) => setAdapterChoice(e.target.value)}
-                disabled={adapterOptions.length === 0}
-                className="w-full px-2.5 py-2 text-sm bg-bg-surface border border-border rounded-md text-text focus:outline-none focus:border-primary transition-colors disabled:opacity-60"
-              >
-                {adapterOptions.length === 0 ? (
-                  <option>No agents enabled</option>
-                ) : (
-                  adapterOptions.map(a => (
-                    <option key={a.id} value={a.id}>{a.label}</option>
-                  ))
+            {/* Agent picker pill */}
+            <Popover open={agentMenuOpen} onOpenChange={setAgentMenuOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors px-1"
+                >
+                  <span>{selectedAdapter?.shortLabel || selectedAdapter?.label || 'Agent'}</span>
+                  <svg className="w-3 h-3 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-48 p-1">
+                {adapterOptions.length === 0 && (
+                  <div className="px-2.5 py-2 text-xs text-text-muted">No agents enabled</div>
                 )}
-              </select>
-            </label>
+                {adapterOptions.map(a => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setAdapterChoice(a.id);
+                      setAgentMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded text-sm hover:bg-bg-hover transition-colors ${
+                      adapterChoice === a.id ? 'text-primary' : 'text-text'
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+
+            {/* Send button — sits where the mock's mic is, mirrors that affordance */}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              title="Send (⌘↵)"
+              className="ml-auto flex-shrink-0 w-8 h-8 rounded-full bg-text text-bg flex items-center justify-center transition-opacity disabled:opacity-30 hover:opacity-90"
+            >
+              {submitting ? (
+                <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                </svg>
+              )}
+            </button>
           </div>
         </div>
-
-        <DialogFooter className="gap-2">
-          <span className="text-[11px] text-text-dim mr-auto self-center">
-            <kbd className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono">⌘↵</kbd> to submit
-          </span>
-          <Button variant="outline" onClick={closeDialog} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || !prompt.trim() || !adapterChoice}>
-            {submitting ? 'Starting…' : 'Start agent'}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
