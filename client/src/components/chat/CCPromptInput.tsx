@@ -341,29 +341,6 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
         />
 
         <div className="flex items-end gap-2">
-          {/* Previous messages — collapses out of the row when textarea is focused on native (keyboard open) */}
-          <div
-            className="flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
-            style={{
-              width: native && focused ? 0 : 40,
-              opacity: native && focused ? 0 : 1,
-            }}
-            aria-hidden={native && focused}
-          >
-            <button
-              type="button"
-              onClick={() => setShowHistory(true)}
-              disabled={disabled}
-              tabIndex={native && focused ? -1 : 0}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
-              title="Previous messages"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-          </div>
-
           <textarea
             ref={textareaRef}
             value={value}
@@ -381,7 +358,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
             onBlur={() => setFocused(false)}
             onKeyDown={handleKeyDown}
             autoFocus={autoFocus}
-            style={{ minHeight: native && focused ? 140 : 44 }}
+            style={{ minHeight: native && focused && !value ? 140 : 44 }}
             className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1 text-base"
             placeholder={
               disabled
@@ -392,7 +369,7 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
             disabled={disabled}
           />
 
-          {/* Icon-only Send / Select / Stop button */}
+          {/* Icon-only Stop / Previous / Select / Send button */}
           {showStop ? (
             <button
               type="button"
@@ -407,6 +384,23 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
             </button>
           ) : (() => {
             const showSelect = !!(isSelectionMode && !value.trim());
+            const showPrevious = !value && !showSelect;
+            if (showPrevious) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => setShowHistory(true)}
+                  disabled={disabled}
+                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-primary hover:bg-bg-hover transition-colors disabled:opacity-30"
+                  aria-label="Previous messages"
+                  title="Previous messages"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              );
+            }
             return (
               <button
                 type="button"

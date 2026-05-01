@@ -160,29 +160,6 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
       />
 
       <div className="flex items-end gap-2">
-        {/* Previous messages — collapses out of the row when textarea is focused on native (keyboard open) */}
-        <div
-          className="flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
-          style={{
-            width: native && focused ? 0 : 36,
-            opacity: native && focused ? 0 : 1,
-          }}
-          aria-hidden={native && focused}
-        >
-          <button
-            onClick={() => setShowHistory(true)}
-            disabled={disabled}
-            tabIndex={native && focused ? -1 : 0}
-            className="w-9 h-9 flex items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-50"
-            aria-label="Previous messages"
-            title="Previous messages"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </button>
-        </div>
-
         <textarea
           ref={textareaRef}
           value={value}
@@ -191,7 +168,7 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           autoFocus={autoFocus}
-          style={{ minHeight: native && focused ? 140 : 42 }}
+          style={{ minHeight: native && focused && !value ? 140 : 42 }}
           className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1"
           placeholder={
             disabled
@@ -213,6 +190,19 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        ) : !value ? (
+          <button
+            type="button"
+            onClick={() => setShowHistory(true)}
+            disabled={disabled}
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-bg-surface border border-border text-text-dim hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-30"
+            aria-label="Previous messages"
+            title="Previous messages"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </button>
         ) : (
