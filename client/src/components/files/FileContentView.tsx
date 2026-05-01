@@ -124,9 +124,13 @@ interface FileContentViewProps {
   projectId: string;
   filePath: string;
   onBack: () => void;
+  /** When provided, renders a fullscreen toggle in the header. Owned by parent
+   *  (e.g. ArtifactCard) so the dialog wrapper can resize accordingly. */
+  onFullscreenToggle?: () => void;
+  isFullscreen?: boolean;
 }
 
-export default function FileContentView({ projectId, filePath, onBack }: FileContentViewProps) {
+export default function FileContentView({ projectId, filePath, onBack, onFullscreenToggle, isFullscreen }: FileContentViewProps) {
   const { socket } = useSocket();
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -282,6 +286,25 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
             </button>
           </div>
         )}
+        {onFullscreenToggle && (
+          <button
+            type="button"
+            onClick={onFullscreenToggle}
+            className="flex-shrink-0 p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              </svg>
+            )}
+          </button>
+        )}
         {previewInfo.available ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -391,10 +414,11 @@ export default function FileContentView({ projectId, filePath, onBack }: FileCon
           </div>
         ) : inlineByExt ? (
           // PDFs: native browser PDF viewer streams the original directly.
-          // The viewer brings its own page-fit + zoom controls.
+          // #view=Fit asks the built-in viewer to start at fit-page so the
+          // whole first page is visible without immediately needing scroll.
           <div className="h-full">
             <iframe
-              src={`${buildDownloadUrl(projectId, filePath)}&inline=1`}
+              src={`${buildDownloadUrl(projectId, filePath)}&inline=1#view=Fit`}
               title={filePath}
               className="w-full h-full border-0 bg-bg-surface"
             />

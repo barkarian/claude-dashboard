@@ -1,23 +1,25 @@
 /**
  * ArtifactCard — renders a chat artifact emitted by the agent's
- * `display_artifact` tool. Image extensions render inline (preview);
- * everything else renders as a clickable file card.
+ * `display_artifact` tool.
  *
- * Bytes are NEVER embedded in the chat message — this card just builds
- * URLs into the existing /api/projects/:id/files/download endpoint
- * (via the env-aware buildDownloadUrl helper) so it works on tunnel,
- * desktop, and mobile alike.
+ * Inline rendering strategy (matches messaging-app conventions):
+ *   - Image / SVG / PDF / PPTX / Video → inline thumbnail card. The preview
+ *     endpoint produces a JPEG for everything except SVG (which renders the
+ *     original vector since rasterizing it loses the point).
+ *   - Word / Excel / Audio / archives / everything else → file card with a
+ *     generic icon (their HTML/binary preview isn't useful as a thumbnail).
  *
- * Click opens an in-app preview dialog wrapping the existing
- * FileContentView (the same viewer the Files tab uses) — no
- * target="_blank" so Tauri / Capacitor stay in-app.
+ * Bytes are NEVER embedded in the chat message — this card just builds URLs
+ * into the existing /api/projects/:id/files/download endpoint via the
+ * env-aware buildDownloadUrl helper.
  *
- * Download button is a dropdown when previewService can produce a
- * compressed/HTML variant (Compressed vs Original). Plain button when
- * there's no preview to offer.
+ * Click opens an in-app preview Dialog wrapping FileContentView (the same
+ * viewer the Files tab uses). The dialog supports a fullscreen toggle so
+ * users can expand it edge-to-edge for tall PDFs / presentations.
  *
- * Both go through downloadProjectFile which already handles Capacitor
- * Share on native + <a download> on the web.
+ * Download icon is a DropdownMenu (Compressed / Original) when the preview
+ * service can build a compressed variant; plain button otherwise. Both go
+ * through downloadProjectFile (Capacitor Share on native, anchor on web).
  */
 
 import { useState } from 'react';
@@ -68,14 +70,32 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
   const label = artifact.label || filename;
   const sizeLabel = formatSize(artifact.size);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const previewInfo = usePreviewInfo(projectId, artifact.path);
 
-  // For images we serve the compressed preview as the inline thumbnail —
-  // saves bandwidth on mobile/tunnel and matches the "low quality by default"
-  // UX. Click → dialog → user can flip to full quality there.
-  const inlineUrl = isImage(artifact.path)
-    ? `${buildDownloadUrl(projectId, artifact.path, { variant: 'preview' })}&inline=1`
-    : `${buildDownloadUrl(projectId, artifact.path)}&inline=1`;
+  // Should this artifact render as a visual thumbnail card?
+  // Yes for: any image (we have the bytes natively), plus the formats whose
+  // preview service produces a JPEG (pdf / pptx / video). Word / Excel /
+  // audio / unknown → false (file card style).
+  const isThumbableImage = isImage(artifact.path);
+  const isThumbableViaPreview =
+    previewInfo.available && (previewInfo.kind === 'pdf' || previewInfo.kind === 'pptx' || previewInfo.kind === 'video');
+  const showThumbnail = isThumbableImage || isThumbableViaPreview;
+
+  // For thumbnails:
+  // - Image with preview available → compressed JPEG
+  // - Image WITHOUT preview (e.g. SVG — server doesn't kind it) → original URL
+  // - PDF / PPTX / video → preview JPEG
+  const thumbnailUrl = (() => {
+    if (isThumbableImage) {
+      if (previewInfo.available) {
+        return `${buildDownloadUrl(projectId, artifact.path, { variant: 'preview' })}&inline=1`;
+      }
+      return `${buildDownloadUrl(projectId, artifact.path)}&inline=1`;
+    }
+    // PDF/PPTX/video — only previewable via the cached JPEG
+    return `${buildDownloadUrl(projectId, artifact.path, { variant: 'preview' })}&inline=1`;
+  })();
 
   function doDownload(opts: { variant?: 'preview' } = {}) {
     downloadProjectFile(projectId, artifact.path, opts).catch((err) => {
@@ -83,8 +103,6 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
     });
   }
 
-  // The download affordance — single button when there's nothing to choose,
-  // dropdown when previewService can build a compressed/HTML variant.
   function DownloadAffordance({ className }: { className?: string }) {
     if (previewInfo.available) {
       return (
@@ -132,48 +150,74 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
     );
   }
 
-  if (isImage(artifact.path)) {
+  // ── Preview dialog (shared by all variants) ──────────────────────
+  // Uses dvh (dynamic viewport height) instead of vh so iOS Safari's URL bar
+  // doesn't push the dialog past the visible area.
+  const dialog = (
+    <Dialog
+      open={previewOpen}
+      onOpenChange={(open) => { setPreviewOpen(open); if (!open) setFullscreen(false); }}
+    >
+      <DialogContent
+        className={
+          fullscreen
+            ? 'max-w-none w-screen h-[100dvh] rounded-none border-none p-0 sm:max-w-none [&>button]:hidden top-0 left-0 translate-x-0 translate-y-0 sm:top-0 sm:translate-y-0'
+            : 'max-w-3xl p-0 sm:max-w-3xl [&>button]:hidden'
+        }
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{label}</DialogTitle>
+        </DialogHeader>
+        <div className={fullscreen ? 'h-[100dvh] flex flex-col' : 'h-[80dvh] flex flex-col'}>
+          <FileContentView
+            projectId={projectId}
+            filePath={artifact.path}
+            onBack={() => setPreviewOpen(false)}
+            onFullscreenToggle={() => setFullscreen((f) => !f)}
+            isFullscreen={fullscreen}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (showThumbnail) {
     return (
       <>
         <div className="my-2 rounded-lg border border-border overflow-hidden bg-bg-surface max-w-md">
           <button
             type="button"
             onClick={() => setPreviewOpen(true)}
-            className="block w-full"
+            className="block w-full relative"
             aria-label={`Open preview of ${label}`}
           >
             <img
-              src={inlineUrl}
+              src={thumbnailUrl}
               alt={label}
               className="w-full h-auto object-contain max-h-96 cursor-zoom-in bg-bg"
               loading="lazy"
             />
+            {previewInfo.kind === 'video' && (
+              <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="bg-black/60 rounded-full w-14 h-14 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </span>
+              </span>
+            )}
           </button>
           <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs gap-2">
             <span className="truncate text-text-muted flex-1" title={artifact.path}>{label}</span>
             <DownloadAffordance className="flex-shrink-0 p-1 rounded text-text-muted hover:text-text hover:bg-bg-hover transition-colors" />
           </div>
         </div>
-
-        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-          <DialogContent className="max-w-3xl p-0 sm:max-w-3xl [&>button]:hidden">
-            <DialogHeader className="sr-only">
-              <DialogTitle>{label}</DialogTitle>
-            </DialogHeader>
-            <div className="h-[80vh] flex flex-col">
-              <FileContentView
-                projectId={projectId}
-                filePath={artifact.path}
-                onBack={() => setPreviewOpen(false)}
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
+        {dialog}
       </>
     );
   }
 
-  // Generic file card. Click anywhere → in-app preview dialog (FileContentView).
+  // Generic file card for word / excel / audio / archives / unknown.
   return (
     <>
       <div className="my-2 flex items-stretch rounded-lg border border-border bg-bg-surface max-w-md overflow-hidden">
@@ -196,21 +240,7 @@ export default function ArtifactCard({ artifact, projectId }: ArtifactCardProps)
         </button>
         <DownloadAffordance className="flex-shrink-0 flex items-center justify-center px-3 border-l border-border text-text-dim hover:text-text hover:bg-bg-hover transition-colors" />
       </div>
-
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-3xl p-0 sm:max-w-3xl [&>button]:hidden">
-          <DialogHeader className="sr-only">
-            <DialogTitle>{label}</DialogTitle>
-          </DialogHeader>
-          <div className="h-[80vh] flex flex-col">
-            <FileContentView
-              projectId={projectId}
-              filePath={artifact.path}
-              onBack={() => setPreviewOpen(false)}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {dialog}
     </>
   );
 }
