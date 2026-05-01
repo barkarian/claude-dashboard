@@ -25,6 +25,20 @@ router.get('/', async (req: Request, res: Response) => {
     const offset = parseInt(req.query.offset as string) || 0;
     const search = (req.query.search as string) || '';
     const pinnedOnly = req.query.pinned === '1';
+    // home=1 → return only the Home workspace (path = user's home dir).
+    // home=ensure → get-or-create. home=if-exists → null when missing.
+    // Used by the sidebar (if-exists) and the New Agent flow (ensure).
+    const homeMode = req.query.home as string | undefined;
+
+    if (homeMode === 'ensure') {
+      const project = projectManager.getOrCreateHomeProject();
+      return res.json({ project });
+    }
+    if (homeMode === 'if-exists') {
+      const id = projectManager.getHomeProjectId();
+      const project = id ? projectManager.getProject(id) : null;
+      return res.json({ project });
+    }
 
     if (pinnedOnly) {
       const projects = projectManager.listPinnedProjects();

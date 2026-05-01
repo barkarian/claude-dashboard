@@ -33,12 +33,13 @@ import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
+import { useNewAgent } from '../../hooks/useNewAgent.ts';
 
 export interface SidebarHandle {
   refreshProjects: () => void;
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 5;
 
 // Status dot colors for active chats
 function statusDotClass(status: ActiveChat['status']): string {
@@ -94,9 +95,8 @@ function badgeCount(chats: ActiveChat[]): number {
 }
 
 interface ChatRowProps {
-  chat: ActiveChat;
+  chat: SidebarChatRow;
   isActive: boolean;
-  isDismissible: boolean;
   onSelect: () => void;
   onTouchStart: (e: ReactTouchEvent) => void;
   onTouchEndCancel: () => void;
@@ -107,13 +107,17 @@ interface ChatRowProps {
 }
 
 function ChatRow({
-  chat, isActive, isDismissible, onSelect, onTouchStart, onTouchEndCancel,
+  chat, isActive, onSelect, onTouchStart, onTouchEndCancel,
   onMouseEnter, onMouseLeave, onContextMenuNative, onDismiss,
 }: ChatRowProps) {
+  const isDismissible = chat.isDismissible;
   // Category emoji acts as the inline marker. Falls back to the live status
-  // dot when the chat is uncategorised.
+  // dot when the chat is uncategorised. Idle (lazy-fetched) chats with no
+  // category get a plain neutral dot.
   const marker = chat.categoryEmoji ? (
     <span className="text-[13px] leading-none flex-shrink-0" aria-hidden>{chat.categoryEmoji}</span>
+  ) : chat.status === 'idle' ? (
+    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-border" />
   ) : (
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
   );
@@ -144,16 +148,70 @@ function ChatRow({
             </svg>
           </button>
         ) : (
-          <span className="flex-shrink-0 text-[9px] opacity-70">{statusLabel(chat.status)}</span>
+          <span className="flex-shrink-0 text-[9px] opacity-70">
+            {chat.status === 'idle' ? '' : statusLabel(chat.status as ActiveChat['status'])}
+          </span>
         )}
       </button>
     </li>
   );
 }
 
-// How many active chats to show per project before collapsing the rest behind
-// "Show more". Keeps the sidebar readable when many chats are categorised.
-const ACTIVE_CHATS_PAGE_SIZE = 8;
+// How many chats to load per "Show more" tap when paging through a project's
+// full chat list (lazy-fetched into the sidebar on expand).
+const CHATS_PER_PAGE = 5;
+
+const ACTIONABLE_STATUSES = new Set<string>([
+  'working',
+  'question-awaiting',
+  'questions-awaiting',
+  'plan-awaiting',
+  'permission-awaiting',
+  'unread',
+]);
+
+interface SidebarChatRow {
+  chatId: string;
+  label: string;
+  status: ActiveChat['status'] | 'idle';
+  categoryId: string | null;
+  categoryEmoji: string | null;
+  lastActivityAt: string;
+  /** True when the chat is "seen"/"new" (came from the live tracker and the
+   * user can clear it). False for plain idle chats fetched lazily. */
+  isDismissible: boolean;
+}
+
+/** Merge live tracker chats with lazy-fetched idle chats. Tracker entries
+ * win on duplicate id (they have fresh status). Sorted by activity desc. */
+function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatRow[] {
+  const byId = new Map<string, SidebarChatRow>();
+  for (const f of fetched) {
+    byId.set(f.id, {
+      chatId: f.id,
+      label: f.label,
+      status: 'idle',
+      categoryId: f.categoryId,
+      categoryEmoji: f.category?.emoji ?? null,
+      lastActivityAt: f.lastActivityAt || f.createdAt,
+      isDismissible: false,
+    });
+  }
+  for (const t of tracker) {
+    byId.set(t.chatId, {
+      chatId: t.chatId,
+      label: t.label,
+      status: t.status,
+      categoryId: t.categoryId,
+      categoryEmoji: t.categoryEmoji,
+      lastActivityAt: t.lastActivityAt,
+      isDismissible: t.status === 'seen' || t.status === 'new',
+    });
+  }
+  return [...byId.values()].sort(
+    (a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
+  );
+}
 
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
@@ -162,14 +220,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const location = useLocation();
   const navigate = useNavigate();
   const { openDrawer } = useNewProjectDrawer();
+  const { startNewAgent } = useNewAgent();
   const activeChats = useGlobalActiveChats();
   const { setProject } = useProject();
 
   const [accountPopoverOpen, setAccountPopoverOpen] = useState(false);
 
   // Context menu and delete confirmation state for sidebar chat long-press
-  const [sidebarCtx, setSidebarCtx] = useState<{ chat: ActiveChat; projectId: string; projectPath: string; x: number; y: number; trigger: 'longpress' | 'hover' } | null>(null);
-  const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: ActiveChat; projectId: string } | null>(null);
+  const [sidebarCtx, setSidebarCtx] = useState<{ chat: SidebarChatRow; projectId: string; projectPath: string; x: number; y: number; trigger: 'longpress' | 'hover' } | null>(null);
+  const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: SidebarChatRow; projectId: string } | null>(null);
   const sidebarLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ideMenu, setIdeMenu] = useState<{ projectPath: string; x: number; y: number } | null>(null);
   const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -199,17 +258,44 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     api.put(`/api/projects/${projectId}/chats/${chatId}/category`, { categoryId }).catch(() => {});
   }
 
-  // Per-project "show all chats" toggle. Defaults to collapsed; clicking
-  // "Show more" expands that project's list to the full active set.
-  const [expandedAllChats, setExpandedAllChats] = useState<Set<string>>(new Set());
-  const toggleShowAllChats = useCallback((projectId: string) => {
-    setExpandedAllChats(prev => {
+  // Lazy-loaded per-project chat lists. Sidebar only knows about live
+  // actionable chats by default (via the socket tracker); when the user
+  // expands a project we paginate through its real chat list so they can
+  // see idle chats too with "Show more".
+  const [chatsByProject, setChatsByProject] = useState<Record<string, { chats: Chat[]; total: number }>>({});
+  const [chatsLoadingProject, setChatsLoadingProject] = useState<Set<string>>(new Set());
+
+  const fetchProjectChats = useCallback(async (projectId: string, more: boolean) => {
+    setChatsLoadingProject(prev => {
       const next = new Set(prev);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
+      next.add(projectId);
       return next;
     });
-  }, []);
+    try {
+      const offset = more ? (chatsByProject[projectId]?.chats.length ?? 0) : 0;
+      const data = await api.get<{ chats: Chat[]; total: number }>(
+        `/api/projects/${projectId}/chats?limit=${CHATS_PER_PAGE}&offset=${offset}`
+      );
+      const fetched = data.chats || [];
+      setChatsByProject(prev => {
+        const existing = prev[projectId]?.chats ?? [];
+        // Dedupe by id when paging (server might return one we already had).
+        const seen = new Set(more ? existing.map(c => c.id) : []);
+        const merged = more
+          ? [...existing, ...fetched.filter(c => !seen.has(c.id))]
+          : fetched;
+        return { ...prev, [projectId]: { chats: merged, total: data.total ?? merged.length } };
+      });
+    } catch {
+      // ignore — sidebar shouldn't surface errors here
+    } finally {
+      setChatsLoadingProject(prev => {
+        const next = new Set(prev);
+        next.delete(projectId);
+        return next;
+      });
+    }
+  }, [chatsByProject]);
 
   // Cleanup hover timers
   useEffect(() => () => {
@@ -217,7 +303,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
   }, []);
 
-  function handleSidebarChatTouchStart(e: ReactTouchEvent, chat: ActiveChat, projectId: string, projectPath: string) {
+  function handleSidebarChatTouchStart(e: ReactTouchEvent, chat: SidebarChatRow, projectId: string, projectPath: string) {
     const touch = e.touches[0];
     sidebarLongPress.current = setTimeout(() => {
       haptics.impactLight();
@@ -233,7 +319,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   }
 
   // Desktop: hover to show popover
-  function handleChatMouseEnter(e: React.MouseEvent, chat: ActiveChat, projectId: string, projectPath: string) {
+  function handleChatMouseEnter(e: React.MouseEvent, chat: SidebarChatRow, projectId: string, projectPath: string) {
     if (isMobile || ideMenu) return;
     if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
     if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
@@ -301,10 +387,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
+      else {
+        next.add(projectId);
+        // Lazy-fetch the project's chat list the first time it expands so
+        // the user sees idle chats too, not just the actionable tracker set.
+        if (!chatsByProject[projectId]) fetchProjectChats(projectId, false);
+      }
       return next;
     });
-  }, []);
+  }, [chatsByProject, fetchProjectChats]);
 
   const accountSettingsUrl = tunnelUrl
     ? new URL('/settings', tunnelUrl).href
@@ -318,6 +409,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   }
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [home, setHome] = useState<ProjectSummary | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [displayMode, setDisplayMode] = useState<'pinned' | 'recent'>('recent');
@@ -347,6 +439,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   }, [openMobile]);
 
   async function loadInitial() {
+    // Fetch the Home workspace separately (only if it already exists — don't
+    // auto-create just by rendering the sidebar). It pins to the very top.
+    api.get<{ project: ProjectSummary | null }>(`/api/projects?home=if-exists`)
+      .then(data => setHome(data.project ?? null))
+      .catch(() => setHome(null));
+
     try {
       // Pins-XOR-Recents: if any workspace is pinned, show only pins.
       // Otherwise fall back to the paginated recent list.
@@ -419,21 +517,32 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }, 300);
   }
 
-  // Display: API results when available, else local filter, else full list
-  // Sort projects with active chats to the top
+  // Display: API results when available, else local filter, else full list.
+  // Sort projects with active chats to the top. Home is rendered separately
+  // as its own row above the Recents group (see JSX) and is filtered out
+  // here defensively in case the backend ever returns it.
   const baseProjects = searchResults ?? localFiltered ?? projects;
   const displayProjects = useMemo(() => {
-    return [...baseProjects].sort((a, b) => {
-      const aCount = activeChats.byProject[a.id]?.count || 0;
-      const bCount = activeChats.byProject[b.id]?.count || 0;
-      if (aCount > 0 && bCount === 0) return -1;
-      if (aCount === 0 && bCount > 0) return 1;
-      return 0;
-    });
-  }, [baseProjects, activeChats]);
+    return [...baseProjects]
+      .filter(p => !home || p.id !== home.id)
+      .sort((a, b) => {
+        const aCount = activeChats.byProject[a.id]?.count || 0;
+        const bCount = activeChats.byProject[b.id]?.count || 0;
+        if (aCount > 0 && bCount === 0) return -1;
+        if (aCount === 0 && bCount > 0) return 1;
+        return 0;
+      });
+  }, [baseProjects, activeChats, home]);
+
+  // Home is its own top-level row when it exists AND has at least one chat
+  // (categorised, drafted, or with messages — anything counted by chatsCount).
+  // Hidden during search since search filters by name/path against recents.
+  const showHomeRow = !sidebarSearch.trim() && home && (home.chatsCount ?? 0) > 0;
   const showInfiniteScroll = !sidebarSearch.trim() && displayMode === 'recent';
 
-  // Auto-expand projects that have active chats
+  // Auto-expand projects that have active chats. Also kick off a lazy
+  // chat fetch the first time we surface a project so "Show more" actually
+  // has data to extend with.
   useEffect(() => {
     const activeProjectIds = Object.keys(activeChats.byProject).filter(
       id => activeChats.byProject[id].count > 0
@@ -444,8 +553,127 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         for (const id of activeProjectIds) next.add(id);
         return next;
       });
+      for (const id of activeProjectIds) {
+        if (!chatsByProject[id]) fetchProjectChats(id, false);
+      }
     }
-  }, [activeChats]);
+  }, [activeChats, chatsByProject, fetchProjectChats]);
+
+  // Reusable project row renderer. Used both for ordinary recents and for
+  // the standalone Home row that lives above the Recents group.
+  const renderProjectRow = (project: ProjectSummary) => {
+    const projectActive = activeChats.byProject[project.id];
+    const count = projectActive?.count || 0;
+    const isExpanded = expanded.has(project.id);
+    const isActive = location.pathname.startsWith(`/project/${project.id}`);
+    const isHome = home?.id === project.id;
+    // Always offer the expand arrow when the project has *any* chats.
+    const hasAnyChats = count > 0 || (project.chatsCount ?? 0) > 0;
+
+    return (
+      <SidebarMenuItem key={project.id}>
+        <div className="flex items-center w-full" onContextMenu={(e) => handleChatContextMenu(e, project.path)}>
+          {/* Expand/collapse toggle */}
+          {hasAnyChats ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleExpanded(project.id); }}
+              className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-text-dim hover:text-text transition-colors"
+              aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            >
+              <svg
+                className={`w-3 h-3 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          ) : (
+            <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+              {isHome ? (
+                <svg className="w-3.5 h-3.5 text-text-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                </svg>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-border" />
+              )}
+            </span>
+          )}
+
+          {/* Project link */}
+          <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-base h-10 md:text-[15px] md:h-9">
+            <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
+              <span className="truncate">{project.name}</span>
+              {count > 0 && (
+                <span className={`ml-auto flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${badgeClass(projectActive.chats)}`}>
+                  {badgeCount(projectActive.chats) || count}
+                </span>
+              )}
+            </NavLink>
+          </SidebarMenuButton>
+
+          {/* Quick New Chat button */}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleQuickNewChat(project.id); }}
+            className="flex-shrink-0 w-7 h-7 md:w-5 md:h-5 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Expanded chat list: live tracker chats + lazy-fetched real chats. */}
+        {hasAnyChats && isExpanded && (() => {
+          const trackerChats = projectActive?.chats ?? [];
+          const fetched = chatsByProject[project.id]?.chats ?? [];
+          const total = chatsByProject[project.id]?.total ?? trackerChats.length;
+          const merged = mergeProjectChats(trackerChats, fetched);
+          const isLoading = chatsLoadingProject.has(project.id);
+          const hasMore = fetched.length < total;
+          return (
+            <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
+              {merged.map((chat) => (
+                <ChatRow
+                  key={chat.chatId}
+                  chat={chat}
+                  isActive={location.pathname.includes(chat.chatId)}
+                  onSelect={() => {
+                    setOpenMobile(false);
+                    navigate(`/project/${project.id}/chats/${chat.chatId}`);
+                  }}
+                  onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
+                  onTouchEndCancel={handleSidebarChatTouchEndCancel}
+                  onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
+                  onMouseLeave={handleChatMouseLeave}
+                  onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
+                  onDismiss={() => {
+                    api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
+                  }}
+                />
+              ))}
+              {isLoading && (
+                <li className="flex justify-center py-1.5">
+                  <div className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full" />
+                </li>
+              )}
+              {!isLoading && hasMore && (
+                <li>
+                  <button
+                    onClick={() => fetchProjectChats(project.id, true)}
+                    className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                  >
+                    Show more chats
+                  </button>
+                </li>
+              )}
+            </ul>
+          );
+        })()}
+      </SidebarMenuItem>
+    );
+  };
 
   return (
     <Sidebar collapsible="offcanvas">
@@ -460,9 +688,22 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Catalog — Apps + Services entry point */}
+        {/* Top-level entry points: New Agent (opens command box) + Catalog */}
         <SidebarGroup>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => { setOpenMobile(false); startNewAgent(); }}
+                className="text-base h-10 md:text-sm md:h-8 text-primary"
+                title="New Agent (⌘N)"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                </svg>
+                <span>New Agent</span>
+                <kbd className="ml-auto text-[10px] text-text-dim font-mono opacity-70 hidden md:inline">⌘N</kbd>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={location.pathname.startsWith('/catalog')} className="text-base h-10 md:text-sm md:h-8">
                 <NavLink to="/catalog" className="flex items-center gap-3">
@@ -475,6 +716,18 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
+
+        {/* Home — pinned above Recents whenever it has chats. Acts as the
+            implicit "anywhere" workspace and is the New Agent default. */}
+        {showHomeRow && home && (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {renderProjectRow(home)}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {/* Workspaces list — Pinned XOR Recent (never both) */}
         <SidebarGroup>
@@ -508,118 +761,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
                 </li>
               )}
-              {displayProjects.map((project) => {
-                const projectActive = activeChats.byProject[project.id];
-                const count = projectActive?.count || 0;
-                const isExpanded = expanded.has(project.id);
-                const isActive = location.pathname.startsWith(`/project/${project.id}`);
-
-                return (
-                  <SidebarMenuItem key={project.id}>
-                    <div className="flex items-center w-full" onContextMenu={(e) => handleChatContextMenu(e, project.path)}>
-                      {/* Expand/collapse toggle (only if has active chats) */}
-                      {count > 0 ? (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); toggleExpanded(project.id); }}
-                          className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-text-dim hover:text-text transition-colors"
-                          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                        >
-                          <svg
-                            className={`w-3 h-3 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
-                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                      ) : (
-                        <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                          <span className="w-2 h-2 rounded-full bg-border" />
-                        </span>
-                      )}
-
-                      {/* Project link */}
-                      <SidebarMenuButton asChild isActive={isActive} className="flex-1 min-w-0 text-base h-10 md:text-[15px] md:h-9">
-                        <NavLink to={`/project/${project.id}`} className="flex items-center gap-2">
-                          <span className="truncate">{project.name}</span>
-                          {count > 0 && (
-                            <span className={`ml-auto flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${badgeClass(projectActive.chats)}`}>
-                              {badgeCount(projectActive.chats) || count}
-                            </span>
-                          )}
-                        </NavLink>
-                      </SidebarMenuButton>
-
-                      {/* Quick New Chat button */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleQuickNewChat(project.id); }}
-                        className="flex-shrink-0 w-7 h-7 md:w-5 md:h-5 flex items-center justify-center rounded text-text-dim hover:text-primary hover:bg-bg-hover transition-colors"
-                        aria-label="New chat"
-                        title="New chat"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                        </svg>
-                      </button>
-                    </div>
-
-                    {/* Expanded: active chats list (paginated, drag removed). */}
-                    {count > 0 && isExpanded && (() => {
-                      const showAll = expandedAllChats.has(project.id);
-                      const visible = showAll
-                        ? projectActive.chats
-                        : projectActive.chats.slice(0, ACTIVE_CHATS_PAGE_SIZE);
-                      const hiddenCount = projectActive.chats.length - visible.length;
-                      return (
-                        <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
-                          {visible.map((chat) => {
-                            const isDismissible = chat.status === 'seen' || chat.status === 'new';
-                            return (
-                              <ChatRow
-                                key={chat.chatId}
-                                chat={chat}
-                                isActive={location.pathname.includes(chat.chatId)}
-                                isDismissible={isDismissible}
-                                onSelect={() => {
-                                  setOpenMobile(false);
-                                  navigate(`/project/${project.id}/chats/${chat.chatId}`);
-                                }}
-                                onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
-                                onTouchEndCancel={handleSidebarChatTouchEndCancel}
-                                onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
-                                onMouseLeave={handleChatMouseLeave}
-                                onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
-                                onDismiss={() => {
-                                  api.put(`/api/projects/${project.id}/chats/${chat.chatId}/dismiss`).catch(() => {});
-                                }}
-                              />
-                            );
-                          })}
-                          {hiddenCount > 0 && (
-                            <li>
-                              <button
-                                onClick={() => toggleShowAllChats(project.id)}
-                                className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-                              >
-                                Show {hiddenCount} more
-                              </button>
-                            </li>
-                          )}
-                          {showAll && projectActive.chats.length > ACTIVE_CHATS_PAGE_SIZE && (
-                            <li>
-                              <button
-                                onClick={() => toggleShowAllChats(project.id)}
-                                className="w-full px-2 py-1.5 md:py-1 rounded-md text-left text-[12px] text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-                              >
-                                Show fewer
-                              </button>
-                            </li>
-                          )}
-                        </ul>
-                      );
-                    })()}
-                  </SidebarMenuItem>
-                );
-              })}
+              {displayProjects.map((project) => renderProjectRow(project))}
 
               {sidebarSearch.trim() && !searchLoading && displayProjects.length === 0 && (
                 <li className="px-3 py-2 text-xs text-text-dim">No workspaces found</li>

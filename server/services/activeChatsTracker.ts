@@ -149,46 +149,24 @@ function onChatCreated(chatId: string, projectId: string, label: string): void {
   scheduleBroadcast();
 }
 
-/** Refresh category + activity for a tracked chat after an API mutation. */
+/** Refresh category + activity for a tracked chat after an API mutation.
+ * Categories are purely visual markers — they do NOT keep a chat in the
+ * sidebar tracker on their own. Only live session state, unread, or seen
+ * does that. */
 function refreshChatMeta(chatId: string, projectId: string): void {
   const existing = tracked.get(chatId);
+  if (!existing) {
+    // Not tracked, and category alone doesn't pull a chat in. Rebroadcast
+    // anyway so any open client can refresh its full chat list (where the
+    // emoji marker actually renders).
+    scheduleBroadcast();
+    return;
+  }
   const info = getChatInfo(chatId, projectId);
-  if (existing && info) {
-    existing.categoryId = info.categoryId;
-    existing.categoryEmoji = info.categoryEmoji;
-    existing.lastActivityAt = info.lastActivityAt;
-    // Categorised chats should be removable from the tracker once the user
-    // un-categorises them — drop if nothing else keeps them around.
-    if (
-      !info.categoryId
-      && !existing.unread && !existing.seen && !existing.fresh
-      && (!existing.sessionStatus || !INTERESTING_STATUSES.has(existing.sessionStatus))
-    ) {
-      tracked.delete(chatId);
-    }
-    scheduleBroadcast();
-    return;
-  }
-  // Categorised chats should appear in the tracker even if they had no other state.
-  if (info?.categoryId) {
-    tracked.set(chatId, {
-      chatId,
-      label: info.label,
-      projectId,
-      projectName: info.projectName,
-      sessionStatus: null,
-      unread: false,
-      seen: false,
-      fresh: false,
-      categoryId: info.categoryId,
-      categoryEmoji: info.categoryEmoji,
-      lastActivityAt: info.lastActivityAt,
-    });
-    scheduleBroadcast();
-    return;
-  }
-  // Uncategorised + untracked → nothing to do, but rebroadcast in case clients
-  // need to refresh display state for this chat.
+  if (!info) return;
+  existing.categoryId = info.categoryId;
+  existing.categoryEmoji = info.categoryEmoji;
+  existing.lastActivityAt = info.lastActivityAt;
   scheduleBroadcast();
 }
 
@@ -258,7 +236,9 @@ function getChatInfo(
   };
 }
 
-/** Load unread, pinned (seen), and categorised chats from DB on startup. */
+/** Load unread + pinned (seen) chats from DB on startup. Categories alone
+ * don't pull a chat into the tracker — they're rendered in the full chat
+ * list page; the sidebar only surfaces actionable state. */
 function loadFromDB(): void {
   const rows = db.prepare(`
     SELECT c.id, c.label, c.project_id, c.unread, c.pinned, c.category_id,
@@ -267,7 +247,7 @@ function loadFromDB(): void {
     FROM chats c
     JOIN projects p ON c.project_id = p.id
     LEFT JOIN chat_categories cat ON c.category_id = cat.id
-    WHERE c.unread = 1 OR c.pinned = 1 OR c.category_id IS NOT NULL
+    WHERE c.unread = 1 OR c.pinned = 1
   `).all() as Array<{
     id: string; label: string; project_id: string; unread: number; pinned: number;
     category_id: string | null; category_emoji: string | null;

@@ -40,34 +40,87 @@ function listProjects(): ProjectSummary[] {
 }
 
 function listProjectsPaginated(limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
-  const { total } = db.prepare('SELECT COUNT(*) as total FROM projects').get() as any;
+  // Home is rendered separately (always pinned to the very top) so we exclude
+  // it from the recents list to avoid showing it twice.
+  const homePath = os.homedir();
+  const { total } = db.prepare(
+    'SELECT COUNT(*) as total FROM projects WHERE path != ?'
+  ).get(homePath) as any;
 
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
+    WHERE p.path != ?
     ORDER BY p.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(limit, offset) as any[];
+  `).all(homePath, limit, offset) as any[];
 
   return { projects: rows.map(mapRowToSummary), total };
 }
 
 function searchProjectsPaginated(search: string, limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
   const pattern = `%${search}%`;
+  const homePath = os.homedir();
 
   const { total } = db.prepare(
-    'SELECT COUNT(*) as total FROM projects WHERE name LIKE ? OR path LIKE ?'
-  ).get(pattern, pattern) as any;
+    'SELECT COUNT(*) as total FROM projects WHERE (name LIKE ? OR path LIKE ?) AND path != ?'
+  ).get(pattern, pattern, homePath) as any;
 
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    WHERE p.name LIKE ? OR p.path LIKE ?
+    WHERE (p.name LIKE ? OR p.path LIKE ?) AND p.path != ?
     ORDER BY p.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(pattern, pattern, limit, offset) as any[];
+  `).all(pattern, pattern, homePath, limit, offset) as any[];
 
   return { projects: rows.map(mapRowToSummary), total };
+}
+
+// === Home project ===
+// The "Home" workspace is auto-managed and points at the user's home dir.
+// It's used by the global "New Agent" entry point so users can spin up an
+// ad-hoc agent without explicitly creating a workspace first. Recognised by
+// path === os.homedir() so we never list it twice in the recents.
+function isHomePath(p: string): boolean {
+  return path.resolve(p) === path.resolve(os.homedir());
+}
+
+function getOrCreateHomeProject(): Project {
+  const homePath = os.homedir();
+  const existing = db.prepare('SELECT id, mode FROM projects WHERE path = ?').get(homePath) as { id: string; mode: string } | undefined;
+  if (existing) {
+    // Forward-fix: earlier revisions created Home in 'simple' mode, which
+    // forces every chat to claw-chat regardless of the requested adapter.
+    // Upgrade once on the next read.
+    if (existing.mode === 'simple') {
+      db.prepare("UPDATE projects SET mode = 'dev' WHERE id = ?").run(existing.id);
+    }
+    const proj = getProject(existing.id);
+    if (proj) return proj;
+  }
+  // Create lazily.
+  let id = 'home';
+  if (db.prepare('SELECT id FROM projects WHERE id = ?').get(id)) {
+    id = `home-${uuidv4().slice(0, 8)}`;
+  }
+  const now = new Date().toISOString();
+  const defaultAdapter = resolveDefaultAdapter();
+  // Home runs in 'dev' mode so the user can pick any adapter (including
+  // Claude Code) from the New Agent dialog. Simple mode would defense-in-
+  // depth force every chat to claw-chat regardless of the requested adapter.
+  db.prepare(
+    'INSERT INTO projects (id, name, path, repo, created_at, default_adapter, mode) VALUES (?, ?, ?, NULL, ?, ?, ?)'
+  ).run(id, 'Home', homePath, now, defaultAdapter, 'dev');
+  ensureDefaultCategory(id);
+  const proj = getProject(id);
+  if (!proj) throw new Error('Failed to create Home project');
+  return proj;
+}
+
+function getHomeProjectId(): string | null {
+  const row = db.prepare('SELECT id FROM projects WHERE path = ?').get(os.homedir()) as { id: string } | undefined;
+  return row?.id ?? null;
 }
 
 function listPinnedProjects(): ProjectSummary[] {
@@ -788,6 +841,9 @@ export default {
   listProjectsPaginated,
   searchProjectsPaginated,
   listPinnedProjects,
+  getOrCreateHomeProject,
+  getHomeProjectId,
+  isHomePath,
   getProject,
   createProject,
   registerProject,

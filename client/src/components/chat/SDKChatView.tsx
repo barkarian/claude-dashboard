@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSearch, type SearchHandler } from '../../context/SearchContext.tsx';
@@ -22,6 +22,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
+  const navigate = useNavigate();
   const { project, setProject, refreshProject } = useProject();
   const refreshRef = useRef(refreshProject);
   refreshRef.current = refreshProject;
@@ -89,6 +90,23 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
 
   // Determine autoFocus from navigation state (only set when explicitly creating a new chat)
   const isNewChat = !!(location.state as { isNewChat?: boolean } | null)?.isNewChat;
+  // autoSend: New Agent dialog stashes the typed prompt as the draft and
+  // sets this flag. Once the SDK session is idle (ready to receive input),
+  // fire the send exactly once and clear both the draft and the location
+  // state so a refresh doesn't replay it.
+  const autoSendRequested = !!(location.state as { autoSend?: boolean } | null)?.autoSend;
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (!autoSendRequested || autoSentRef.current) return;
+    if (status !== 'idle') return;
+    const text = chat?.draftMessage?.trim();
+    if (!text) return;
+    autoSentRef.current = true;
+    sendPrompt(text);
+    clearDraft();
+    // Clear the navigation state so back/forward / refresh doesn't replay.
+    navigate(location.pathname, { replace: true, state: { isNewChat } });
+  }, [autoSendRequested, status, chat?.draftMessage, sendPrompt, clearDraft, navigate, location.pathname, isNewChat]);
 
   // Start or attach to SDK session on mount
   useEffect(() => {

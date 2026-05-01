@@ -20,6 +20,9 @@ import { SearchProvider } from './context/SearchContext.tsx';
 import NewProjectDrawer from './components/projects/NewProjectDrawer.tsx';
 import SearchOverlay from './components/ui/SearchOverlay.tsx';
 import CommandPalette from './components/ui/CommandPalette.tsx';
+import NewAgentDialog from './components/chat/NewAgentDialog.tsx';
+import { NewAgentProvider } from './context/NewAgentContext.tsx';
+import { useNewAgent } from './hooks/useNewAgent.ts';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { isCapacitorNative } from './utils/platform.ts';
 import { haptics } from './utils/haptics.ts';
@@ -319,6 +322,30 @@ function BadgeManager() {
   return null;
 }
 
+/**
+ * Cmd+N (or Ctrl+N) anywhere in the app opens the New Agent dialog. The
+ * dialog itself is mounted at the app root.
+ */
+function NewAgentHotkey() {
+  const { startNewAgent } = useNewAgent();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!((e.metaKey || e.ctrlKey) && (e.key === 'n' || e.key === 'N'))) return;
+      // Don't hijack typing in inputs/textareas/contentEditable.
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
+      e.preventDefault();
+      startNewAgent();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [startNewAgent]);
+
+  return null;
+}
+
 export default function App() {
   const sidebarRef = useRef<SidebarHandle>(null);
   const refreshProjects = useCallback(() => sidebarRef.current?.refreshProjects(), []);
@@ -333,6 +360,7 @@ export default function App() {
             <SidebarProvider>
               <AppSidebarContext.Provider value={{ refreshProjects }}>
                 <NewProjectDrawerProvider>
+                <NewAgentProvider>
                   <SwipeHandler />
                   <BackButtonHandler />
                   <BadgeManager />
@@ -358,7 +386,10 @@ export default function App() {
                   </div>
                   <NewProjectDrawer />
                   <CommandPalette />
+                  <NewAgentDialog />
+                  <NewAgentHotkey />
                   </SearchProvider>
+                </NewAgentProvider>
                 </NewProjectDrawerProvider>
               </AppSidebarContext.Provider>
             </SidebarProvider>

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import { useProject } from '../../context/ProjectContext.tsx';
 import { useSearch, type SearchHandler } from '../../context/SearchContext.tsx';
@@ -31,6 +31,7 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
   const { chatId } = useParams();
   const { socket } = useSocket();
   const location = useLocation();
+  const navigate = useNavigate();
   const { project, setProject, refreshProject } = useProject();
   const { registerHandler, unregisterHandler } = useSearch();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,6 +175,28 @@ export default function ClaudeCodeChatView({ projectId }: ClaudeCodeChatViewProp
       setTimeout(() => terminal.current?.focus(), 200);
     }
   }, [status]);
+
+  // autoSend: New Agent dialog stashes the typed prompt as the chat's draft
+  // and sets this flag. Once the CC terminal is running and the JSONL session
+  // is idle (claude code prompt is ready), inject the prompt + Enter once.
+  const autoSendRequested = !!(location.state as { autoSend?: boolean } | null)?.autoSend;
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (!autoSendRequested || autoSentRef.current) return;
+    if (status !== 'running') return;
+    // Wait until the JSONL session reports idle so the prompt isn't typed
+    // before claude code is ready to accept it.
+    if (sessionState?.status && sessionState.status !== 'idle') return;
+    const text = chat?.draftMessage?.trim();
+    if (!text) return;
+    autoSentRef.current = true;
+    // Small delay lets the terminal fully mount its prompt UI before paste.
+    setTimeout(() => {
+      handleSend(text + '\r');
+      clearDraft();
+      navigate(location.pathname, { replace: true, state: { isNewChat } });
+    }, 300);
+  }, [autoSendRequested, status, sessionState?.status, chat?.draftMessage, handleSend, clearDraft, navigate, location.pathname, isNewChat]);
 
   const handleArrow = useCallback((data: string) => {
     write(data);
