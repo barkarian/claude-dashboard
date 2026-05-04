@@ -1,5 +1,22 @@
 import sdkSessionManager from '../services/sdkSessionManager.ts';
 import projectManager from '../services/projectManager.ts';
+import { adapterRegistry } from '../adapters/registry.ts';
+
+/**
+ * The legacy sdk:* socket events were originally for the Claude Agent SDK
+ * adapter only. The frontend (SDKChatView) still emits them for every
+ * message-based chat regardless of adapter — so when an adapter other than
+ * claw-chat is active (e.g. opencode), we need to dispatch to the registered
+ * adapter instead of running the Claude SDK code path.
+ *
+ * Returns true if the legacy claude-sdk handler should run; false if the
+ * chat was already routed to its own adapter.
+ */
+function isLegacyClaudeSdkChat(chatId: string): boolean {
+  const chat = projectManager.getChat(chatId);
+  if (!chat) return true; // unknown chat — fall through to legacy error handling
+  return chat.adapter === 'claw-chat' || chat.adapter === 'claude-agent-sdk';
+}
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
 import { emitSidecarEvent } from '../services/sidecarEmitter.ts';
 import { sendPushEvent } from '../services/tunnelClient.ts';
@@ -46,13 +63,27 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
       const chat = projectManager.getChat(chatId);
 
+      // Adapter dispatch: opencode (and future non-Claude message adapters)
+      // implement their own start() — let them handle the session lifecycle.
+      // The Claude SDK code below only applies to claw-chat.
+      if (chat && !isLegacyClaudeSdkChat(chatId)) {
+        const adapter = adapterRegistry.get(chat.adapter);
+        if (adapter) {
+          await adapter.start({ chatId, projectId, projectPath, io, sessionId: chat.sessionId || chat.sdkSessionId || undefined });
+        } else {
+          socket.emit('sdk:error', { chatId, error: `Adapter not registered: ${chat.adapter}` });
+        }
+        return;
+      }
+
       // Pass persisted session ID if available (for resume) — prefer unified sessionId
       const savedSdkSessionId = chat?.sessionId || chat?.sdkSessionId || undefined;
       // Enable the display_artifact MCP tool when this chat is using the claw-chat
       // adapter. The legacy sdk:* socket handlers don't go through the adapter
       // orchestrator, so without this branch the tool would never load.
       const withArtifacts = chat?.adapter === 'claw-chat';
-      sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSdkSessionId, { withArtifacts });
+      const model = chat?.model ?? null;
+      sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSdkSessionId, { withArtifacts, model });
       socket.emit('sdk:status', { chatId, status: 'idle' });
 
       // Load history from JSONL session file (single source of truth for both CC and SDK)
@@ -70,6 +101,13 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
 
   socket.on('sdk:send', async ({ chatId, prompt }: SDKSendPayload) => {
     try {
+      // Non-Claude message adapters: hand off to their own sendInput().
+      if (!isLegacyClaudeSdkChat(chatId)) {
+        const chat = projectManager.getChat(chatId);
+        if (chat) adapterRegistry.get(chat.adapter)?.sendInput(chatId, prompt);
+        return;
+      }
+
       const session = sdkSessionManager.getSession(chatId);
       if (session) {
         // Auto-title: rename "New Chat" after first user message
@@ -155,24 +193,50 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
   });
 
   socket.on('sdk:permission-response', ({ chatId, requestId, granted }: SDKPermissionResponsePayload) => {
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      if (chat) adapterRegistry.get(chat.adapter)?.resolvePermission?.(chatId, requestId, granted);
+      return;
+    }
     sdkSessionManager.resolvePermission(chatId, requestId, granted);
   });
 
   socket.on('sdk:question-response', ({ chatId, requestId, answers }: SDKQuestionResponsePayload) => {
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      if (chat) adapterRegistry.get(chat.adapter)?.resolveQuestion?.(chatId, requestId, answers);
+      return;
+    }
     sdkSessionManager.resolveQuestion(chatId, requestId, answers);
   });
 
   socket.on('sdk:interrupt', ({ chatId }: SDKInterruptPayload) => {
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      if (chat) adapterRegistry.get(chat.adapter)?.interrupt?.(chatId);
+      return;
+    }
     sdkSessionManager.interrupt(chatId);
   });
 
   socket.on('sdk:end', ({ chatId }: SDKEndPayload) => {
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      if (chat) adapterRegistry.get(chat.adapter)?.stop(chatId);
+      return;
+    }
     sdkSessionManager.endSession(chatId);
   });
 
   socket.on('sdk:attach', async ({ chatId }: SDKAttachPayload) => {
     const room = `claude:${chatId}`;
     socket.join(room);
+
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      if (chat) adapterRegistry.get(chat.adapter)?.attach(chatId, socket);
+      return;
+    }
 
     const session = sdkSessionManager.getSession(chatId);
     if (session) {
@@ -201,17 +265,28 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
   });
 
   socket.on('sdk:check-session', ({ chatId }: SDKCheckSessionPayload, callback: Function) => {
+    if (!isLegacyClaudeSdkChat(chatId)) {
+      const chat = projectManager.getChat(chatId);
+      const result = chat ? adapterRegistry.get(chat.adapter)?.checkSession(chatId) : undefined;
+      callback(result || { exists: false });
+      return;
+    }
     const session = sdkSessionManager.getSession(chatId);
     callback(session ? { exists: true, status: session.status } : { exists: false });
   });
 
   socket.on('project:join', ({ projectId }: { projectId: string }, callback?: Function) => {
     socket.join(`project:${projectId}`);
-    // Merge SDK and CC unified session states
+    // Start from the legacy Claude SDK + Claude Code states (kept for the JSONL
+    // overlay below), then layer every registered adapter on top so opencode
+    // and any future adapters contribute their session states too.
     const sessionStates: Record<string, SessionStateContext> = {
       ...sdkSessionManager.getProjectSessionStates(projectId),
       ...getProjectCCSessionStates(projectId),
     };
+    for (const [, adapter] of adapterRegistry.entries()) {
+      Object.assign(sessionStates, adapter.getProjectSessionStates(projectId));
+    }
     // Overlay JSONL-derived states for SDK sessions (richer data when available)
     const sdkSessionIds = sdkSessionManager.getProjectSDKSessionIds(projectId);
     for (const [chatId, sdkSessionId] of Object.entries(sdkSessionIds)) {

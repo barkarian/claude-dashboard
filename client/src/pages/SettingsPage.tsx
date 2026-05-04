@@ -5,7 +5,6 @@ import MobileNav from '../components/layout/MobileNav.tsx';
 import UpdateSection from '../components/settings/UpdateSection.tsx';
 import DesktopNotificationsSection from '../components/settings/DesktopNotificationsSection.tsx';
 import ThemeSection from '../components/settings/ThemeSection.tsx';
-import ChatAgentsSection from '../components/settings/ChatAgentsSection.tsx';
 import AIToolsSection from '../components/settings/AIToolsSection.tsx';
 import PermissionsManagementSection from '../components/settings/PermissionsManagementSection.tsx';
 import SystemInfoSection from '../components/settings/SystemInfoSection.tsx';
@@ -16,11 +15,10 @@ export default function SettingsPage() {
   const location = useLocation();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Support hash-scroll (e.g. /settings#chat-agents)
+  // Support hash-scroll for in-page anchors
   useEffect(() => {
     if (location.hash) {
       const id = location.hash.slice(1);
-      // Wait for render then scroll
       requestAnimationFrame(() => {
         const el = document.getElementById(id);
         if (el) {
@@ -36,7 +34,6 @@ export default function SettingsPage() {
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-6">
           <ThemeSection />
-          <ChatAgentsSection />
           <AIToolsSection />
           <PermissionsManagementSection />
           <SystemInfoSection />

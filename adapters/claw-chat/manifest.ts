@@ -2,9 +2,9 @@ import type { AdapterMetadata } from '../../shared/types/adapter.ts';
 
 const manifest: AdapterMetadata = {
   id: 'claw-chat',
-  displayName: 'Chat',
+  displayName: 'Claude Agent',
   description: 'Conversational AI for everyone — chat with files and get artifacts back inline.',
-  shortLabel: 'Chat',
+  shortLabel: 'Claude',
   badgeColor: 'bg-blue-500/10 text-blue-500',
   icon: 'message-square',
   capabilities: {

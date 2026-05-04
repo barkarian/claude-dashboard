@@ -613,17 +613,21 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     // Use explicit adapter if provided, otherwise fall back to project default (then global default)
     const { resolveDefaultAdapter } = await import('../services/database.ts');
     let chatAdapter = adapter || project.defaultAdapter || resolveDefaultAdapter();
-    // Defense-in-depth: simple-mode workspaces always use the claw-chat adapter
-    // (SDK + display_artifact tool) for new chats, even if the client requests
-    // something else. Existing chats keep their own adapter.
-    if (project.mode === 'simple') {
-      chatAdapter = 'claw-chat';
-    }
 
     // Validate adapter is registered
     const { adapterRegistry } = await import('../adapters/registry.ts');
     if (!adapterRegistry.has(chatAdapter)) {
       return res.status(400).json({ error: `Unknown adapter: ${chatAdapter}` });
+    }
+
+    // Defense-in-depth: simple-mode workspaces only allow message-based
+    // adapters. Terminal adapters (claude-code) are dev-only. If the
+    // requested adapter is terminal, fall back to claw-chat.
+    if (project.mode === 'simple') {
+      const reg = adapterRegistry.get(chatAdapter);
+      if (reg?.metadata.capabilities.terminal) {
+        chatAdapter = 'claw-chat';
+      }
     }
 
     // Validate adapter is enabled (if adapter_settings exist)

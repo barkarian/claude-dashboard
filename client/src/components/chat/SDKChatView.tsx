@@ -10,6 +10,7 @@ import SDKPromptInput from './SDKPromptInput.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
+import ModelPicker from './ModelPicker.tsx';
 import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 import type { ChatArtifact } from '../../../../shared/types/models.ts';
@@ -256,8 +257,31 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     }, 100);
   }
 
+  // Model-switch handler: persist the new model, then end any active SDK
+  // session so the next prompt starts fresh with it. The chat:stop event
+  // is consumed by both claw-chat and opencode adapters.
+  const handleModelChanged = useCallback((newModel: string) => {
+    if (socket && chatId) socket.emit('chat:stop', { chatId });
+    refreshRef.current?.();
+    void newModel;
+  }, [socket, chatId]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Slim model bar — visible only for message-based chats. Provider
+          switching is locked once a chat is created; this picker only
+          changes the model within the chat's adapter. */}
+      {!connecting && chat && chatId && (
+        <div className="flex-shrink-0 flex items-center justify-end px-3 py-1 border-b border-border bg-bg-surface">
+          <ModelPicker
+            projectId={projectId}
+            chatId={chatId}
+            adapterId={chat.adapter}
+            currentModel={chat.model}
+            onModelChanged={handleModelChanged}
+          />
+        </div>
+      )}
       {/* Main content */}
       {connecting ? (
         <div className="flex-1 flex items-center justify-center">

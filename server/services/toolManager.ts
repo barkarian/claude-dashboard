@@ -36,8 +36,8 @@ const TOOLS = [
   },
   {
     id: 'opencode',
-    name: 'Open Code',
-    description: 'Open-source AI coding assistant CLI',
+    name: 'OpenCode',
+    description: 'Multi-provider AI coding agent CLI',
     binary: 'opencode',
     installCommand: 'npm install -g opencode-ai',
   },

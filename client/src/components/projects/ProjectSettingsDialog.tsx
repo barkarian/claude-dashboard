@@ -208,12 +208,13 @@ export default function ProjectSettingsDialog({
   }
 
   const shellChanged = (localShellOverride || null) !== (shellOverride || null);
-  // Adapter list filtered by mode: simple workspaces only see claw-chat;
-  // dev workspaces see every enabled adapter. Filtered against the SAVED mode
-  // (not localMode) so adapters don't flicker on toggle before save.
+  // Adapter list filtered by mode: simple workspaces show every enabled
+  // message-based adapter (claw-chat, opencode, …); terminal-only adapters
+  // (claude-code) are dev-only. Filtered against the SAVED mode (not
+  // localMode) so adapters don't flicker on toggle before save.
   const enabledAdapters = adapterInfos
     .filter(a => a.enabled)
-    .filter(a => mode === 'dev' || a.metadata.id === 'claw-chat')
+    .filter(a => mode === 'dev' || !a.metadata.capabilities.terminal)
     .map(a => ({ metadata: a.metadata }));
 
   return (

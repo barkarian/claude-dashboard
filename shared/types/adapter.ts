@@ -55,3 +55,20 @@ export interface PrerequisiteResult {
   /** Optional install command hint */
   installHint?: string;
 }
+
+/**
+ * Model exposed by an adapter. The `id` is adapter-opaque — each adapter
+ * encodes its own format (e.g. claw-chat uses "claude-sonnet-4-6", opencode
+ * uses "anthropic/claude-sonnet-4-6"). The chat.model column stores it
+ * verbatim and the adapter parses it on session start.
+ */
+export interface ModelInfo {
+  /** Adapter-opaque model identifier */
+  id: string;
+  /** Display label shown in pickers (e.g. "Claude Sonnet 4.6") */
+  label: string;
+  /** Optional family/grouping for picker UI ("Sonnet", "Opus", "GPT-4", …) */
+  family?: string;
+  /** Optional short tagline shown under the label */
+  description?: string;
+}

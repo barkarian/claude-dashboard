@@ -10,6 +10,7 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type { IChatAdapterServer, AdapterStartParams, AdapterSession } from '../../server/adapters/types.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 import type { SDKChatMessage } from '../../shared/types/sdk.ts';
+import type { ModelInfo } from '../../shared/types/adapter.ts';
 import manifest from './manifest.ts';
 import sdkSessionManager from '../../server/services/sdkSessionManager.ts';
 import projectManager from '../../server/services/projectManager.ts';
@@ -38,8 +39,12 @@ export default class ClawChatAdapter extends EventEmitter implements IChatAdapte
 
     const chat = projectManager.getChat(chatId);
     const savedSessionId = sessionId || chat?.sessionId || chat?.sdkSessionId || undefined;
+    // chat.model is set at chat creation from the adapter's default_model
+    // setting; null means "let the SDK pick its default" rather than a
+    // forced fallback at this layer.
+    const model = chat?.model ?? null;
 
-    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true });
+    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true, model });
 
     return { chatId, projectId, status: 'idle' };
   }
@@ -160,5 +165,13 @@ export default class ClawChatAdapter extends EventEmitter implements IChatAdapte
 
   getMessageHistory(chatId: string): SDKChatMessage[] {
     return sdkSessionManager.getMessageHistory(chatId);
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return [
+      { id: 'claude-opus-4-7',     label: 'Claude Opus 4.7',    family: 'Opus',   description: 'Most capable — frontier reasoning and coding' },
+      { id: 'claude-sonnet-4-6',   label: 'Claude Sonnet 4.6',  family: 'Sonnet', description: 'Balanced — strong defaults for everyday work' },
+      { id: 'claude-haiku-4-5',    label: 'Claude Haiku 4.5',   family: 'Haiku',  description: 'Fastest and cheapest' },
+    ];
   }
 }

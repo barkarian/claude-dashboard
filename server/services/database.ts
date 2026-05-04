@@ -139,6 +139,14 @@ try {
   // Column already exists — ignore
 }
 
+// Add model column to chats (adapter-opaque model identifier; NULL = fall
+// back to adapter's default_model setting at session start)
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN model TEXT`);
+} catch {
+  // Column already exists — ignore
+}
+
 // Add cc_conversation_id column to chats
 try {
   db.exec(`ALTER TABLE chats ADD COLUMN cc_conversation_id TEXT`);
@@ -496,6 +504,40 @@ export function getEnabledAdapterIds(): string[] {
 export function hasAnyAdapterSettings(): boolean {
   const row = db.prepare('SELECT COUNT(*) as count FROM adapter_settings').get() as { count: number };
   return row.count > 0;
+}
+
+// --- Per-adapter model preferences ---
+// Stored under reserved keys in the adapter_settings K/V table:
+//   key='default_model'   value=<model id string>
+//   key='favorite_models' value=<JSON array of model id strings>
+// The configure dialog is the only UI that mutates these; chat creation
+// reads default_model to seed chat.model.
+
+export function getDefaultModel(adapterId: string): string | null {
+  return getAdapterSetting(adapterId, 'default_model') ?? null;
+}
+
+export function setDefaultModel(adapterId: string, modelId: string | null): void {
+  if (modelId === null || modelId === '') {
+    deleteAdapterSetting(adapterId, 'default_model');
+  } else {
+    setAdapterSetting(adapterId, 'default_model', modelId);
+  }
+}
+
+export function getFavoriteModels(adapterId: string): string[] {
+  const raw = getAdapterSetting(adapterId, 'favorite_models');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setFavoriteModels(adapterId: string, modelIds: string[]): void {
+  setAdapterSetting(adapterId, 'favorite_models', JSON.stringify(modelIds));
 }
 
 // --- Session purge ---

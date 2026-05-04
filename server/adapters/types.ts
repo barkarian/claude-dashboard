@@ -10,7 +10,7 @@
 import { EventEmitter } from 'node:events';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type { SessionStateContext } from '../../shared/types/session.ts';
-import type { AdapterMetadata, PrerequisiteResult } from '../../shared/types/adapter.ts';
+import type { AdapterMetadata, ModelInfo, PrerequisiteResult } from '../../shared/types/adapter.ts';
 import type { SDKChatMessage } from '../../shared/types/sdk.ts';
 
 // ── Params passed to adapter.start() ──────────────────────────────
@@ -101,6 +101,18 @@ export interface IChatAdapterServer extends EventEmitter {
 
   /** Check if this adapter's prerequisites are met */
   checkPrerequisites?(): Promise<PrerequisiteResult>;
+
+  // ── Models ──
+
+  /**
+   * Return the list of models this adapter can use. Optional — adapters
+   * without per-session model selection (e.g. terminal adapters that inherit
+   * the user's CLI config) can omit this. The configure dialog shows a model
+   * picker only when this is implemented.
+   *
+   * Implementations should cache as appropriate (network calls, etc.).
+   */
+  listModels?(): Promise<ModelInfo[]>;
 
   // ── Push notification customization ──
 

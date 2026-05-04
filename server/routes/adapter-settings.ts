@@ -7,6 +7,9 @@
 import { Router } from 'express';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { promises as fsAsync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   getAllAdapterSettings,
   getAdapterSettings,
@@ -18,6 +21,10 @@ import {
   getStoredDefaultAdapter,
   setStoredDefaultAdapter,
   resolveDefaultAdapter,
+  getDefaultModel,
+  setDefaultModel,
+  getFavoriteModels,
+  setFavoriteModels,
 } from '../services/database.ts';
 import { adapterRegistry } from '../adapters/registry.ts';
 
@@ -79,6 +86,58 @@ router.put('/default', (req, res) => {
     stored: getStoredDefaultAdapter(),
     effective: resolveDefaultAdapter(),
   });
+});
+
+/** GET /api/adapter-settings/:id/default-model — adapter's default model id */
+router.get('/:id/default-model', (req, res) => {
+  const { id } = req.params;
+  if (!adapterRegistry.has(id)) {
+    res.status(404).json({ error: `Adapter not found: ${id}` });
+    return;
+  }
+  res.json({ defaultModel: getDefaultModel(id) });
+});
+
+/** PUT /api/adapter-settings/:id/default-model — set/clear adapter's default model */
+router.put('/:id/default-model', (req, res) => {
+  const { id } = req.params;
+  if (!adapterRegistry.has(id)) {
+    res.status(404).json({ error: `Adapter not found: ${id}` });
+    return;
+  }
+  const { defaultModel } = req.body as { defaultModel?: string | null };
+  if (defaultModel !== null && typeof defaultModel !== 'string') {
+    res.status(400).json({ error: 'defaultModel must be a string or null' });
+    return;
+  }
+  setDefaultModel(id, defaultModel ?? null);
+  res.json({ defaultModel: getDefaultModel(id) });
+});
+
+/** GET /api/adapter-settings/:id/favorite-models — adapter's favorite model ids */
+router.get('/:id/favorite-models', (req, res) => {
+  const { id } = req.params;
+  if (!adapterRegistry.has(id)) {
+    res.status(404).json({ error: `Adapter not found: ${id}` });
+    return;
+  }
+  res.json({ favoriteModels: getFavoriteModels(id) });
+});
+
+/** PUT /api/adapter-settings/:id/favorite-models — replace adapter's favorites list */
+router.put('/:id/favorite-models', (req, res) => {
+  const { id } = req.params;
+  if (!adapterRegistry.has(id)) {
+    res.status(404).json({ error: `Adapter not found: ${id}` });
+    return;
+  }
+  const { favoriteModels } = req.body as { favoriteModels?: unknown };
+  if (!Array.isArray(favoriteModels) || !favoriteModels.every((x) => typeof x === 'string')) {
+    res.status(400).json({ error: 'favoriteModels must be an array of strings' });
+    return;
+  }
+  setFavoriteModels(id, favoriteModels as string[]);
+  res.json({ favoriteModels: getFavoriteModels(id) });
 });
 
 /** GET /api/adapter-settings/:id — settings for one adapter */
@@ -154,6 +213,22 @@ router.get('/:id/check-auth', async (req, res) => {
     return;
   }
 
+  if (id === 'opencode') {
+    // OpenCode auth lives at ~/.local/share/opencode/auth.json — we treat
+    // the presence of any provider entry as "authenticated". The user
+    // creates this file via `opencode auth login` outside the dashboard.
+    try {
+      const authPath = path.join(os.homedir(), '.local/share/opencode/auth.json');
+      const raw = await fsAsync.readFile(authPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const ok = parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0;
+      res.json({ authenticated: !!ok, source: ok ? 'cli' : undefined });
+    } catch {
+      res.json({ authenticated: false });
+    }
+    return;
+  }
+
   // Generic: check if adapter has any API key configured
   const hasAnyKey = Object.keys(settings).some(k => k.endsWith('_api_key') && settings[k]);
   res.json({ authenticated: hasAnyKey, source: hasAnyKey ? 'api_key' : undefined });
@@ -203,6 +278,16 @@ router.post('/auto-detect', async (_req, res) => {
       const keychainToken = await readClaudeKeychainToken();
       authenticated = !!(envKey || keychainToken);
       source = envKey ? 'env' : keychainToken ? 'oauth' : undefined;
+    } else if (id === 'opencode') {
+      try {
+        const authPath = path.join(os.homedir(), '.local/share/opencode/auth.json');
+        const raw = await fsAsync.readFile(authPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        authenticated = parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0;
+        source = authenticated ? 'cli' : undefined;
+      } catch {
+        authenticated = false;
+      }
     }
 
     // Auto-enable if fully ready

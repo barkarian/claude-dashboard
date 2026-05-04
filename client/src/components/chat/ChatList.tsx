@@ -298,7 +298,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   function handleNewChat() {
     if (enabledIds.length === 0) {
       // No adapters enabled → navigate to settings
-      navigate('/settings#chat-agents');
+      navigate('/catalog');
       return;
     }
     if (enabledIds.length === 1) {
@@ -335,7 +335,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   function handleForcePickerOpen() {
     if (enabledIds.length === 0) {
-      navigate('/settings#chat-agents');
+      navigate('/catalog');
       return;
     }
     setPickerOpen(true);
@@ -559,7 +559,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         onSelect={handlePickerSelect}
         enabledAdapters={adapterInfos
           .filter(a => a.enabled)
-          .filter(a => project?.mode === 'dev' || a.metadata.id === 'claw-chat')
+          // Simple-mode workspaces show every enabled message-based adapter.
+          // Terminal-only adapters (claude-code) stay dev-only.
+          .filter(a => project?.mode === 'dev' || !a.metadata.capabilities.terminal)
           .map(a => ({ metadata: a.metadata }))}
         adapterOrder={project?.adapterOrder ?? null}
         onReorder={handleAdapterReorder}
@@ -726,7 +728,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                 {adapterInfos.map(a => (
                   <button
                     key={a.metadata.id}
-                    onClick={() => navigate('/settings#chat-agents')}
+                    onClick={() => navigate('/catalog')}
                     className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-bg-hover/50 transition-colors text-left"
                   >
                     <span className={`flex-shrink-0 text-[10px] font-semibold px-2 py-1 rounded ${a.metadata.badgeColor}`}>

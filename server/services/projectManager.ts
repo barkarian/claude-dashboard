@@ -3,7 +3,7 @@ import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import db, { resolveDefaultAdapter } from './database.ts';
+import db, { resolveDefaultAdapter, getDefaultModel } from './database.ts';
 import gitService from './gitService.ts';
 import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, ChatCategory, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
 
@@ -483,6 +483,7 @@ function mapRowToChat(r: any): Chat {
     history: getChatMessages(r.id),
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claw-chat',
+    model: r.model || null,
     ccConversationId: r.cc_conversation_id || null,
     sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
@@ -503,6 +504,7 @@ function mapRowToChatLite(r: any): Chat {
     history: [],
     sdkSessionId: r.sdk_session_id || null,
     adapter: (r.adapter as ChatAdapter) || 'claw-chat',
+    model: r.model || null,
     ccConversationId: r.cc_conversation_id || null,
     sessionId: r.session_id || null,
     draftMessage: r.draft_message || null,
@@ -517,7 +519,12 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
   const id = uuidv4();
   const now = new Date().toISOString();
   const chatAdapter = adapter || 'claw-chat';
-  db.prepare('INSERT INTO chats (id, project_id, label, adapter, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, projectId, label || 'New Chat', chatAdapter, now, now);
+  // Seed chat.model from the adapter's default_model setting (if any). NULL
+  // is fine — runtime falls back to the same default at session start.
+  const model = getDefaultModel(chatAdapter);
+  db.prepare(
+    'INSERT INTO chats (id, project_id, label, adapter, model, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, projectId, label || 'New Chat', chatAdapter, model, now, now);
   return {
     id,
     label: label || 'New Chat',
@@ -527,6 +534,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     history: [],
     sdkSessionId: null,
     adapter: chatAdapter,
+    model,
     ccConversationId: null,
     sessionId: null,
     draftMessage: null,
@@ -543,7 +551,7 @@ function getChat(chatId: string): Chat | null {
   return mapRowToChat(row);
 }
 
-function updateChat(chatId: string, updates: { label?: string; description?: string | null; sdkSessionId?: string | null; ccConversationId?: string | null; sessionId?: string | null; draftMessage?: string | null }): Chat | null {
+function updateChat(chatId: string, updates: { label?: string; description?: string | null; sdkSessionId?: string | null; ccConversationId?: string | null; sessionId?: string | null; draftMessage?: string | null; model?: string | null }): Chat | null {
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
@@ -553,6 +561,7 @@ function updateChat(chatId: string, updates: { label?: string; description?: str
   if (updates.ccConversationId !== undefined) db.prepare('UPDATE chats SET cc_conversation_id = ? WHERE id = ?').run(updates.ccConversationId, chatId);
   if (updates.sessionId !== undefined) db.prepare('UPDATE chats SET session_id = ? WHERE id = ?').run(updates.sessionId, chatId);
   if (updates.draftMessage !== undefined) db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(updates.draftMessage, chatId);
+  if (updates.model !== undefined) db.prepare('UPDATE chats SET model = ? WHERE id = ?').run(updates.model, chatId);
 
   return getChat(chatId);
 }

@@ -48,6 +48,13 @@ export interface Chat {
   history: ChatHistoryEntry[];
   sdkSessionId: string | null;
   adapter: ChatAdapter;
+  /**
+   * Adapter-opaque model identifier (e.g. "claude-sonnet-4-6" for claw-chat,
+   * "anthropic/claude-sonnet-4-6" for opencode). NULL means the runtime
+   * falls back to the adapter's `default_model` setting at session start.
+   * Set at chat creation, mutable via the chat-header model picker.
+   */
+  model: string | null;
   ccConversationId: string | null;
   sessionId: string | null;
   draftMessage: string | null;

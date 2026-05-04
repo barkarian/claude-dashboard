@@ -73,12 +73,19 @@ interface SDKSession {
   lastActivityAt: number;
   /** Enable the display_artifact MCP tool (claw-chat adapter). */
   withArtifacts: boolean;
+  /**
+   * Model id passed to query(). NULL means the SDK picks its own default.
+   * Read from chat.model at session start; the chat-header model picker
+   * persists changes which take effect on the next session start.
+   */
+  model: string | null;
   /** ID of the assistant message currently being streamed (used to anchor artifacts). */
   currentAssistantMsgId?: string;
 }
 
 interface InitSessionOptions {
   withArtifacts?: boolean;
+  model?: string | null;
 }
 
 const sessions = new Map<string, SDKSession>();
@@ -239,6 +246,7 @@ function initSession(
     queryStartTime: null,
     lastActivityAt: Date.now(),
     withArtifacts: !!options?.withArtifacts,
+    model: options?.model ?? null,
   };
 
   if (sdkSessionId) {
@@ -445,6 +453,10 @@ NEVER respond with "I can't send files" or "the chat is text-only" — you can. 
 
     if (artifactsMcp) {
       queryOptions.mcpServers = { claw_artifacts: artifactsMcp };
+    }
+
+    if (session.model) {
+      queryOptions.model = session.model;
     }
 
     if (useResume && session.sdkSessionId) {

@@ -33,4 +33,25 @@ router.get('/:id/prerequisites', async (req, res) => {
   }
 });
 
+/** GET /api/adapters/:id/models — list models the adapter can use */
+router.get('/:id/models', async (req, res) => {
+  const adapter = adapterRegistry.get(req.params.id);
+  if (!adapter) {
+    res.status(404).json({ error: `Adapter not found: ${req.params.id}` });
+    return;
+  }
+
+  if (!adapter.listModels) {
+    res.json({ models: [] });
+    return;
+  }
+
+  try {
+    const models = await adapter.listModels();
+    res.json({ models });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to list models' });
+  }
+});
+
 export default router;
