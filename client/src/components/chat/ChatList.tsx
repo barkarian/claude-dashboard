@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -33,17 +33,56 @@ import CategoryManager from './CategoryManager.tsx';
 
 const PAGE_SIZE = 20;
 
-function formatChatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  if (sameYear) {
-    return `${month}/${day} ${time}`;
+type BucketKey = string; // 'today' | 'yesterday' | 'weekday-N' | 'earlier-this-month' | 'month-YYYY-MM'
+
+interface ChatBucket {
+  key: BucketKey;
+  label: string;
+}
+
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+// Compute the time-bucket a chat falls into relative to `now`. Buckets are
+// rendered as section headers in the chat list. Returning a stable `key` lets
+// us group by bucket without re-deriving labels per row.
+function getChatBucket(date: Date, now: Date): ChatBucket {
+  const dayMs = 86_400_000;
+  const diffDays = Math.floor((startOfDay(now) - startOfDay(date)) / dayMs);
+
+  if (diffDays <= 0) return { key: 'today', label: 'Today' };
+  if (diffDays === 1) return { key: 'yesterday', label: 'Yesterday' };
+  // Days 2–6: weekday name. Cap at 6 so we never collide with today's weekday.
+  if (diffDays <= 6) {
+    const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
+    return { key: `weekday-${diffDays}`, label: weekday };
   }
-  return `${month}/${day}/${String(d.getFullYear()).slice(-2)} ${time}`;
+  // Older than a week but still in the current calendar month.
+  const sameMonth = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  if (sameMonth) return { key: 'earlier-this-month', label: 'Earlier this month' };
+  // Month buckets: name only when in same year, "Month YYYY" otherwise.
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const monthName = date.toLocaleDateString(undefined, { month: 'long' });
+  const key = `month-${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
+  return { key, label: sameYear ? monthName : `${monthName} ${date.getFullYear()}` };
+}
+
+// Format the per-row metadata. Inside same-day buckets we drop the date since
+// the section header already provides it; older buckets show a short date.
+// When `bucketKey` is omitted (e.g., search sheet, summary dialog) falls back
+// to a self-contained date+time.
+function formatChatTime(dateStr: string, bucketKey?: BucketKey): string {
+  const d = new Date(dateStr);
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (bucketKey === 'today' || bucketKey === 'yesterday' || bucketKey?.startsWith('weekday-')) {
+    return time;
+  }
+  const now = new Date();
+  const monthDay = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const datePart = d.getFullYear() !== now.getFullYear() ? `${monthDay}, ${d.getFullYear()}` : monthDay;
+  // Outside the grouped list, include the time so the value remains readable on its own.
+  return bucketKey ? datePart : `${datePart} ${time}`;
 }
 
 /** Render a rich status badge from SessionStateContext */
@@ -512,6 +551,25 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
 
   const showSearch = chats.length > 0 || searchQuery;
 
+  // Group loaded chats into time buckets for the section-header layout.
+  // Server already returns chats sorted by lastActivityAt DESC, so iterating
+  // in-order and starting a new group whenever the bucket key changes
+  // preserves order and naturally skips empty buckets.
+  const groupedChats = useMemo(() => {
+    const now = new Date();
+    const groups: { bucket: ChatBucket; chats: Chat[] }[] = [];
+    for (const chat of chats) {
+      const bucket = getChatBucket(new Date(chat.lastActivityAt || chat.createdAt), now);
+      const last = groups[groups.length - 1];
+      if (last && last.bucket.key === bucket.key) {
+        last.chats.push(chat);
+      } else {
+        groups.push({ bucket, chats: [chat] });
+      }
+    }
+    return groups;
+  }, [chats]);
+
   return (
     <PullToRefresh onRefresh={() => loadChats(true)} className="p-4 space-y-3">
       <div className="flex gap-1">
@@ -740,8 +798,12 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         </div>
       ) : (
         <>
-          {chats.map((chat) => {
-            return (
+          {groupedChats.map((group) => (
+            <Fragment key={group.bucket.key}>
+              <div className="px-1 pt-2 pb-0.5 text-[11px] font-medium uppercase tracking-wide text-text-dim">
+                {group.bucket.label}
+              </div>
+              {group.chats.map((chat) => (
             <SwipeableRow
               key={chat.id}
               // Mobile no longer uses swipe — long-press opens the full action popover.
@@ -786,7 +848,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                     })()}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
-                    <span>{formatChatTime(chat.lastActivityAt || chat.createdAt)}</span>
+                    <span>{formatChatTime(chat.lastActivityAt || chat.createdAt, group.bucket.key)}</span>
                     {sessionStates[chat.id]
                       ? <StatusBadge state={sessionStates[chat.id]} />
                       : null}
@@ -864,8 +926,9 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               </div>
             </ChatCard>
             </SwipeableRow>
-            );
-          })}
+              ))}
+            </Fragment>
+          ))}
 
           {/* Infinite scroll sentinel */}
           <div ref={sentinelRef} />
