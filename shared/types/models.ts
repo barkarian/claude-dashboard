@@ -109,6 +109,8 @@ export interface ProjectSummary {
   mode: ProjectMode;
   pinned: boolean;
   pinnedAt: string | null;
+  /** Most recent chat activity, falling back to createdAt if no chats. */
+  lastActivityAt: string;
 }
 
 export interface GitHubRepo {

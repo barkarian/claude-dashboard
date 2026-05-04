@@ -25,6 +25,10 @@ router.get('/', async (req: Request, res: Response) => {
     const offset = parseInt(req.query.offset as string) || 0;
     const search = (req.query.search as string) || '';
     const pinnedOnly = req.query.pinned === '1';
+    // The sidebar fetches Pinned and Recents as separate sections; pass
+    // excludePinned=1 on the Recents request so pinned workspaces don't appear
+    // in both lists.
+    const excludePinned = req.query.excludePinned === '1';
     // home=1 → return only the Home workspace (path = user's home dir).
     // home=ensure → get-or-create. home=if-exists → null when missing.
     // Used by the sidebar (if-exists) and the New Agent flow (ensure).
@@ -47,10 +51,10 @@ router.get('/', async (req: Request, res: Response) => {
       const projects = projectManager.listPinnedProjects();
       res.json({ projects, total: projects.length });
     } else if (search && limit > 0) {
-      const result = projectManager.searchProjectsPaginated(search, limit, offset);
+      const result = projectManager.searchProjectsPaginated(search, limit, offset, { excludePinned });
       res.json({ projects: result.projects, total: result.total });
     } else if (limit > 0) {
-      const result = projectManager.listProjectsPaginated(limit, offset);
+      const result = projectManager.listProjectsPaginated(limit, offset, { excludePinned });
       res.json({ projects: result.projects, total: result.total });
     } else {
       const projects = projectManager.listProjects();
@@ -59,6 +63,22 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error listing projects:', err);
     res.status(500).json({ error: 'Failed to list projects' });
+  }
+});
+
+// Reorder the Pinned section. Body: { orderedIds: string[] } where index 0
+// is the topmost pinned project. Ids not currently pinned are ignored.
+router.post('/reorder-pinned', async (req: Request, res: Response) => {
+  try {
+    const orderedIds = req.body?.orderedIds;
+    if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === 'string')) {
+      return res.status(400).json({ error: 'orderedIds must be a string array' });
+    }
+    projectManager.reorderPinnedProjects(orderedIds);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering pinned projects:', err);
+    res.status(500).json({ error: 'Failed to reorder pinned projects' });
   }
 });
 

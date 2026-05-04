@@ -1,5 +1,24 @@
-import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type TouchEvent as ReactTouchEvent } from 'react';
+import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type TouchEvent as ReactTouchEvent, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragStartEvent,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+  closestCenter,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useDesktopUpdate } from '../../context/DesktopUpdateContext.tsx';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
@@ -190,6 +209,51 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
   );
 }
 
+// Drag wrappers. The whole row is the drag handle — the activation
+// constraints (PointerSensor distance, TouchSensor delay) make sure a click
+// or scroll never triggers a drag. While dragging, opacity drops so the user
+// sees the source row dimming as they move.
+function SortableProjectWrapper({ id, children }: { id: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    touchAction: 'manipulation',
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
+function DraggableProjectWrapper({ id, children }: { id: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
+  const style: React.CSSProperties = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    opacity: isDragging ? 0.4 : 1,
+    touchAction: 'manipulation',
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
+function DroppableZone({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`${className || ''} ${isOver ? 'bg-primary/5 ring-1 ring-primary/30 rounded-md transition-colors' : ''}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const { user, logout, isDesktop, tunnelUrl } = useAuth();
   const { updateAvailable } = useDesktopUpdate();
@@ -208,6 +272,9 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: SidebarChatRow; projectId: string } | null>(null);
   const sidebarLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ideMenu, setIdeMenu] = useState<{ projectPath: string; x: number; y: number } | null>(null);
+  // Project-level long-press / right-click menu (Pin/Unpin + IDE on desktop).
+  const [projectMenu, setProjectMenu] = useState<{ project: ProjectSummary; x: number; y: number } | null>(null);
+  const projectLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -330,14 +397,147 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }, 500);
   }
 
-  // Desktop app: right-click to open in IDE/Finder
+  // Desktop app: right-click on a chat row → open in IDE/Finder. Stops
+  // propagation so the project row's onContextMenu (which opens the project
+  // menu) doesn't also fire on the same right-click.
   function handleChatContextMenu(e: React.MouseEvent, projectPath: string) {
     if (!isDesktop || isMobile) return;
     e.preventDefault();
+    e.stopPropagation();
     setSidebarCtx(null);
     if (hoverShowRef.current) { clearTimeout(hoverShowRef.current); hoverShowRef.current = null; }
     if (hoverHideRef.current) { clearTimeout(hoverHideRef.current); hoverHideRef.current = null; }
     setIdeMenu({ projectPath, x: e.clientX, y: e.clientY });
+  }
+
+  // ── Pin / Unpin / Reorder ──────────────────────────────────────────────
+  // The Pinned section is manually ordered; Recents excludes anything pinned.
+  // We update local state optimistically so the drag and the menu both feel
+  // immediate, then reconcile with the server. On error we re-fetch.
+
+  const sortByActivity = useCallback((a: ProjectSummary, b: ProjectSummary) => {
+    return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+  }, []);
+
+  const pinProject = useCallback(async (project: ProjectSummary, atIndex?: number) => {
+    const updated: ProjectSummary = {
+      ...project,
+      pinned: true,
+      pinnedAt: new Date().toISOString(),
+    };
+    let nextOrder: ProjectSummary[] = [];
+    setPinnedProjects(prev => {
+      const without = prev.filter(p => p.id !== project.id);
+      const idx = atIndex !== undefined ? Math.max(0, Math.min(atIndex, without.length)) : without.length;
+      nextOrder = [...without];
+      nextOrder.splice(idx, 0, updated);
+      return nextOrder;
+    });
+    setProjects(prev => prev.filter(p => p.id !== project.id));
+    try {
+      await api.patch(`/api/projects/${project.id}`, { pinned: true });
+      // Reorder writes synthetic timestamps so the server returns the same
+      // order on next reload.
+      await api.post('/api/projects/reorder-pinned', { orderedIds: nextOrder.map(p => p.id) });
+    } catch {
+      loadInitial();
+    }
+  }, []);
+
+  const unpinProject = useCallback(async (project: ProjectSummary) => {
+    setPinnedProjects(prev => prev.filter(p => p.id !== project.id));
+    setProjects(prev => {
+      if (prev.some(p => p.id === project.id)) return prev;
+      const updated: ProjectSummary = { ...project, pinned: false, pinnedAt: null };
+      return [...prev, updated].sort(sortByActivity);
+    });
+    try {
+      await api.patch(`/api/projects/${project.id}`, { pinned: false });
+    } catch {
+      loadInitial();
+    }
+  }, [sortByActivity]);
+
+  const reorderPinned = useCallback(async (orderedIds: string[]) => {
+    try {
+      await api.post('/api/projects/reorder-pinned', { orderedIds });
+    } catch {
+      loadInitial();
+    }
+  }, []);
+
+  // ── DnD wiring ────────────────────────────────────────────────────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // 250ms hold + 8px tolerance so the page can still scroll on touch:
+    // a tap navigates, a long-hold opens the project menu (500ms), and a
+    // press-then-drag arms a drag.
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  );
+
+  function handleDragStart(_e: DragStartEvent) {
+    // Cancel any pending long-press menu so a drag never coexists with the menu.
+    if (projectLongPressRef.current) {
+      clearTimeout(projectLongPressRef.current);
+      projectLongPressRef.current = null;
+    }
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    const fromPinned = pinnedProjects.find(p => p.id === activeId);
+    const fromRecents = projects.find(p => p.id === activeId);
+    const overInPinned = pinnedProjects.findIndex(p => p.id === overId);
+    const overIsPinnedZone = overId === 'pinned-zone' || overInPinned >= 0;
+    const overIsRecentsZone = overId === 'recents-zone' || projects.some(p => p.id === overId);
+
+    if (fromPinned && overIsPinnedZone) {
+      // Reorder within Pinned. Drop on the pinned-zone droppable means "end".
+      const oldIndex = pinnedProjects.findIndex(p => p.id === activeId);
+      const newIndex = overInPinned >= 0 ? overInPinned : pinnedProjects.length - 1;
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+      const reordered = arrayMove(pinnedProjects, oldIndex, newIndex);
+      setPinnedProjects(reordered);
+      reorderPinned(reordered.map(p => p.id));
+      return;
+    }
+    if (fromPinned && overIsRecentsZone) {
+      // Whole-zone unpin: position in Recents is meaningless (auto-sorted),
+      // we just unpin and let the activity-order reinsertion happen locally.
+      unpinProject(fromPinned);
+      return;
+    }
+    if (fromRecents && overIsPinnedZone) {
+      const insertIndex = overInPinned >= 0 ? overInPinned : pinnedProjects.length;
+      pinProject(fromRecents, insertIndex);
+      return;
+    }
+    // Recents → Recents: no-op (Recents is auto-sorted by activity).
+  }
+
+  // Long-press / right-click on a project row → project menu (Pin/Unpin
+  // + Open in IDE on desktop). Cancelled if the user drags or releases early.
+  function handleProjectTouchStart(e: ReactTouchEvent, project: ProjectSummary) {
+    const touch = e.touches[0];
+    projectLongPressRef.current = setTimeout(() => {
+      haptics.impactLight();
+      setProjectMenu({ project, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  }
+  function handleProjectTouchEndCancel() {
+    if (projectLongPressRef.current) {
+      clearTimeout(projectLongPressRef.current);
+      projectLongPressRef.current = null;
+    }
+  }
+  function handleProjectContextMenu(e: React.MouseEvent, project: ProjectSummary) {
+    if (isMobile) return;
+    e.preventDefault();
+    setProjectMenu({ project, x: e.clientX, y: e.clientY });
   }
 
   // Quick New Chat for a project
@@ -417,11 +617,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }
   }
 
+  // Pinned and Recents are two separate sections. Pinned is manually ordered
+  // (drag-reorder writes pinned_at as the sort key on the server). Recents is
+  // auto-sorted by last chat activity, descending, and excludes anything in
+  // Pinned so workspaces never appear twice.
+  const [pinnedProjects, setPinnedProjects] = useState<ProjectSummary[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [home, setHome] = useState<ProjectSummary | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [displayMode, setDisplayMode] = useState<'pinned' | 'recent'>('recent');
   const offsetRef = useRef(0);
 
   // Search state
@@ -455,23 +659,17 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       .catch(() => setHome(null));
 
     try {
-      // Pins-XOR-Recents: if any workspace is pinned, show only pins.
-      // Otherwise fall back to the paginated recent list.
-      const pinnedData = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?pinned=1`);
-      const pins = pinnedData.projects || [];
-      if (pins.length > 0) {
-        setProjects(pins);
-        offsetRef.current = pins.length;
-        setHasMore(false);
-        setDisplayMode('pinned');
-        return;
-      }
-      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0`);
-      const fetched = data.projects || [];
+      // Pinned + Recents in parallel. Recents excludes pinned so a project
+      // never appears in both lists.
+      const [pinnedData, recentData] = await Promise.all([
+        api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?pinned=1`),
+        api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=0&excludePinned=1`),
+      ]);
+      setPinnedProjects(pinnedData.projects || []);
+      const fetched = recentData.projects || [];
       setProjects(fetched);
       offsetRef.current = fetched.length;
-      setHasMore(fetched.length < (data.total || 0));
-      setDisplayMode('recent');
+      setHasMore(fetched.length < (recentData.total || 0));
     } catch {
       // ignore
     }
@@ -486,7 +684,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     setLoadingMore(true);
     try {
       const currentOffset = offsetRef.current;
-      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${currentOffset}`);
+      const data = await api.get<{ projects: ProjectSummary[]; total: number }>(`/api/projects?limit=${PAGE_SIZE}&offset=${currentOffset}&excludePinned=1`);
       const newProjects = data.projects || [];
       setProjects(prev => [...prev, ...newProjects]);
       const newOffset = currentOffset + newProjects.length;
@@ -501,12 +699,13 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
   const { sentinelRef } = useInfiniteScroll({ loadMore, hasMore, loading: loadingMore });
 
-  // Local filtering of already-loaded projects
+  // Local filtering of already-loaded projects (across both lists)
   const localFiltered = useMemo(() => {
     if (!sidebarSearch.trim()) return null;
     const q = sidebarSearch.toLowerCase();
-    return projects.filter(p => p.name.toLowerCase().includes(q));
-  }, [sidebarSearch, projects]);
+    const all = [...pinnedProjects, ...projects];
+    return all.filter(p => p.name.toLowerCase().includes(q));
+  }, [sidebarSearch, pinnedProjects, projects]);
 
   // Debounced API search for full DB results
   function handleSidebarSearch(value: string) {
@@ -526,49 +725,62 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }, 300);
   }
 
-  // Display: API results when available, else local filter, else full list.
-  // Sort projects with active chats to the top. Home is rendered separately
-  // as its own row above the Recents group (see JSX) and is filtered out
-  // here defensively in case the backend ever returns it.
-  const baseProjects = searchResults ?? localFiltered ?? projects;
-  const displayProjects = useMemo(() => {
-    return [...baseProjects]
-      .filter(p => !home || p.id !== home.id)
-      .sort((a, b) => {
-        const aCount = activeChats.byProject[a.id]?.count || 0;
-        const bCount = activeChats.byProject[b.id]?.count || 0;
-        if (aCount > 0 && bCount === 0) return -1;
-        if (aCount === 0 && bCount > 0) return 1;
-        return 0;
-      });
-  }, [baseProjects, activeChats, home]);
+  // When searching, render a single flat list (no Pinned/Recents distinction).
+  // Otherwise render the two sections separately. Home is filtered out
+  // defensively in case the backend ever returns it in either list.
+  const isSearching = !!sidebarSearch.trim();
+  const searchDisplay = useMemo(() => {
+    const list = searchResults ?? localFiltered ?? [];
+    return list.filter(p => !home || p.id !== home.id);
+  }, [searchResults, localFiltered, home]);
+
+  const visiblePinned = useMemo(
+    () => pinnedProjects.filter(p => !home || p.id !== home.id),
+    [pinnedProjects, home],
+  );
+  const visibleRecents = useMemo(
+    () => projects.filter(p => !home || p.id !== home.id),
+    [projects, home],
+  );
 
   // Home is its own top-level row when it exists AND has at least one chat
   // (categorised, drafted, or with messages — anything counted by chatsCount).
   // Hidden during search since search filters by name/path against recents.
-  const showHomeRow = !sidebarSearch.trim() && home && (home.chatsCount ?? 0) > 0;
-  const showInfiniteScroll = !sidebarSearch.trim() && displayMode === 'recent';
+  const showHomeRow = !isSearching && home && (home.chatsCount ?? 0) > 0;
+  const showInfiniteScroll = !isSearching;
 
-  // Auto-expand projects that have active chats. Also kick off a lazy
-  // chat fetch the first time we surface a project so "Show more" actually
-  // has data to extend with.
+  // Auto-expand the project that matches the current URL on mobile so the
+  // user can see its chats when they re-open the drawer. Desktop additionally
+  // auto-expands any project with live actionable chats so awaiting/working
+  // chats stay visible without manual interaction.
+  const activeProjectIdFromUrl = useMemo(() => {
+    const m = location.pathname.match(/^\/project\/([^/]+)/);
+    return m ? m[1] : null;
+  }, [location.pathname]);
+
   useEffect(() => {
-    const activeProjectIds = Object.keys(activeChats.byProject).filter(
-      id => activeChats.byProject[id].count > 0
-    );
-    if (activeProjectIds.length > 0) {
-      setExpanded(prev => {
-        const next = new Set(prev);
-        for (const id of activeProjectIds) next.add(id);
-        return next;
-      });
-      for (const id of activeProjectIds) {
-        if (!chatsByProject[id]) {
-          fetchProjectChats(id, false, oldestActionableActivity(id));
-        }
+    const idsToExpand: string[] = [];
+    if (activeProjectIdFromUrl) idsToExpand.push(activeProjectIdFromUrl);
+    if (!isMobile) {
+      for (const id of Object.keys(activeChats.byProject)) {
+        if (activeChats.byProject[id].count > 0) idsToExpand.push(id);
       }
     }
-  }, [activeChats, chatsByProject, fetchProjectChats, oldestActionableActivity]);
+    if (idsToExpand.length === 0) return;
+    setExpanded(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of idsToExpand) {
+        if (!next.has(id)) { next.add(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+    for (const id of idsToExpand) {
+      if (!chatsByProject[id]) {
+        fetchProjectChats(id, false, oldestActionableActivity(id));
+      }
+    }
+  }, [isMobile, activeChats, activeProjectIdFromUrl, chatsByProject, fetchProjectChats, oldestActionableActivity]);
 
   // Reusable project row renderer. Used both for ordinary recents and for
   // the standalone Home row that lives above the Recents group.
@@ -583,7 +795,14 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
     return (
       <SidebarMenuItem key={project.id}>
-        <div className="flex items-center w-full" onContextMenu={(e) => handleChatContextMenu(e, project.path)}>
+        <div
+          className="flex items-center w-full"
+          onContextMenu={(e) => handleProjectContextMenu(e, project)}
+          onTouchStart={(e) => handleProjectTouchStart(e, project)}
+          onTouchEnd={handleProjectTouchEndCancel}
+          onTouchMove={handleProjectTouchEndCancel}
+          onTouchCancel={handleProjectTouchEndCancel}
+        >
           {/* Expand/collapse toggle */}
           {hasAnyChats ? (
             <button
@@ -796,84 +1015,127 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </SidebarGroup>
         )}
 
-        {/* Workspaces list — Pinned XOR Recent (never both) */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">{displayMode === 'pinned' ? 'Pinned' : 'Recent'}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <PullToRefresh onRefresh={loadInitial}>
-            {/* Search input */}
-            <div className="px-2 pb-2 relative">
-              <input
-                type="text"
-                value={sidebarSearch}
-                onChange={(e) => handleSidebarSearch(e.target.value)}
-                placeholder="Search workspaces..."
-                className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-2 pr-7 text-sm md:text-xs md:py-1.5 text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-              />
-              {sidebarSearch && (
-                <button
-                  onClick={() => handleSidebarSearch('')}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
-                  aria-label="Clear search"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-            <SidebarMenu>
-              {searchLoading && sidebarSearch.trim() && (
-                <li className="flex justify-center py-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-                </li>
-              )}
-              {displayProjects.map((project) => renderProjectRow(project))}
+        {/* Workspaces — Pinned (manual order) + Recents (last-activity order).
+            Wrapped in a single DndContext so drags can cross sections:
+              · within Pinned: reorder
+              · Pinned → Recents: unpin (whole-zone drop, position ignored)
+              · Recents → Pinned: pin at the dropped position
+            Search renders a flat list with no sections. */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => {}}
+        >
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <PullToRefresh onRefresh={loadInitial}>
+              {/* Search input */}
+              <div className="px-2 pb-2 relative">
+                <input
+                  type="text"
+                  value={sidebarSearch}
+                  onChange={(e) => handleSidebarSearch(e.target.value)}
+                  placeholder="Search workspaces..."
+                  className="w-full bg-bg-surface border border-border rounded-md px-2.5 py-2 pr-7 text-sm md:text-xs md:py-1.5 text-text placeholder:text-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                />
+                {sidebarSearch && (
+                  <button
+                    onClick={() => handleSidebarSearch('')}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-full text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+                    aria-label="Clear search"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
 
-              {sidebarSearch.trim() && !searchLoading && displayProjects.length === 0 && (
-                <li className="px-3 py-2 text-xs text-text-dim">No workspaces found</li>
+              {/* Search-mode flat list (no sections, no DnD) */}
+              {isSearching && (
+                <SidebarMenu>
+                  {searchLoading && (
+                    <li className="flex justify-center py-2">
+                      <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                    </li>
+                  )}
+                  {searchDisplay.map((project) => renderProjectRow(project))}
+                  {!searchLoading && searchDisplay.length === 0 && (
+                    <li className="px-3 py-2 text-xs text-text-dim">No workspaces found</li>
+                  )}
+                </SidebarMenu>
               )}
 
-              {!sidebarSearch.trim() && displayProjects.length === 0 && (
-                <li className="px-3 py-3 text-xs text-text-muted leading-relaxed">
-                  No workspaces yet. Create one below to start chatting with Claude on a folder.
-                </li>
+              {/* Pinned section — rendered only when there's at least one
+                  pinned project. The first pin happens via long-press /
+                  right-click "Pin to top"; once any item is pinned, drag
+                  from Recents into this zone (or onto a pinned item) pins
+                  more projects at the dropped position. */}
+              {!isSearching && visiblePinned.length > 0 && (
+                <>
+                  <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Pinned</SidebarGroupLabel>
+                  <SortableContext items={visiblePinned.map(p => p.id)} strategy={verticalListSortingStrategy}>
+                    <DroppableZone id="pinned-zone" className="px-1">
+                      <SidebarMenu>
+                        {visiblePinned.map((project) => (
+                          <SortableProjectWrapper key={project.id} id={project.id}>
+                            {renderProjectRow(project)}
+                          </SortableProjectWrapper>
+                        ))}
+                      </SidebarMenu>
+                    </DroppableZone>
+                  </SortableContext>
+                </>
               )}
 
-              {/* Infinite scroll sentinel — only when not searching and in recent mode */}
-              {showInfiniteScroll && <li><div ref={sentinelRef} /></li>}
-              {showInfiniteScroll && loadingMore && (
-                <li className="flex justify-center py-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-                </li>
+              {/* Recents section — auto-sorted by last activity. The whole
+                  zone is a droppable so a Pinned item dropped anywhere in it
+                  unpins (drop position is ignored — Recents is auto-sorted). */}
+              {!isSearching && (
+                <>
+                  {visiblePinned.length > 0 && (
+                    <SidebarGroupLabel className="uppercase tracking-wider text-text-dim mt-2">Recent</SidebarGroupLabel>
+                  )}
+                  <DroppableZone id="recents-zone" className="px-1 min-h-[40px]">
+                    <SidebarMenu>
+                      {visibleRecents.map((project) => (
+                        <DraggableProjectWrapper key={project.id} id={project.id}>
+                          {renderProjectRow(project)}
+                        </DraggableProjectWrapper>
+                      ))}
+                      {visiblePinned.length === 0 && visibleRecents.length === 0 && (
+                        <li className="px-3 py-3 text-xs text-text-muted leading-relaxed">
+                          No workspaces yet. Create one below to start chatting with Claude on a folder.
+                        </li>
+                      )}
+                      {showInfiniteScroll && <li><div ref={sentinelRef} /></li>}
+                      {showInfiniteScroll && loadingMore && (
+                        <li className="flex justify-center py-2">
+                          <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                        </li>
+                      )}
+                    </SidebarMenu>
+                  </DroppableZone>
+                </>
               )}
 
-              {/* "Browse all" — escape hatch when only pins are shown in the sidebar */}
-              {displayMode === 'pinned' && !sidebarSearch.trim() && (
+              {/* New Workspace — always at the bottom of the workspaces group. */}
+              <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild className="text-text-muted text-sm h-9 md:text-xs md:h-8">
-                    <NavLink to="/" end className="flex items-center gap-3">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-                      </svg>
-                      <span>Browse all workspaces</span>
-                    </NavLink>
+                  <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted text-lg h-12 md:text-sm md:h-8">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    <span>New Workspace</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              )}
-
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => { setOpenMobile(false); openDrawer(); }} className="text-text-muted text-lg h-12 md:text-sm md:h-8">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  <span>New Workspace</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-            </PullToRefresh>
-          </SidebarGroupContent>
-        </SidebarGroup>
+              </SidebarMenu>
+              </PullToRefresh>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </DndContext>
 
       </SidebarContent>
 
@@ -1075,6 +1337,51 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Project long-press / right-click menu — Pin/Unpin (everywhere) +
+          Open in IDE/Finder (desktop only). */}
+      <ContextMenu
+        open={!!projectMenu}
+        onClose={() => setProjectMenu(null)}
+        position={{ x: projectMenu?.x || 0, y: projectMenu?.y || 0 }}
+        header={projectMenu ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text truncate">{projectMenu.project.name}</span>
+          </div>
+        ) : undefined}
+        items={projectMenu ? [
+          // Home is always shown at the very top above Pinned, so pinning it
+          // is a no-op; suppress the Pin/Unpin item for Home.
+          ...(home && projectMenu.project.id === home.id ? [] : [
+            projectMenu.project.pinned ? {
+              label: 'Unpin',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M9 9v6m6-6v6M5 7h14l-1 12H6L5 7zm2-4h10" /></svg>,
+              onAction: () => { unpinProject(projectMenu.project); },
+            } : {
+              label: 'Pin to top',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4m0 0H8m8 0l-4 4m-3 9l-3 3m0 0v-6h6m-3 3l9-9" /></svg>,
+              onAction: () => { pinProject(projectMenu.project, 0); },
+            },
+          ]),
+          ...(isDesktop ? [
+            {
+              label: 'Open Folder',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: projectMenu.project.path, editor: 'finder' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in VS Code',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: projectMenu.project.path, editor: 'vscode' }).catch(() => {}); },
+            },
+            {
+              label: 'Open in Cursor',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>,
+              onAction: () => { api.post('/api/open-path', { path: projectMenu.project.path, editor: 'cursor' }).catch(() => {}); },
+            },
+          ] : []),
+        ] : []}
+      />
 
       {/* Desktop right-click: open in IDE / Finder */}
       {isDesktop && (

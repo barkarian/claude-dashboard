@@ -12,7 +12,11 @@ import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEnt
 const PROJECT_SUMMARY_COLUMNS = `
   p.id, p.name, p.path, p.repo, p.created_at, p.mode, p.pinned, p.pinned_at,
   (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
-  (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount
+  (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount,
+  COALESCE(
+    (SELECT MAX(COALESCE(last_activity_at, created_at)) FROM chats WHERE project_id = p.id),
+    p.created_at
+  ) AS last_activity_at
 `;
 
 function mapRowToSummary(r: any): ProjectSummary {
@@ -27,6 +31,7 @@ function mapRowToSummary(r: any): ProjectSummary {
     mode: (r.mode as ProjectMode) || 'simple',
     pinned: !!r.pinned,
     pinnedAt: r.pinned_at || null,
+    lastActivityAt: r.last_activity_at || r.created_at,
   };
 }
 
@@ -34,45 +39,69 @@ function listProjects(): ProjectSummary[] {
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    ORDER BY p.created_at DESC
+    ORDER BY last_activity_at DESC, p.created_at DESC
   `).all() as any[];
   return rows.map(mapRowToSummary);
 }
 
-function listProjectsPaginated(limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
+function listProjectsPaginated(
+  limit: number = 20,
+  offset: number = 0,
+  opts: { excludePinned?: boolean } = {},
+): { projects: ProjectSummary[]; total: number } {
   // Home is rendered separately (always pinned to the very top) so we exclude
-  // it from the recents list to avoid showing it twice.
+  // it from the recents list to avoid showing it twice. When the client is
+  // showing a separate Pinned section, it passes excludePinned=1 so the
+  // Recents list doesn't double up.
   const homePath = os.homedir();
+  const filters: string[] = ['p.path != ?'];
+  const params: any[] = [homePath];
+  if (opts.excludePinned) {
+    filters.push('p.pinned = 0');
+  }
+  const where = filters.join(' AND ');
+
   const { total } = db.prepare(
-    'SELECT COUNT(*) as total FROM projects WHERE path != ?'
-  ).get(homePath) as any;
+    `SELECT COUNT(*) as total FROM projects p WHERE ${where}`
+  ).get(...params) as any;
 
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    WHERE p.path != ?
-    ORDER BY p.created_at DESC
+    WHERE ${where}
+    ORDER BY last_activity_at DESC, p.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(homePath, limit, offset) as any[];
+  `).all(...params, limit, offset) as any[];
 
   return { projects: rows.map(mapRowToSummary), total };
 }
 
-function searchProjectsPaginated(search: string, limit: number = 20, offset: number = 0): { projects: ProjectSummary[]; total: number } {
+function searchProjectsPaginated(
+  search: string,
+  limit: number = 20,
+  offset: number = 0,
+  opts: { excludePinned?: boolean } = {},
+): { projects: ProjectSummary[]; total: number } {
   const pattern = `%${search}%`;
   const homePath = os.homedir();
+  const filters: string[] = ['(p.name LIKE ? OR p.path LIKE ?)', 'p.path != ?'];
+  const params: any[] = [pattern, pattern, homePath];
+  if (opts.excludePinned) {
+    filters.push('p.pinned = 0');
+  }
+  const where = filters.join(' AND ');
 
   const { total } = db.prepare(
-    'SELECT COUNT(*) as total FROM projects WHERE (name LIKE ? OR path LIKE ?) AND path != ?'
-  ).get(pattern, pattern, homePath) as any;
+    `SELECT COUNT(*) as total FROM projects p WHERE ${where}`
+  ).get(...params) as any;
 
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    WHERE (p.name LIKE ? OR p.path LIKE ?) AND p.path != ?
-    ORDER BY p.created_at DESC
+    WHERE ${where}
+    ORDER BY last_activity_at DESC, p.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(pattern, pattern, homePath, limit, offset) as any[];
+  `).all(...params, limit, offset) as any[];
 
   return { projects: rows.map(mapRowToSummary), total };
 }
@@ -137,13 +166,33 @@ function getProjectSummary(projectId: string): ProjectSummary | null {
 }
 
 function listPinnedProjects(): ProjectSummary[] {
+  // Home is rendered separately as its own row at the top of the sidebar, so
+  // it never belongs in the Pinned list even if pinned=1 was somehow set.
+  const homePath = os.homedir();
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    WHERE p.pinned = 1
+    WHERE p.pinned = 1 AND p.path != ?
     ORDER BY p.pinned_at DESC, p.created_at DESC
-  `).all() as any[];
+  `).all(homePath) as any[];
   return rows.map(mapRowToSummary);
+}
+
+// Manual order for the Pinned section. We reuse pinned_at as the sort key:
+// each ordered id gets a synthetic ISO timestamp where index 0 (top) is the
+// most recent. ORDER BY pinned_at DESC then renders them in the requested
+// order. Ids that aren't currently pinned are ignored.
+function reorderPinnedProjects(orderedIds: string[]): void {
+  const update = db.prepare("UPDATE projects SET pinned_at = ? WHERE id = ? AND pinned = 1");
+  const tx = db.transaction((ids: string[]) => {
+    const baseMs = Date.now();
+    for (let i = 0; i < ids.length; i++) {
+      // Spaced 1s apart so the order is unambiguous and stable across timezones.
+      const ts = new Date(baseMs - i * 1000).toISOString();
+      update.run(ts, ids[i]);
+    }
+  });
+  tx(orderedIds);
 }
 
 function parseAdapterOrder(raw: unknown): ChatAdapter[] | null {
@@ -871,6 +920,7 @@ export default {
   listProjectsPaginated,
   searchProjectsPaginated,
   listPinnedProjects,
+  reorderPinnedProjects,
   getOrCreateHomeProject,
   getHomeProjectId,
   getProjectSummary,
