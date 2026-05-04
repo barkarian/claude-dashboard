@@ -213,33 +213,63 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
 // constraints (PointerSensor distance, TouchSensor delay) make sure a click
 // or scroll never triggers a drag. While dragging, opacity drops so the user
 // sees the source row dimming as they move.
-function SortableProjectWrapper({ id, children }: { id: string; children: ReactNode }) {
+// Suppress Capacitor / iOS WebKit's native long-press callout (the "Open in
+// Browser / Copy Link" sheet) over draggable rows. Without this, holding to
+// drag opens the WebView's link menu instead of arming our drag.
+const NO_CALLOUT_STYLE: React.CSSProperties = {
+  WebkitTouchCallout: 'none',
+  WebkitUserSelect: 'none',
+  userSelect: 'none',
+  touchAction: 'manipulation',
+};
+
+// Drag attributes/listeners/refs are attached only to the project's inner
+// row div — never to the SidebarMenuItem itself — so the expanded chat list
+// underneath stays put when the row is dragged.
+type RowDragProps = {
+  setNodeRef: (el: HTMLElement | null) => void;
+  attributes: Record<string, unknown>;
+  listeners: Record<string, (e: unknown) => void> | undefined;
+  style: React.CSSProperties;
+};
+
+function mergeHandlers<E>(...fns: Array<((e: E) => void) | undefined>) {
+  return (e: E) => { for (const f of fns) f?.(e); };
+}
+
+function SortableProjectItem({ id, render }: {
+  id: string;
+  render: (drag: RowDragProps) => ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
-    touchAction: 'manipulation',
   };
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      {children}
-    </div>
-  );
+  return <>{render({
+    setNodeRef,
+    attributes: attributes as unknown as Record<string, unknown>,
+    listeners: listeners as unknown as Record<string, (e: unknown) => void> | undefined,
+    style,
+  })}</>;
 }
 
-function DraggableProjectWrapper({ id, children }: { id: string; children: ReactNode }) {
+function DraggableProjectItem({ id, render }: {
+  id: string;
+  render: (drag: RowDragProps) => ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
   const style: React.CSSProperties = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     opacity: isDragging ? 0.4 : 1,
-    touchAction: 'manipulation',
   };
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      {children}
-    </div>
-  );
+  return <>{render({
+    setNodeRef,
+    attributes: attributes as unknown as Record<string, unknown>,
+    listeners: listeners as unknown as Record<string, (e: unknown) => void> | undefined,
+    style,
+  })}</>;
 }
 
 function DroppableZone({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
@@ -275,12 +305,21 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   // Project-level long-press / right-click menu (Pin/Unpin + IDE on desktop).
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectSummary; x: number; y: number } | null>(null);
   const projectLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True only while a Recents item is mid-drag — used to reveal the Pinned
+  // drop zone when no pinned items exist yet, so first-time pinning via drag
+  // is discoverable.
+  const [isDraggingFromRecents, setIsDraggingFromRecents] = useState(false);
   const hoverShowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Close popover when mobile sidebar closes
+  // Close popovers/menus when mobile sidebar closes — without this, a long-
+  // press menu opened in one drawer-open session can persist into the next.
   useEffect(() => {
-    if (isMobile && !openMobile) setSidebarCtx(null);
+    if (isMobile && !openMobile) {
+      setSidebarCtx(null);
+      setProjectMenu(null);
+      setIdeMenu(null);
+    }
   }, [openMobile, isMobile]);
 
   // Per-project categories are fetched lazily (only when the popover opens for
@@ -475,15 +514,18 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
 
-  function handleDragStart(_e: DragStartEvent) {
+  function handleDragStart(e: DragStartEvent) {
     // Cancel any pending long-press menu so a drag never coexists with the menu.
     if (projectLongPressRef.current) {
       clearTimeout(projectLongPressRef.current);
       projectLongPressRef.current = null;
     }
+    const id = String(e.active.id);
+    setIsDraggingFromRecents(projects.some(p => p.id === id));
   }
 
   function handleDragEnd(e: DragEndEvent) {
+    setIsDraggingFromRecents(false);
     const { active, over } = e;
     if (!over) return;
     const activeId = String(active.id);
@@ -638,12 +680,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     loadInitial();
   }, []);
 
-  // Auto-close mobile drawer on navigation + clear search + close popover
+  // Auto-close mobile drawer on navigation + clear search + close popovers
   useEffect(() => {
     setOpenMobile(false);
     setSidebarSearch('');
     setSearchResults(null);
     setAccountPopoverOpen(false);
+    setProjectMenu(null);
+    setIdeMenu(null);
+    setSidebarCtx(null);
   }, [location.pathname]);
 
   // Close popover when mobile sidebar is dismissed
@@ -743,10 +788,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     [projects, home],
   );
 
-  // Home is its own top-level row when it exists AND has at least one chat
-  // (categorised, drafted, or with messages — anything counted by chatsCount).
-  // Hidden during search since search filters by name/path against recents.
-  const showHomeRow = !isSearching && home && (home.chatsCount ?? 0) > 0;
+  // Home is rendered as the always-top, always-pinned row inside the Pinned
+  // section whenever it exists. Hidden during search.
   const showInfiniteScroll = !isSearching;
 
   // Auto-expand the project that matches the current URL on mobile so the
@@ -782,9 +825,11 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }
   }, [isMobile, activeChats, activeProjectIdFromUrl, chatsByProject, fetchProjectChats, oldestActionableActivity]);
 
-  // Reusable project row renderer. Used both for ordinary recents and for
-  // the standalone Home row that lives above the Recents group.
-  const renderProjectRow = (project: ProjectSummary) => {
+  // Reusable project row renderer. Used for Home, Pinned, Recents, and search
+  // results. When `drag` is provided, the DnD ref/listeners are attached to
+  // the inner row div only — never to the wrapping SidebarMenuItem — so the
+  // expanded chat list underneath stays put while the row is being dragged.
+  const renderProjectRow = (project: ProjectSummary, drag?: RowDragProps) => {
     const projectActive = activeChats.byProject[project.id];
     const count = projectActive?.count || 0;
     const isExpanded = expanded.has(project.id);
@@ -796,12 +841,28 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     return (
       <SidebarMenuItem key={project.id}>
         <div
+          ref={drag?.setNodeRef}
           className="flex items-center w-full"
+          style={{ ...NO_CALLOUT_STYLE, ...(drag?.style ?? {}) }}
+          {...(drag?.attributes ?? {})}
+          onPointerDown={drag?.listeners?.onPointerDown as ((e: React.PointerEvent) => void) | undefined}
           onContextMenu={(e) => handleProjectContextMenu(e, project)}
-          onTouchStart={(e) => handleProjectTouchStart(e, project)}
-          onTouchEnd={handleProjectTouchEndCancel}
-          onTouchMove={handleProjectTouchEndCancel}
-          onTouchCancel={handleProjectTouchEndCancel}
+          onTouchStart={mergeHandlers<React.TouchEvent>(
+            drag?.listeners?.onTouchStart as ((e: React.TouchEvent) => void) | undefined,
+            (e) => handleProjectTouchStart(e, project),
+          )}
+          onTouchEnd={mergeHandlers<React.TouchEvent>(
+            drag?.listeners?.onTouchEnd as ((e: React.TouchEvent) => void) | undefined,
+            handleProjectTouchEndCancel,
+          )}
+          onTouchMove={mergeHandlers<React.TouchEvent>(
+            drag?.listeners?.onTouchMove as ((e: React.TouchEvent) => void) | undefined,
+            handleProjectTouchEndCancel,
+          )}
+          onTouchCancel={mergeHandlers<React.TouchEvent>(
+            drag?.listeners?.onTouchCancel as ((e: React.TouchEvent) => void) | undefined,
+            handleProjectTouchEndCancel,
+          )}
         >
           {/* Expand/collapse toggle */}
           {hasAnyChats ? (
@@ -1003,19 +1064,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Home — pinned above Recents whenever it has chats. Acts as the
-            implicit "anywhere" workspace and is the New Agent default. */}
-        {showHomeRow && home && (
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {renderProjectRow(home)}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {/* Workspaces — Pinned (manual order) + Recents (last-activity order).
+        {/* Workspaces — Pinned (manual order, with Home always at top if it
+            exists) + Recents (last-activity order).
             Wrapped in a single DndContext so drags can cross sections:
               · within Pinned: reorder
               · Pinned → Recents: unpin (whole-zone drop, position ignored)
@@ -1026,7 +1076,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
-          onDragCancel={() => {}}
+          onDragCancel={() => setIsDraggingFromRecents(false)}
         >
           <SidebarGroup>
             <SidebarGroupContent>
@@ -1068,22 +1118,32 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 </SidebarMenu>
               )}
 
-              {/* Pinned section — rendered only when there's at least one
-                  pinned project. The first pin happens via long-press /
-                  right-click "Pin to top"; once any item is pinned, drag
-                  from Recents into this zone (or onto a pinned item) pins
-                  more projects at the dropped position. */}
-              {!isSearching && visiblePinned.length > 0 && (
+              {/* Pinned section — rendered when:
+                    · Home exists (Home is always the top row of Pinned), OR
+                    · at least one workspace is pinned, OR
+                    · a Recents item is being dragged (drop-target is revealed
+                      so first-time pinning via drag is discoverable).
+                  Home is rendered as a static row at the top — it can't be
+                  dragged or unpinned. Pinned items below are sortable. */}
+              {!isSearching && (home || visiblePinned.length > 0 || isDraggingFromRecents) && (
                 <>
                   <SidebarGroupLabel className="uppercase tracking-wider text-text-dim">Pinned</SidebarGroupLabel>
                   <SortableContext items={visiblePinned.map(p => p.id)} strategy={verticalListSortingStrategy}>
                     <DroppableZone id="pinned-zone" className="px-1">
                       <SidebarMenu>
+                        {home && renderProjectRow(home)}
                         {visiblePinned.map((project) => (
-                          <SortableProjectWrapper key={project.id} id={project.id}>
-                            {renderProjectRow(project)}
-                          </SortableProjectWrapper>
+                          <SortableProjectItem
+                            key={project.id}
+                            id={project.id}
+                            render={(drag) => renderProjectRow(project, drag)}
+                          />
                         ))}
+                        {!home && visiblePinned.length === 0 && isDraggingFromRecents && (
+                          <li className="px-3 py-3 text-xs text-text-dim italic text-center border border-dashed border-border rounded-md">
+                            Drop here to pin
+                          </li>
+                        )}
                       </SidebarMenu>
                     </DroppableZone>
                   </SortableContext>
@@ -1095,15 +1155,17 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   unpins (drop position is ignored — Recents is auto-sorted). */}
               {!isSearching && (
                 <>
-                  {visiblePinned.length > 0 && (
+                  {(home || visiblePinned.length > 0) && (
                     <SidebarGroupLabel className="uppercase tracking-wider text-text-dim mt-2">Recent</SidebarGroupLabel>
                   )}
                   <DroppableZone id="recents-zone" className="px-1 min-h-[40px]">
                     <SidebarMenu>
                       {visibleRecents.map((project) => (
-                        <DraggableProjectWrapper key={project.id} id={project.id}>
-                          {renderProjectRow(project)}
-                        </DraggableProjectWrapper>
+                        <DraggableProjectItem
+                          key={project.id}
+                          id={project.id}
+                          render={(drag) => renderProjectRow(project, drag)}
+                        />
                       ))}
                       {visiblePinned.length === 0 && visibleRecents.length === 0 && (
                         <li className="px-3 py-3 text-xs text-text-muted leading-relaxed">
@@ -1350,8 +1412,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </div>
         ) : undefined}
         items={projectMenu ? [
-          // Home is always shown at the very top above Pinned, so pinning it
-          // is a no-op; suppress the Pin/Unpin item for Home.
+          // Home is always rendered at the top of the Pinned section and can
+          // never be unpinned, so suppress Pin/Unpin entirely for Home.
           ...(home && projectMenu.project.id === home.id ? [] : [
             projectMenu.project.pinned ? {
               label: 'Unpin',
