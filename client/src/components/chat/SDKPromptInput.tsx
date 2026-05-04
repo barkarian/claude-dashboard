@@ -7,7 +7,6 @@ import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { haptics } from '../../utils/haptics.ts';
-import { isCapacitorNative } from '../../utils/platform.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 
 interface SDKPromptInputProps {
@@ -28,12 +27,10 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
   const [cursorPosition, setCursorPosition] = useState(0);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingAutoSendRef = useRef<string | null>(null);
 
   const { getRecordingContent } = useTerminalRecording();
-  const native = isCapacitorNative();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -165,11 +162,8 @@ export default function SDKPromptInput({ projectId, status, onSend, onInterrupt,
           value={value}
           onChange={(e) => { setValue(e.target.value); onDraftChange?.(e.target.value); }}
           onKeyDown={handleKeyDown}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           autoFocus={autoFocus}
-          style={{ minHeight: native && focused && !value ? 140 : 42 }}
-          className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1"
+          className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[42px] max-h-[200px] py-2.5 flex-1"
           placeholder={
             disabled
               ? 'Session not active'

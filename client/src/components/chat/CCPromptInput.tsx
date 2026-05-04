@@ -47,7 +47,6 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
   const [showHistory, setShowHistory] = useState(false);
   const { getRecordingContent } = useTerminalRecording();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -348,18 +347,9 @@ export default function CCPromptInput({ projectId, status, terminalUIMode, unifi
               setValue(e.target.value);
               onDraftChange?.(e.target.value);
             }}
-            onFocus={() => {
-              setFocused(true);
-              if (textareaRef.current) {
-                textareaRef.current.style.height = 'auto';
-                textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
-              }
-            }}
-            onBlur={() => setFocused(false)}
             onKeyDown={handleKeyDown}
             autoFocus={autoFocus}
-            style={{ minHeight: native && focused && !value ? 140 : 44 }}
-            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-[min-height,border-color] duration-200 ease-out resize-none max-h-[200px] py-2.5 flex-1 text-base"
+            className="w-full bg-bg border border-border rounded-lg px-3 text-text placeholder-text-dim focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-none min-h-[44px] max-h-[200px] py-2.5 flex-1 text-base"
             placeholder={
               disabled
                 ? 'Session not active'
