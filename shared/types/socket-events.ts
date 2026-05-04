@@ -147,8 +147,8 @@ import type { UnifiedStatus } from './session.ts';
 export interface ActiveChat {
   chatId: string;
   label: string;
-  /** UnifiedStatus for live sessions, 'unread' for unseen replies, 'seen' for read-but-not-dismissed, 'new' for just-created chats */
-  status: UnifiedStatus | 'unread' | 'seen' | 'new';
+  /** UnifiedStatus for live sessions, or 'unread' for unseen replies. */
+  status: UnifiedStatus | 'unread';
   projectId: string;
   /** Category emoji + id for inline marker rendering. Null = uncategorised. */
   categoryId: string | null;
@@ -166,6 +166,6 @@ export interface ActiveProjectChats {
 export interface GlobalActiveChats {
   byProject: Record<string, ActiveProjectChats>;
   totalCount: number;
-  /** Count of unread + awaiting chats only (excludes working/seen/new) — used for dock/app badge */
+  /** Count of unread + awaiting chats only (excludes plain working) — used for dock/app badge */
   badgeCount: number;
 }

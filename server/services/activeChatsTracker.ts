@@ -1,7 +1,8 @@
 /**
- * ActiveChatsTracker — aggregates "interesting" chats across all projects.
+ * ActiveChatsTracker — aggregates "actionable" chats across all projects.
  *
- * Interesting = working | awaiting-* | unread | seen (read but not dismissed).
+ * Actionable = working | awaiting-* | unread.
+ * Once a chat is read (and not currently working/awaiting) it falls out.
  * Broadcasts `global:active-chats` via Socket.IO whenever the set changes.
  */
 
@@ -11,7 +12,7 @@ import projectManager from './projectManager.ts';
 import type { UnifiedStatus, SessionStateContext } from '../../shared/types/session.ts';
 import type { ActiveChat, GlobalActiveChats, ActiveProjectChats } from '../../shared/types/socket-events.ts';
 
-// Statuses that count as "interesting" for the sidebar / badge
+// Statuses that count as live-actionable for the sidebar / badge
 const INTERESTING_STATUSES: Set<string> = new Set([
   'working',
   'question-awaiting',
@@ -25,14 +26,10 @@ interface TrackedChat {
   label: string;
   projectId: string;
   projectName: string;
-  /** Live session status, or null if only tracked because of unread/seen */
+  /** Live session status, or null if only tracked because of unread */
   sessionStatus: UnifiedStatus | null;
   /** True when the chat is unread (idle response not yet seen) */
   unread: boolean;
-  /** True when the chat was read but not yet dismissed by the user */
-  seen: boolean;
-  /** True when the chat was just created and has no messages yet */
-  fresh: boolean;
   categoryId: string | null;
   categoryEmoji: string | null;
   lastActivityAt: string;
@@ -59,15 +56,11 @@ function onSessionStateChange(
   state: SessionStateContext,
 ): void {
   const isInteresting = INTERESTING_STATUSES.has(state.status);
-
   const existing = tracked.get(chatId);
 
   if (isInteresting) {
-    // Upsert
     if (existing) {
       existing.sessionStatus = state.status;
-      existing.fresh = false; // session started, no longer fresh
-      // Refresh label + activity timestamp in case either changed.
       const chat = projectManager.getChat(chatId);
       if (chat) {
         existing.label = chat.label;
@@ -83,8 +76,6 @@ function onSessionStateChange(
         projectName: info.projectName,
         sessionStatus: state.status,
         unread: false,
-        seen: false,
-        fresh: false,
         categoryId: info.categoryId,
         categoryEmoji: info.categoryEmoji,
         lastActivityAt: info.lastActivityAt,
@@ -92,12 +83,8 @@ function onSessionStateChange(
     }
     scheduleBroadcast();
   } else if (existing) {
-    // Status is no longer interesting (e.g. idle, exited)
     existing.sessionStatus = null;
-    if (!existing.unread && !existing.seen && !existing.fresh) {
-      // Nothing interesting left — remove
-      tracked.delete(chatId);
-    }
+    if (!existing.unread) tracked.delete(chatId);
     scheduleBroadcast();
   }
 }
@@ -107,8 +94,6 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
   const existing = tracked.get(chatId);
   if (existing) {
     existing.unread = true;
-    existing.seen = false; // back to unread overrides seen
-    existing.fresh = false;
     existing.label = label;
   } else {
     const info = getChatInfo(chatId, projectId);
@@ -119,8 +104,6 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
       projectName: info?.projectName || projectId,
       sessionStatus: null,
       unread: true,
-      seen: false,
-      fresh: false,
       categoryId: info?.categoryId ?? null,
       categoryEmoji: info?.categoryEmoji ?? null,
       lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
@@ -129,36 +112,24 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
   scheduleBroadcast();
 }
 
-/** Called when a new chat is created (no messages yet). */
-function onChatCreated(chatId: string, projectId: string, label: string): void {
-  if (tracked.has(chatId)) return; // already tracked
-  const info = getChatInfo(chatId, projectId);
-  tracked.set(chatId, {
-    chatId,
-    label: label || info?.label || 'New Chat',
-    projectId,
-    projectName: info?.projectName || projectId,
-    sessionStatus: null,
-    unread: false,
-    seen: false,
-    fresh: true,
-    categoryId: info?.categoryId ?? null,
-    categoryEmoji: info?.categoryEmoji ?? null,
-    lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
-  });
+/** Called when a chat is marked as read by the user. Removes it from the
+ * tracker unless it still has a live working/awaiting session. */
+function onChatRead(chatId: string): void {
+  const existing = tracked.get(chatId);
+  if (!existing) return;
+  existing.unread = false;
+  if (!existing.sessionStatus || !INTERESTING_STATUSES.has(existing.sessionStatus)) {
+    tracked.delete(chatId);
+  }
   scheduleBroadcast();
 }
 
 /** Refresh category + activity for a tracked chat after an API mutation.
  * Categories are purely visual markers — they do NOT keep a chat in the
- * sidebar tracker on their own. Only live session state, unread, or seen
- * does that. */
+ * sidebar tracker on their own. */
 function refreshChatMeta(chatId: string, projectId: string): void {
   const existing = tracked.get(chatId);
   if (!existing) {
-    // Not tracked, and category alone doesn't pull a chat in. Rebroadcast
-    // anyway so any open client can refresh its full chat list (where the
-    // emoji marker actually renders).
     scheduleBroadcast();
     return;
   }
@@ -170,37 +141,19 @@ function refreshChatMeta(chatId: string, projectId: string): void {
   scheduleBroadcast();
 }
 
-/** Called when a chat is marked as read by the user — transitions to 'seen'. */
-function onChatRead(chatId: string): void {
-  const existing = tracked.get(chatId);
-  if (!existing) return;
-  if (!existing.unread) return; // already read, nothing to do
-  existing.unread = false;
-  existing.seen = true; // keep in tracker as 'seen'
-  scheduleBroadcast();
-}
-
-/** Called when the user explicitly dismisses a chat from the tracker. */
-function onChatDismiss(chatId: string): void {
-  const existing = tracked.get(chatId);
-  if (!existing) return;
-  existing.seen = false;
-  existing.unread = false;
-  existing.fresh = false;
-  if (!existing.sessionStatus || !INTERESTING_STATUSES.has(existing.sessionStatus)) {
-    tracked.delete(chatId);
-  }
-  scheduleBroadcast();
-}
-
 /** Called when a session exits (process ended). */
 function onSessionExit(chatId: string): void {
   const existing = tracked.get(chatId);
   if (!existing) return;
   existing.sessionStatus = null;
-  if (!existing.unread && !existing.seen && !existing.fresh) {
-    tracked.delete(chatId);
-  }
+  if (!existing.unread) tracked.delete(chatId);
+  scheduleBroadcast();
+}
+
+/** Called when a chat is removed entirely (deleted). Unconditional drop. */
+function onChatRemoved(chatId: string): void {
+  if (!tracked.has(chatId)) return;
+  tracked.delete(chatId);
   scheduleBroadcast();
 }
 
@@ -236,48 +189,35 @@ function getChatInfo(
   };
 }
 
-/** Load unread + pinned (seen) chats from DB on startup. Categories alone
- * don't pull a chat into the tracker — they're rendered in the full chat
- * list page; the sidebar only surfaces actionable state. */
+/** Load unread chats from DB on startup. */
 function loadFromDB(): void {
   const rows = db.prepare(`
-    SELECT c.id, c.label, c.project_id, c.unread, c.pinned, c.category_id,
+    SELECT c.id, c.label, c.project_id, c.category_id,
            cat.emoji AS category_emoji,
            c.last_activity_at, c.created_at, p.name as project_name
     FROM chats c
     JOIN projects p ON c.project_id = p.id
     LEFT JOIN chat_categories cat ON c.category_id = cat.id
-    WHERE c.unread = 1 OR c.pinned = 1
+    WHERE c.unread = 1
   `).all() as Array<{
-    id: string; label: string; project_id: string; unread: number; pinned: number;
+    id: string; label: string; project_id: string;
     category_id: string | null; category_emoji: string | null;
     last_activity_at: string | null; created_at: string; project_name: string;
   }>;
 
   for (const row of rows) {
     const lastActivityAt = row.last_activity_at || row.created_at;
-    const existing = tracked.get(row.id);
-    if (existing) {
-      if (row.unread) existing.unread = true;
-      if (row.pinned && !row.unread) existing.seen = true;
-      existing.categoryId = row.category_id;
-      existing.categoryEmoji = row.category_emoji;
-      existing.lastActivityAt = lastActivityAt;
-    } else {
-      tracked.set(row.id, {
-        chatId: row.id,
-        label: row.label,
-        projectId: row.project_id,
-        projectName: row.project_name,
-        sessionStatus: null,
-        unread: !!row.unread,
-        seen: !!row.pinned && !row.unread,
-        fresh: false,
-        categoryId: row.category_id,
-        categoryEmoji: row.category_emoji,
-        lastActivityAt,
-      });
-    }
+    tracked.set(row.id, {
+      chatId: row.id,
+      label: row.label,
+      projectId: row.project_id,
+      projectName: row.project_name,
+      sessionStatus: null,
+      unread: true,
+      categoryId: row.category_id,
+      categoryEmoji: row.category_emoji,
+      lastActivityAt,
+    });
   }
 }
 
@@ -287,17 +227,10 @@ function buildSnapshot(): GlobalActiveChats {
   let badgeCount = 0;
 
   for (const t of tracked.values()) {
-    // Determine the display status
-    let displayStatus: ActiveChat['status'];
-    if (t.sessionStatus && INTERESTING_STATUSES.has(t.sessionStatus)) {
-      displayStatus = t.sessionStatus;
-    } else if (t.unread) {
-      displayStatus = 'unread';
-    } else if (t.fresh) {
-      displayStatus = 'new';
-    } else {
-      displayStatus = 'seen';
-    }
+    const displayStatus: ActiveChat['status'] =
+      t.sessionStatus && INTERESTING_STATUSES.has(t.sessionStatus)
+        ? t.sessionStatus
+        : 'unread';
 
     if (!byProject[t.projectId]) {
       byProject[t.projectId] = {
@@ -319,7 +252,7 @@ function buildSnapshot(): GlobalActiveChats {
     byProject[t.projectId].count++;
     totalCount++;
 
-    // Badge count: only unread + awaiting (not working, not seen, not new)
+    // Badge count: unread + awaiting (excludes plain working)
     if (
       displayStatus === 'unread' ||
       displayStatus === 'question-awaiting' ||
@@ -331,7 +264,7 @@ function buildSnapshot(): GlobalActiveChats {
     }
   }
 
-  // Activity-only sort: newest message first. Categories no longer float to top.
+  // Activity-only sort: newest message first.
   for (const projectChats of Object.values(byProject)) {
     projectChats.chats.sort(
       (a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
@@ -363,11 +296,10 @@ function getIO(): SocketIOServer | null {
 export default {
   init,
   onSessionStateChange,
-  onChatCreated,
   onChatUnread,
   onChatRead,
-  onChatDismiss,
   onSessionExit,
+  onChatRemoved,
   onChatRenamed,
   refreshChatMeta,
   getSnapshot,

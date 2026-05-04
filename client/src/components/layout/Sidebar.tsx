@@ -53,10 +53,6 @@ function statusDotClass(status: ActiveChat['status']): string {
       return 'bg-[#a855f7] animate-pulse'; // purple pulsing (awaiting user)
     case 'unread':
       return 'bg-success'; // solid green (new reply)
-    case 'new':
-      return 'bg-text'; // black/white neutral (new chat, no messages)
-    case 'seen':
-      return 'bg-border'; // grey (already read)
     default:
       return 'bg-border';
   }
@@ -70,8 +66,6 @@ function statusLabel(status: ActiveChat['status']): string {
     case 'plan-awaiting': return 'Plan';
     case 'permission-awaiting': return 'Permission';
     case 'unread': return 'New reply';
-    case 'new': return 'New';
-    case 'seen': return ''; // handled by dismiss button
     default: return '';
   }
 }
@@ -81,7 +75,7 @@ function isAwaitingStatus(status: ActiveChat['status']): boolean {
     status === 'plan-awaiting' || status === 'permission-awaiting';
 }
 
-// Badge color: purple if any awaiting, green if all replies (excludes working/seen/new from count)
+// Badge color: purple if any awaiting, green if all replies (excludes plain working from count)
 function badgeClass(chats: ActiveChat[]): string {
   const counted = chats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status));
   if (counted.length === 0) return 'bg-border text-text-dim';
@@ -89,7 +83,7 @@ function badgeClass(chats: ActiveChat[]): string {
   return 'bg-success text-white'; // green (all new replies)
 }
 
-// Badge count: only new replies + awaiting (not thinking, not seen, not new)
+// Badge count: only new replies + awaiting (not plain thinking)
 function badgeCount(chats: ActiveChat[]): number {
   return chats.filter(c => c.status === 'unread' || isAwaitingStatus(c.status)).length;
 }
@@ -248,7 +242,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const [chatsByProject, setChatsByProject] = useState<Record<string, { chats: Chat[]; total: number }>>({});
   const [chatsLoadingProject, setChatsLoadingProject] = useState<Set<string>>(new Set());
 
-  const fetchProjectChats = useCallback(async (projectId: string, more: boolean) => {
+  const fetchProjectChats = useCallback(async (projectId: string, more: boolean, coverActivityAt?: string) => {
     setChatsLoadingProject(prev => {
       const next = new Set(prev);
       next.add(projectId);
@@ -256,8 +250,10 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     });
     try {
       const offset = more ? (chatsByProject[projectId]?.chats.length ?? 0) : 0;
+      const params = new URLSearchParams({ limit: String(CHATS_PER_PAGE), offset: String(offset) });
+      if (!more && coverActivityAt) params.set('coverActivityAt', coverActivityAt);
       const data = await api.get<{ chats: Chat[]; total: number }>(
-        `/api/projects/${projectId}/chats?limit=${CHATS_PER_PAGE}&offset=${offset}`
+        `/api/projects/${projectId}/chats?${params.toString()}`
       );
       const fetched = data.chats || [];
       setChatsByProject(prev => {
@@ -370,6 +366,22 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   // returns to the default 3-chat view.
   const [showAllChats, setShowAllChats] = useState<Set<string>>(new Set());
 
+  // Oldest "interesting" tracker chat for a project — its lastActivityAt is
+  // passed to the chats fetch so the server returns enough rows to render a
+  // continuous list from the top down through that chat.
+  const oldestActionableActivity = useCallback((projectId: string): string | undefined => {
+    const list = activeChats.byProject[projectId]?.chats ?? [];
+    if (list.length === 0) return undefined;
+    let oldest: string | undefined;
+    for (const c of list) {
+      if (!ACTIONABLE_STATUSES.has(c.status)) continue;
+      if (!oldest || new Date(c.lastActivityAt).getTime() < new Date(oldest).getTime()) {
+        oldest = c.lastActivityAt;
+      }
+    }
+    return oldest;
+  }, [activeChats]);
+
   const toggleExpanded = useCallback((projectId: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
@@ -386,11 +398,13 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         next.add(projectId);
         // Lazy-fetch the project's chat list the first time it expands so
         // the user sees idle chats too, not just the actionable tracker set.
-        if (!chatsByProject[projectId]) fetchProjectChats(projectId, false);
+        if (!chatsByProject[projectId]) {
+          fetchProjectChats(projectId, false, oldestActionableActivity(projectId));
+        }
       }
       return next;
     });
-  }, [chatsByProject, fetchProjectChats]);
+  }, [chatsByProject, fetchProjectChats, oldestActionableActivity]);
 
   const accountSettingsUrl = tunnelUrl
     ? new URL('/settings', tunnelUrl).href
@@ -549,10 +563,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         return next;
       });
       for (const id of activeProjectIds) {
-        if (!chatsByProject[id]) fetchProjectChats(id, false);
+        if (!chatsByProject[id]) {
+          fetchProjectChats(id, false, oldestActionableActivity(id));
+        }
       }
     }
-  }, [activeChats, chatsByProject, fetchProjectChats]);
+  }, [activeChats, chatsByProject, fetchProjectChats, oldestActionableActivity]);
 
   // Reusable project row renderer. Used both for ordinary recents and for
   // the standalone Home row that lives above the Recents group.
@@ -619,10 +635,10 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </button>
         </div>
 
-        {/* Expanded chat list. Default cap = max(3, deepest non-idle + 1) so
-            anything actionable always stays visible; quiet chats past that
-            collapse behind "Show more". User can lift the cap explicitly,
-            and "Show fewer" reapplies it. */}
+        {/* Expanded chat list. Default cap = max(5, deepest actionable + 1)
+            so any working/awaiting/unread chat stays visible no matter how
+            far back it sits, and the rendered list is continuous down to
+            it. Quiet chats past that collapse behind "Show more". */}
         {hasAnyChats && isExpanded && (() => {
           const trackerChats = projectActive?.chats ?? [];
           const fetched = chatsByProject[project.id]?.chats ?? [];
@@ -631,12 +647,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           const isLoading = chatsLoadingProject.has(project.id);
           const showAll = showAllChats.has(project.id);
 
-          // Deepest non-idle entry (working / awaiting / unread / seen / new).
-          let deepestNonIdle = -1;
+          // Deepest actionable entry (working / awaiting / unread).
+          let deepestActionable = -1;
           for (let i = 0; i < merged.length; i++) {
-            if (merged[i].status !== 'idle') deepestNonIdle = i;
+            if (ACTIONABLE_STATUSES.has(merged[i].status)) deepestActionable = i;
           }
-          const cap = Math.max(3, deepestNonIdle + 1);
+          const cap = Math.max(5, deepestActionable + 1);
           const visible = showAll ? merged : merged.slice(0, cap);
           const hiddenInCap = !showAll && merged.length > cap;
           const hasMoreOnServer = fetched.length < total;
@@ -1006,13 +1022,6 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               api.put(`/api/projects/${sidebarCtx.projectId}/chats/${sidebarCtx.chat.chatId}/unread`).catch(() => {});
             },
           }]),
-          ...((sidebarCtx.chat.status === 'seen' || sidebarCtx.chat.status === 'new') ? [{
-            label: 'Dismiss',
-            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-            onAction: () => {
-              api.put(`/api/projects/${sidebarCtx.projectId}/chats/${sidebarCtx.chat.chatId}/dismiss`).catch(() => {});
-            },
-          }] : []),
           {
             label: 'Delete',
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>,

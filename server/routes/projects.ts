@@ -14,7 +14,6 @@ import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts
 import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import config from '../config.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
-import { killSession } from '../sockets/claude-code.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -569,6 +568,11 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     // categoryIds=cat-1,cat-2 → multi-select filter
     const rawCats = (req.query.categoryIds as string) || '';
     const categoryIds = rawCats ? rawCats.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+    // ISO timestamp: when set on the first page, the response is expanded
+    // to cover every chat with last_activity_at >= this value (used by the
+    // sidebar to keep the rendered list continuous through any actionable
+    // chat that sits below the default page).
+    const coverActivityAt = (req.query.coverActivityAt as string) || undefined;
 
     // Clean up empty SDK chats (only on first page / no search/filter — avoid during paginated browsing).
     // Skip claude-code chats: they don't use chat_messages and get a session_id on start.
@@ -587,7 +591,7 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     }
 
     if (limit > 0) {
-      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined, categoryIds });
+      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined, categoryIds, coverActivityAt });
       res.json({ chats: result.chats, total: result.total });
     } else {
       const updatedChats = projectManager.listChats(req.params.id);
@@ -637,7 +641,6 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     }
 
     const chat = projectManager.createChat(req.params.id, label, chatAdapter);
-    activeChatsTracker.onChatCreated(chat.id, req.params.id, chat.label);
     res.status(201).json({ chat });
   } catch (err) {
     console.error('Error creating chat:', err);
@@ -791,21 +794,6 @@ router.delete('/:id/categories/:catId', async (req: Request<{ id: string; catId:
   }
 });
 
-router.put('/:id/chats/:chatId/dismiss', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
-  try {
-    const { chatId } = req.params;
-    // Kill both CC (PTY) and SDK sessions, then remove from tracker
-    killSession(chatId);
-    sdkSessionManager.endSession(chatId);
-    projectManager.markChatDismissed(chatId);
-    activeChatsTracker.onChatDismiss(chatId);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Error dismissing chat:', err);
-    res.status(500).json({ error: 'Failed to dismiss chat' });
-  }
-});
-
 router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     const chat = projectManager.getChat(req.params.chatId);
@@ -860,7 +848,7 @@ router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: strin
 router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
   try {
     projectManager.deleteChat(req.params.chatId);
-    activeChatsTracker.onChatDismiss(req.params.chatId);
+    activeChatsTracker.onChatRemoved(req.params.chatId);
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting chat:', err);

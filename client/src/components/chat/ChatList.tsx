@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type MouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { Card } from '../ui/card.tsx';
 import { Button } from '../ui/button.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -407,11 +407,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     api.put(`/api/projects/${projectId}/chats/${chat.id}/unread`).catch(() => {});
   }
 
-  function handleDismiss(chat: Chat) {
-    api.put(`/api/projects/${projectId}/chats/${chat.id}/dismiss`).catch(() => {});
-  }
-
-  // Desktop hover popover: show extra actions (favorite, unread, dismiss, view summary)
+  // Desktop hover popover: show extra actions (favorite, unread, view summary)
   // after a short hover delay, mirroring the sidebar hover pattern.
   useEffect(() => () => {
     if (hoverShowRef.current) clearTimeout(hoverShowRef.current);
@@ -513,18 +509,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   function clearCategoryFilter() {
     setActiveCategoryIds([]);
   }
-
-  // Determine which chats are in 'seen' state (read but not dismissed from tracker)
-  const seenChatIds = useMemo(() => {
-    const ids = new Set<string>();
-    const projectData = activeChats.byProject[projectId];
-    if (projectData) {
-      for (const c of projectData.chats) {
-        if (c.status === 'seen') ids.add(c.chatId);
-      }
-    }
-    return ids;
-  }, [activeChats, projectId]);
 
   const showSearch = chats.length > 0 || searchQuery;
 
@@ -757,7 +741,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
       ) : (
         <>
           {chats.map((chat) => {
-            const isSeen = seenChatIds.has(chat.id);
             return (
             <SwipeableRow
               key={chat.id}
@@ -765,8 +748,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               {...(isMobile
                 ? {}
                 : {
-                    onDelete: isSeen ? undefined : () => setDeleteTarget(chat),
-                    onDismiss: isSeen ? () => handleDismiss(chat) : undefined,
+                    onDelete: () => setDeleteTarget(chat),
                   }
               )}
             >
@@ -785,8 +767,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
                       <span className="flex-shrink-0 text-[13px] leading-none" aria-hidden>{chat.category.emoji}</span>
                     ) : unreadIds.has(chat.id) ? (
                       <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
-                    ) : isSeen ? (
-                      <span className="flex-shrink-0 w-2 h-2 rounded-full bg-border" />
                     ) : null}
                     <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
                       {generatingTitle === chat.id ? (
@@ -956,7 +936,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
         </DialogContent>
       </Dialog>
 
-      {/* Desktop hover popover — extra per-chat actions (favorite, unread, dismiss, view summary). */}
+      {/* Desktop hover popover — extra per-chat actions (favorite, unread, view summary). */}
       <ContextMenu
         open={!!hoverCtx}
         onClose={() => setHoverCtx(null)}
@@ -987,11 +967,6 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             label: 'Set as unread',
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
             onAction: () => handleSetUnread(hoverCtx.chat),
-          }] : []),
-          ...(seenChatIds.has(hoverCtx.chat.id) ? [{
-            label: 'Dismiss',
-            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-            onAction: () => handleDismiss(hoverCtx.chat),
           }] : []),
           // Edit + Delete only appear on mobile here — desktop already has them inline.
           ...(isMobile ? [

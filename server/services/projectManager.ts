@@ -425,9 +425,9 @@ function listChats(projectId: string): Chat[] {
 
 function listChatsPaginated(
   projectId: string,
-  opts: { limit?: number; offset?: number; search?: string; categoryIds?: string[] } = {},
+  opts: { limit?: number; offset?: number; search?: string; categoryIds?: string[]; coverActivityAt?: string } = {},
 ): { chats: Chat[]; total: number } {
-  const limit = opts.limit ?? 20;
+  let limit = opts.limit ?? 20;
   const offset = opts.offset ?? 0;
   const filters: string[] = ['c.project_id = ?'];
   const params: any[] = [projectId];
@@ -447,6 +447,18 @@ function listChatsPaginated(
   const { total } = db.prepare(
     `SELECT COUNT(*) as total FROM chats c WHERE ${where}`
   ).get(...params) as any;
+
+  // If the caller passed coverActivityAt (the oldest "interesting" tracker
+  // chat's lastActivityAt), expand the limit so the result spans from the
+  // top down through that chat — keeps the sidebar list continuous instead
+  // of leaving a gap before an awaiting/working chat that sits below the
+  // default page.
+  if (offset === 0 && opts.coverActivityAt) {
+    const coverRow = db.prepare(
+      `SELECT COUNT(*) as cnt FROM chats c WHERE ${where} AND COALESCE(c.last_activity_at, c.created_at) >= ?`
+    ).get(...params, opts.coverActivityAt) as { cnt: number };
+    if (coverRow.cnt > limit) limit = coverRow.cnt;
+  }
 
   const rows = db.prepare(
     `${CHAT_SELECT} WHERE ${where} ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
@@ -579,15 +591,11 @@ function updateStashedInput(chatId: string, text: string): void {
 }
 
 function markChatUnread(chatId: string): void {
-  db.prepare('UPDATE chats SET unread = 1, pinned = 1 WHERE id = ?').run(chatId);
+  db.prepare('UPDATE chats SET unread = 1 WHERE id = ?').run(chatId);
 }
 
 function markChatRead(chatId: string): void {
   db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(chatId);
-}
-
-function markChatDismissed(chatId: string): void {
-  db.prepare('UPDATE chats SET pinned = 0 WHERE id = ?').run(chatId);
 }
 
 function setChatCategory(chatId: string, categoryId: string | null): void {
@@ -891,7 +899,6 @@ export default {
   updateStashedInput,
   markChatUnread,
   markChatRead,
-  markChatDismissed,
   setChatCategory,
   touchChatActivity,
   deleteChat,
