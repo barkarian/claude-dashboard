@@ -62,6 +62,12 @@ export interface Chat {
   unread: boolean;
   categoryId: string | null;
   category: ChatCategory | null;
+  /** When the chat was last opened as a sidebar tab. NULL = closed (not in
+   *  the sidebar's chat list — still findable via the chat list view). */
+  tabOpenedAt: string | null;
+  /** When the tab was pinned (sticky in the sidebar). NULL = unpinned.
+   *  Pinned implies opened. */
+  tabPinnedAt: string | null;
 }
 
 export interface Project {
@@ -106,6 +112,10 @@ export interface ProjectSummary {
   createdAt: string;
   scriptsCount: number;
   chatsCount: number;
+  /** How many chats are currently sidebar tabs (open or pinned). Used by
+   *  the sidebar to bubble projects with active tabs to the top of Recents
+   *  and to auto-expand them. */
+  openTabsCount: number;
   mode: ProjectMode;
   pinned: boolean;
   pinnedAt: string | null;

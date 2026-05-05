@@ -1,6 +1,5 @@
 import type { SDKChatMessage } from '../../../../shared/types/sdk.ts';
 import ContentBlockRenderer from './blocks/ContentBlockRenderer.tsx';
-import StreamingIndicator from './blocks/StreamingIndicator.tsx';
 
 interface SDKMessageBubbleProps {
   message: SDKChatMessage;
@@ -13,6 +12,16 @@ export default function SDKMessageBubble({ message }: SDKMessageBubbleProps) {
   const userText = isUser
     ? message.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
     : '';
+
+  // While the assistant is still streaming, suppress the bubble until at
+  // least some text has arrived. Otherwise we render an empty placeholder
+  // bubble that looks like a stuck "ghost message".
+  if (!isUser && message.isPartial) {
+    const hasContent = message.content.some(
+      (b) => (b.type === 'text' && b.text.length > 0) || b.type !== 'text',
+    );
+    if (!hasContent) return null;
+  }
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -32,7 +41,6 @@ export default function SDKMessageBubble({ message }: SDKMessageBubbleProps) {
             {message.content.map((block, idx) => (
               <ContentBlockRenderer key={idx} block={block} />
             ))}
-            {message.isPartial && <StreamingIndicator />}
           </div>
         )}
 

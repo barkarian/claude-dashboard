@@ -62,6 +62,13 @@ export interface SDKStatusPayload {
   status: SDKSessionStatus;
 }
 
+/** Live "what is the agent doing right now" hint (e.g. "Reading foo.ts").
+ *  null label clears the indicator. */
+export interface SDKActivityPayload {
+  chatId: string;
+  label: string | null;
+}
+
 export interface SDKPermissionRequestPayload {
   chatId: string;
   requestId: string;

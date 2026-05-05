@@ -22,6 +22,7 @@ const PROJECT_SUMMARY_COLUMNS = `
   p.id, p.name, p.path, p.repo, p.created_at, p.mode, p.pinned, p.pinned_at,
   (SELECT COUNT(*) FROM scripts WHERE project_id = p.id) AS scriptsCount,
   (SELECT COUNT(*) FROM chats WHERE project_id = p.id) AS chatsCount,
+  (SELECT COUNT(*) FROM chats WHERE project_id = p.id AND tab_opened_at IS NOT NULL) AS openTabsCount,
   COALESCE(
     (SELECT MAX(COALESCE(last_activity_at, created_at)) FROM chats WHERE project_id = p.id),
     p.created_at
@@ -37,6 +38,7 @@ function mapRowToSummary(r: any): ProjectSummary {
     createdAt: r.created_at,
     scriptsCount: r.scriptsCount,
     chatsCount: r.chatsCount,
+    openTabsCount: r.openTabsCount ?? 0,
     mode: (r.mode as ProjectMode) || 'simple',
     pinned: !!r.pinned,
     pinnedAt: r.pinned_at || null,
@@ -48,7 +50,7 @@ function listProjects(): ProjectSummary[] {
   const rows = db.prepare(`
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
-    ORDER BY last_activity_at DESC, p.created_at DESC
+    ORDER BY (openTabsCount > 0) DESC, last_activity_at DESC, p.created_at DESC
   `).all() as any[];
   return rows.map(mapRowToSummary);
 }
@@ -78,7 +80,7 @@ function listProjectsPaginated(
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
     WHERE ${where}
-    ORDER BY last_activity_at DESC, p.created_at DESC
+    ORDER BY (openTabsCount > 0) DESC, last_activity_at DESC, p.created_at DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as any[];
 
@@ -108,7 +110,7 @@ function searchProjectsPaginated(
     SELECT ${PROJECT_SUMMARY_COLUMNS}
     FROM projects p
     WHERE ${where}
-    ORDER BY last_activity_at DESC, p.created_at DESC
+    ORDER BY (openTabsCount > 0) DESC, last_activity_at DESC, p.created_at DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as any[];
 
@@ -483,7 +485,7 @@ function listChats(projectId: string): Chat[] {
 
 function listChatsPaginated(
   projectId: string,
-  opts: { limit?: number; offset?: number; search?: string; categoryIds?: string[]; coverActivityAt?: string } = {},
+  opts: { limit?: number; offset?: number; search?: string; categoryIds?: string[]; coverActivityAt?: string; tabsOnly?: boolean } = {},
 ): { chats: Chat[]; total: number } {
   let limit = opts.limit ?? 20;
   const offset = opts.offset ?? 0;
@@ -499,6 +501,11 @@ function listChatsPaginated(
     const placeholders = opts.categoryIds.map(() => '?').join(',');
     filters.push(`c.category_id IN (${placeholders})`);
     params.push(...opts.categoryIds);
+  }
+  // tabsOnly: sidebar query — only chats currently in the open-tabs set.
+  // Pinned tabs sort first, then unpinned by tab_opened_at.
+  if (opts.tabsOnly) {
+    filters.push('c.tab_opened_at IS NOT NULL');
   }
 
   const where = filters.join(' AND ');
@@ -518,8 +525,11 @@ function listChatsPaginated(
     if (coverRow.cnt > limit) limit = coverRow.cnt;
   }
 
+  const orderClause = opts.tabsOnly
+    ? 'ORDER BY (c.tab_pinned_at IS NOT NULL) DESC, c.tab_pinned_at DESC, c.tab_opened_at DESC'
+    : CHAT_ORDER_CLAUSE;
   const rows = db.prepare(
-    `${CHAT_SELECT} WHERE ${where} ${CHAT_ORDER_CLAUSE} LIMIT ? OFFSET ?`
+    `${CHAT_SELECT} WHERE ${where} ${orderClause} LIMIT ? OFFSET ?`
   ).all(...params, limit, offset) as any[];
 
   return { chats: rows.map(r => mapRowToChat(r)), total };
@@ -561,6 +571,8 @@ function mapRowToChat(r: any): Chat {
     unread: !!r.unread,
     categoryId: r.category_id || null,
     category: rowToCategory(r),
+    tabOpenedAt: r.tab_opened_at || null,
+    tabPinnedAt: r.tab_pinned_at || null,
   };
 }
 
@@ -582,6 +594,8 @@ function mapRowToChatLite(r: any): Chat {
     unread: !!r.unread,
     categoryId: r.category_id || null,
     category: rowToCategory(r),
+    tabOpenedAt: r.tab_opened_at || null,
+    tabPinnedAt: r.tab_pinned_at || null,
   };
 }
 
@@ -592,9 +606,12 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
   // Seed chat.model from the adapter's default_model setting (if any). NULL
   // is fine — runtime falls back to the same default at session start.
   const model = getDefaultModel(chatAdapter);
+  // Auto-open as a sidebar tab on creation: a brand-new chat the user just
+  // explicitly created is, by definition, something they want to see in the
+  // sidebar. (Tabs are dismissable — they can close it with the X.)
   db.prepare(
-    'INSERT INTO chats (id, project_id, label, adapter, model, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, projectId, label || 'New Chat', chatAdapter, model, now, now);
+    'INSERT INTO chats (id, project_id, label, adapter, model, created_at, last_activity_at, tab_opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, projectId, label || 'New Chat', chatAdapter, model, now, now, now);
   return {
     id,
     label: label || 'New Chat',
@@ -612,6 +629,8 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     unread: false,
     categoryId: null,
     category: null,
+    tabOpenedAt: now,
+    tabPinnedAt: null,
   };
 }
 
@@ -656,6 +675,53 @@ function markChatUnread(chatId: string): void {
 
 function markChatRead(chatId: string): void {
   db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(chatId);
+}
+
+// ── Sidebar tab state ────────────────────────────────────────────────
+// Returns true iff the call actually changed the chat's tab state, so callers
+// can skip a sync broadcast when nothing moved (avoids noise on auto-promote
+// hot paths where the chat was already an open tab).
+function openChatTab(chatId: string): boolean {
+  const result = db.prepare(
+    "UPDATE chats SET tab_opened_at = COALESCE(tab_opened_at, datetime('now')) WHERE id = ? AND tab_opened_at IS NULL"
+  ).run(chatId);
+  return result.changes > 0;
+}
+
+function closeChatTab(chatId: string): boolean {
+  const result = db.prepare(
+    'UPDATE chats SET tab_opened_at = NULL, tab_pinned_at = NULL WHERE id = ? AND tab_opened_at IS NOT NULL'
+  ).run(chatId);
+  return result.changes > 0;
+}
+
+function pinChatTab(chatId: string): boolean {
+  // Pin always implies open. Idempotent on already-pinned (changes=0).
+  const result = db.prepare(`
+    UPDATE chats
+    SET tab_pinned_at = datetime('now'),
+        tab_opened_at = COALESCE(tab_opened_at, datetime('now'))
+    WHERE id = ? AND tab_pinned_at IS NULL
+  `).run(chatId);
+  return result.changes > 0;
+}
+
+function unpinChatTab(chatId: string): boolean {
+  // Unpin keeps the tab open — only clears the pinned-at marker.
+  const result = db.prepare(
+    'UPDATE chats SET tab_pinned_at = NULL WHERE id = ? AND tab_pinned_at IS NOT NULL'
+  ).run(chatId);
+  return result.changes > 0;
+}
+
+/** Read the current tab state — used by routes to build the broadcast
+ *  payload after a mutation. */
+function getChatTabState(chatId: string): { tabOpenedAt: string | null; tabPinnedAt: string | null } | null {
+  const row = db.prepare('SELECT tab_opened_at, tab_pinned_at FROM chats WHERE id = ?').get(chatId) as
+    | { tab_opened_at: string | null; tab_pinned_at: string | null }
+    | undefined;
+  if (!row) return null;
+  return { tabOpenedAt: row.tab_opened_at, tabPinnedAt: row.tab_pinned_at };
 }
 
 function setChatCategory(chatId: string, categoryId: string | null): void {
@@ -798,6 +864,20 @@ function addMessage(chatId: string, message: { role: string; content: unknown; t
   // per project every 2 seconds.
   const projectId = getChatProjectId(chatId);
   if (projectId) sidebarSync.projectActivity({ projectId, lastActivityAt: new Date().toISOString() });
+
+  // Auto-promote to sidebar tab on user messages: sending a message is the
+  // commitment signal that turns a previewed chat into a real tab.
+  // Assistant messages don't trigger this — agent activity surfaces via the
+  // unread / awaiting events from activeChatsTracker instead.
+  if (message.role === 'user' && projectId && openChatTab(chatId)) {
+    const state = getChatTabState(chatId);
+    sidebarSync.chatMetaChanged({
+      projectId,
+      chatId,
+      tabOpenedAt: state?.tabOpenedAt ?? null,
+      tabPinnedAt: state?.tabPinnedAt ?? null,
+    });
+  }
 
   return {
     id,
@@ -967,6 +1047,11 @@ export default {
   markChatUnread,
   markChatRead,
   setChatCategory,
+  openChatTab,
+  closeChatTab,
+  pinChatTab,
+  unpinChatTab,
+  getChatTabState,
   touchChatActivity,
   deleteChat,
   addMessage,

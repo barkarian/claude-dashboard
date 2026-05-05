@@ -6,6 +6,7 @@ import type {
   SDKMessagePayload,
   SDKPartialUpdatePayload,
   SDKStatusPayload,
+  SDKActivityPayload,
   SDKPermissionRequestPayload,
   SDKQuestionRequestPayload,
   SDKResultPayload,
@@ -38,6 +39,8 @@ export interface PendingQuestion {
 interface UseSDKMessagesReturn {
   messages: SDKChatMessage[];
   status: SDKSessionStatus | 'disconnected';
+  /** Live "what is the agent doing right now" hint, or null when idle. */
+  activity: string | null;
   pendingPermission: PendingPermission | null;
   pendingQuestion: PendingQuestion | null;
   lastResult: SDKResult | null;
@@ -55,6 +58,7 @@ export function useSDKMessages(
 ): UseSDKMessagesReturn {
   const [messages, setMessages] = useState<SDKChatMessage[]>([]);
   const [status, setStatus] = useState<SDKSessionStatus | 'disconnected'>('disconnected');
+  const [activity, setActivity] = useState<string | null>(null);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [lastResult, setLastResult] = useState<SDKResult | null>(null);
@@ -64,6 +68,7 @@ export function useSDKMessages(
   useEffect(() => {
     setMessages([]);
     setStatus('disconnected');
+    setActivity(null);
     setPendingPermission(null);
     setPendingQuestion(null);
     setLastResult(null);
@@ -110,6 +115,15 @@ export function useSDKMessages(
         setPendingPermission(null);
         setPendingQuestion(null);
       }
+      // Status hitting a terminal value — drop any stale activity hint.
+      if (s === 'idle' || s === 'exited' || s === 'error') {
+        setActivity(null);
+      }
+    }
+
+    function handleActivity({ chatId: cid, label }: SDKActivityPayload) {
+      if (cid !== chatId) return;
+      setActivity(label);
     }
 
     function handlePermissionRequest({
@@ -155,6 +169,7 @@ export function useSDKMessages(
     socket.on('sdk:message', handleMessage);
     socket.on('sdk:partial-update', handlePartialUpdate);
     socket.on('sdk:status', handleStatus);
+    socket.on('sdk:activity', handleActivity);
     socket.on('sdk:permission-request', handlePermissionRequest);
     socket.on('sdk:question-request', handleQuestionRequest);
     socket.on('sdk:result', handleResult);
@@ -165,6 +180,7 @@ export function useSDKMessages(
       socket.off('sdk:message', handleMessage);
       socket.off('sdk:partial-update', handlePartialUpdate);
       socket.off('sdk:status', handleStatus);
+      socket.off('sdk:activity', handleActivity);
       socket.off('sdk:permission-request', handlePermissionRequest);
       socket.off('sdk:question-request', handleQuestionRequest);
       socket.off('sdk:result', handleResult);
@@ -217,6 +233,7 @@ export function useSDKMessages(
   return {
     messages,
     status,
+    activity,
     pendingPermission,
     pendingQuestion,
     lastResult,

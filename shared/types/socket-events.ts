@@ -190,7 +190,9 @@ export interface SidebarChatDeleted {
 
 /** Fields that may change for a chat outside of session-status updates.
  *  Any field omitted means "no change". `categoryEmoji` is sent alongside
- *  `categoryId` so clients don't have to look up the emoji themselves. */
+ *  `categoryId` so clients don't have to look up the emoji themselves.
+ *  `tabOpenedAt` / `tabPinnedAt` express the chat's sidebar-tab state —
+ *  null means "not in the sidebar / not pinned" respectively. */
 export interface SidebarChatMetaChanged {
   projectId: string;
   chatId: string;
@@ -198,6 +200,8 @@ export interface SidebarChatMetaChanged {
   categoryId?: string | null;
   categoryEmoji?: string | null;
   lastActivityAt?: string;
+  tabOpenedAt?: string | null;
+  tabPinnedAt?: string | null;
 }
 
 export interface SidebarProjectPinChanged {

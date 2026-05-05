@@ -614,6 +614,9 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     // sidebar to keep the rendered list continuous through any actionable
     // chat that sits below the default page).
     const coverActivityAt = (req.query.coverActivityAt as string) || undefined;
+    // tabsOnly=1 → only chats currently in the open-tabs set (used by the
+    // sidebar). Without it, returns the full chat list (used by chat list).
+    const tabsOnly = req.query.tabsOnly === '1';
 
     // Clean up empty SDK chats (only on first page / no search/filter — avoid during paginated browsing).
     // Skip claude-code chats: they don't use chat_messages and get a session_id on start.
@@ -632,7 +635,7 @@ router.get('/:id/chats', async (req: Request<{ id: string }>, res: Response) => 
     }
 
     if (limit > 0) {
-      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined, categoryIds, coverActivityAt });
+      const result = projectManager.listChatsPaginated(req.params.id, { limit, offset, search: search || undefined, categoryIds, coverActivityAt, tabsOnly });
       res.json({ chats: result.chats, total: result.total });
     } else {
       const updatedChats = projectManager.listChats(req.params.id);
@@ -766,6 +769,45 @@ router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId
   } catch (err) {
     console.error('Error marking chat unread:', err);
     res.status(500).json({ error: 'Failed to mark chat unread' });
+  }
+});
+
+// Update sidebar-tab state for a chat. Body fields are independent:
+//   { opened: false }              → close the tab (clears both opened+pinned)
+//   { opened: true }               → ensure tab is open (no-op if already)
+//   { pinned: true }               → pin the tab (auto-opens if needed)
+//   { pinned: false }              → unpin (tab stays open)
+// Use cases: explicit "Pin to sidebar" / "Unpin" / "Close tab" menu items
+// from the sidebar long-press menu and the chat-list row menu.
+router.put('/:id/chats/:chatId/tab', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const chat = projectManager.getChat(req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+    const { opened, pinned } = req.body ?? {};
+    let changed = false;
+    if (opened === false) {
+      changed = projectManager.closeChatTab(req.params.chatId) || changed;
+    } else if (opened === true) {
+      changed = projectManager.openChatTab(req.params.chatId) || changed;
+    }
+    if (pinned === true) {
+      changed = projectManager.pinChatTab(req.params.chatId) || changed;
+    } else if (pinned === false) {
+      changed = projectManager.unpinChatTab(req.params.chatId) || changed;
+    }
+    const state = projectManager.getChatTabState(req.params.chatId);
+    if (changed) {
+      sidebarSync.chatMetaChanged({
+        projectId: req.params.id,
+        chatId: req.params.chatId,
+        tabOpenedAt: state?.tabOpenedAt ?? null,
+        tabPinnedAt: state?.tabPinnedAt ?? null,
+      });
+    }
+    res.json({ success: true, tabOpenedAt: state?.tabOpenedAt ?? null, tabPinnedAt: state?.tabPinnedAt ?? null });
+  } catch (err: any) {
+    console.error('Error updating chat tab state:', err);
+    res.status(400).json({ error: err.message || 'Failed to update tab state' });
   }
 });
 

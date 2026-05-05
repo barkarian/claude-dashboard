@@ -14,7 +14,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '../ui/dropdown-menu.tsx';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover.tsx';
-import StatusPill from './StatusPill.tsx';
+import WorkspaceSwitcher from './WorkspaceSwitcher.tsx';
 import type { ContextUsage } from '../../../../shared/types/session.ts';
 
 interface HeaderProps {
@@ -207,7 +207,6 @@ export default function Header({
             <h2 className="text-sm font-semibold truncate">{title}</h2>
           </div>
           <div className="flex items-center gap-2">
-            <StatusPill />
             {actions}
           </div>
         </div>
@@ -219,7 +218,7 @@ export default function Header({
   return (
     <header className="flex-shrink-0 bg-bg/80 backdrop-blur-lg border-b border-border">
       {/* Row 1: Back to projects | Project Name | New Chat */}
-      <div className="flex items-center justify-between h-14 md:h-12 px-4">
+      <div className="flex items-center justify-between h-16 md:h-14 px-4">
         <div className="flex items-center gap-1 min-w-0 flex-1">
           <button
             onClick={toggleSidebar}
@@ -236,13 +235,13 @@ export default function Header({
             style={{ maxWidth: '50vw' }}
             title="Workspace settings"
           >
-            <h2 className="text-sm font-semibold truncate leading-tight">{projectName}</h2>
+            <h2 className="text-base font-semibold truncate leading-tight">{projectName}</h2>
             {projectPath && !simpleMode && <TruncatedPath path={projectPath} />}
           </button>
+          {projectId && <WorkspaceSwitcher currentProjectId={projectId} />}
         </div>
 
         <div className="flex items-center gap-1">
-          <StatusPill />
           {projectActions}
           {onNewChat ? (
             <button

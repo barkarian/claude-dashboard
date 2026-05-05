@@ -64,6 +64,9 @@ import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
 import { useSidebarSync } from '../../hooks/useSidebarSync.ts';
 import { useNewAgent } from '../../hooks/useNewAgent.ts';
+import { useSocket } from '../../context/SocketContext.tsx';
+import { useService } from '../../hooks/useService.ts';
+import { toast } from 'sonner';
 
 export interface SidebarHandle {
   refreshProjects: () => void;
@@ -127,16 +130,22 @@ interface ChatRowProps {
   onMouseEnter: (e: React.MouseEvent) => void;
   onMouseLeave: () => void;
   onContextMenuNative: (e: React.MouseEvent) => void;
+  onCloseTab: () => void;
 }
 
 function ChatRow({
   chat, isActive, onSelect, onTouchStart, onTouchEndCancel,
-  onMouseEnter, onMouseLeave, onContextMenuNative,
+  onMouseEnter, onMouseLeave, onContextMenuNative, onCloseTab,
 }: ChatRowProps) {
   // Category emoji acts as the inline marker. Falls back to the live status
   // dot when the chat is uncategorised. Idle (lazy-fetched) chats with no
-  // category get a plain neutral dot.
-  const marker = chat.categoryEmoji ? (
+  // category get a plain neutral dot. Pinned tabs override with a pin icon
+  // so the user can tell at a glance which tabs are sticky vs dismissable.
+  const marker = chat.tabPinnedAt ? (
+    <svg className="w-3 h-3 flex-shrink-0 text-text" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4m0 0H8m8 0l-4 4m-3 9l-3 3m0 0v-6h6m-3 3l9-9" />
+    </svg>
+  ) : chat.categoryEmoji ? (
     <span className="text-[13px] leading-none flex-shrink-0" aria-hidden>{chat.categoryEmoji}</span>
   ) : chat.status === 'idle' ? (
     <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-border" />
@@ -144,7 +153,7 @@ function ChatRow({
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
   );
   return (
-    <li>
+    <li className="group relative">
       <button
         onClick={onSelect}
         onTouchStart={onTouchStart}
@@ -153,9 +162,9 @@ function ChatRow({
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         onContextMenu={onContextMenuNative}
-        className={`w-full flex items-center gap-2 px-2 py-2 md:py-1 rounded-md text-base md:text-[13px] transition-colors hover:bg-bg-hover ${
+        className={`w-full flex items-center gap-2 px-2 py-2 md:py-1 pr-7 rounded-md text-base md:text-[13px] transition-colors hover:bg-bg-hover ${
           isActive ? 'bg-bg-hover text-text' : 'text-text-dim'
-        }`}
+        } ${chat.tabPinnedAt ? 'font-medium text-text' : ''}`}
       >
         {marker}
         <span className="truncate flex-1 text-left">{chat.label}</span>
@@ -165,6 +174,20 @@ function ChatRow({
           </span>
         )}
       </button>
+      {/* Close-tab × — always visible on touch, hover-only on desktop. Pinned
+          tabs hide the X (use the menu's Unpin to remove). */}
+      {!chat.tabPinnedAt && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onCloseTab(); }}
+          aria-label="Close tab"
+          title="Close tab"
+          className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-danger hover:bg-bg-hover opacity-60 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
     </li>
   );
 }
@@ -189,10 +212,12 @@ interface SidebarChatRow {
   categoryId: string | null;
   categoryEmoji: string | null;
   lastActivityAt: string;
+  tabPinnedAt: string | null;
 }
 
-/** Merge live tracker chats with lazy-fetched idle chats. Tracker entries
- * win on duplicate id (they have fresh status). Sorted by activity desc. */
+/** Merge live tracker chats with lazy-fetched tab chats. Tracker entries
+ *  win on duplicate id (they carry fresh status). Sort: pinned tabs first
+ *  (newest pin on top), then unpinned by activity. */
 function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatRow[] {
   const byId = new Map<string, SidebarChatRow>();
   for (const f of fetched) {
@@ -203,9 +228,11 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
       categoryId: f.categoryId,
       categoryEmoji: f.category?.emoji ?? null,
       lastActivityAt: f.lastActivityAt || f.createdAt,
+      tabPinnedAt: f.tabPinnedAt,
     });
   }
   for (const t of tracker) {
+    const prev = byId.get(t.chatId);
     byId.set(t.chatId, {
       chatId: t.chatId,
       label: t.label,
@@ -213,11 +240,18 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
       categoryId: t.categoryId,
       categoryEmoji: t.categoryEmoji,
       lastActivityAt: t.lastActivityAt,
+      // Tracker payloads don't carry tab state; preserve whatever the
+      // lazy-fetched copy knew.
+      tabPinnedAt: prev?.tabPinnedAt ?? null,
     });
   }
-  return [...byId.values()].sort(
-    (a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
-  );
+  return [...byId.values()].sort((a, b) => {
+    const aPinned = a.tabPinnedAt ? 1 : 0;
+    const bPinned = b.tabPinnedAt ? 1 : 0;
+    if (aPinned !== bPinned) return bPinned - aPinned;
+    if (aPinned && bPinned) return new Date(b.tabPinnedAt!).getTime() - new Date(a.tabPinnedAt!).getTime();
+    return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+  });
 }
 
 // Drag wrappers. The whole row is the drag handle — the activation
@@ -308,6 +342,33 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
 
   const [accountPopoverOpen, setAccountPopoverOpen] = useState(false);
 
+  // Connection state + host shutdown — surfaced in the footer popover so
+  // the indicator lives in one place instead of in every page header.
+  const { socket, connected } = useSocket();
+  const { enabled: localComputerEnabled } = useService('local-computer');
+  const [confirmShutdown, setConfirmShutdown] = useState(false);
+  const [shuttingDown, setShuttingDown] = useState(false);
+
+  function handleToggleConnection() {
+    if (!socket) return;
+    if (connected) socket.disconnect();
+    else socket.connect();
+  }
+
+  async function handleShutdown() {
+    setShuttingDown(true);
+    try {
+      await api.post('/api/system/shutdown');
+      toast.success('Shutting down…');
+      setConfirmShutdown(false);
+      setAccountPopoverOpen(false);
+    } catch (err: any) {
+      toast.error(`Shutdown failed: ${err?.message || 'unknown error'}`);
+    } finally {
+      setShuttingDown(false);
+    }
+  }
+
   // Context menu and delete confirmation state for sidebar chat long-press
   const [sidebarCtx, setSidebarCtx] = useState<{ chat: SidebarChatRow; projectId: string; projectPath: string; x: number; y: number; trigger: 'longpress' | 'hover' } | null>(null);
   const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<{ chat: SidebarChatRow; projectId: string } | null>(null);
@@ -352,6 +413,39 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     api.put(`/api/projects/${projectId}/chats/${chatId}/category`, { categoryId }).catch(() => {});
   }
 
+  // Tab mutations — optimistic local update first so the X disappears /
+  // pin icon flips instantly, then PUT /tab. The server's broadcast comes
+  // back through useSidebarSync and is idempotent (dedupe by id).
+  function closeChatTabLocal(projectId: string, chatId: string) {
+    setChatsByProject(prev => {
+      const entry = prev[projectId];
+      if (!entry) return prev;
+      const filtered = entry.chats.filter(c => c.id !== chatId);
+      if (filtered.length === entry.chats.length) return prev;
+      return { ...prev, [projectId]: { chats: filtered, total: Math.max(0, entry.total - 1) } };
+    });
+    api.put(`/api/projects/${projectId}/chats/${chatId}/tab`, { opened: false }).catch(() => {});
+  }
+  function pinChatTabLocal(projectId: string, chatId: string) {
+    const now = new Date().toISOString();
+    setChatsByProject(prev => {
+      const entry = prev[projectId];
+      if (!entry) return prev;
+      const chats = entry.chats.map(c => c.id === chatId ? { ...c, tabPinnedAt: now, tabOpenedAt: c.tabOpenedAt ?? now } : c);
+      return { ...prev, [projectId]: { chats, total: entry.total } };
+    });
+    api.put(`/api/projects/${projectId}/chats/${chatId}/tab`, { pinned: true }).catch(() => {});
+  }
+  function unpinChatTabLocal(projectId: string, chatId: string) {
+    setChatsByProject(prev => {
+      const entry = prev[projectId];
+      if (!entry) return prev;
+      const chats = entry.chats.map(c => c.id === chatId ? { ...c, tabPinnedAt: null } : c);
+      return { ...prev, [projectId]: { chats, total: entry.total } };
+    });
+    api.put(`/api/projects/${projectId}/chats/${chatId}/tab`, { pinned: false }).catch(() => {});
+  }
+
   // Lazy-loaded per-project chat lists. Sidebar only knows about live
   // actionable chats by default (via the socket tracker); when the user
   // expands a project we paginate through its real chat list so they can
@@ -367,7 +461,9 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     });
     try {
       const offset = more ? (chatsByProject[projectId]?.chats.length ?? 0) : 0;
-      const params = new URLSearchParams({ limit: String(CHATS_PER_PAGE), offset: String(offset) });
+      // Sidebar shows only the open-tabs subset — closed chats live in the
+      // chat list view, not here.
+      const params = new URLSearchParams({ limit: String(CHATS_PER_PAGE), offset: String(offset), tabsOnly: '1' });
       if (!more && coverActivityAt) params.set('coverActivityAt', coverActivityAt);
       const data = await api.get<{ chats: Chat[]; total: number }>(
         `/api/projects/${projectId}/chats?${params.toString()}`
@@ -771,7 +867,20 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   const onChatMetaChanged = useCallback((e: SidebarChatMetaChanged) => {
     setChatsByProject(prev => {
       const entry = prev[e.projectId];
+      // Tab opened by another client on a project we haven't lazy-fetched
+      // yet → no local entry to update; the next expand will load fresh.
       if (!entry) return prev;
+      // Tab closed elsewhere → drop the row from this project's cache.
+      if (e.tabOpenedAt === null) {
+        const filtered = entry.chats.filter(c => c.id !== e.chatId);
+        if (filtered.length === entry.chats.length) return prev;
+        return { ...prev, [e.projectId]: { chats: filtered, total: Math.max(0, entry.total - 1) } };
+      }
+      const exists = entry.chats.some(c => c.id === e.chatId);
+      // Tab opened elsewhere for a chat we don't have cached yet → can't
+      // synthesise a full Chat object from a meta event; rely on the next
+      // expand to fetch it. (Chat-create events still carry the full chat.)
+      if (!exists) return prev;
       let changed = false;
       const chats = entry.chats.map(c => {
         if (c.id !== e.chatId) return c;
@@ -780,7 +889,6 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         if (e.label !== undefined) next.label = e.label;
         if (e.categoryId !== undefined) next.categoryId = e.categoryId;
         if (e.categoryEmoji !== undefined) {
-          // category is `{ emoji, ... } | null` — preserve the rest if we can.
           if (e.categoryEmoji === null) {
             next.category = null;
           } else if (next.category) {
@@ -788,6 +896,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           }
         }
         if (e.lastActivityAt !== undefined) next.lastActivityAt = e.lastActivityAt;
+        if (e.tabOpenedAt !== undefined) next.tabOpenedAt = e.tabOpenedAt;
+        if (e.tabPinnedAt !== undefined) next.tabPinnedAt = e.tabPinnedAt;
         return next;
       });
       if (!changed) return prev;
@@ -966,23 +1076,38 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   // section whenever it exists. Hidden during search.
   const showInfiniteScroll = !isSearching;
 
-  // Auto-expand the project that matches the current URL on mobile so the
-  // user can see its chats when they re-open the drawer. Desktop additionally
-  // auto-expands any project with live actionable chats so awaiting/working
-  // chats stay visible without manual interaction.
+  // Auto-expand rules:
+  //   · the project matching the current URL is always expanded
+  //   · projects with at least one open tab auto-expand on first appearance
+  //     (mobile + desktop), but only once per project per session — if the
+  //     user manually collapses, we don't keep re-opening it
+  //   · desktop also auto-expands projects with live actionable chats
   const activeProjectIdFromUrl = useMemo(() => {
     const m = location.pathname.match(/^\/project\/([^/]+)/);
     return m ? m[1] : null;
   }, [location.pathname]);
 
+  // Track which projects we've already auto-expanded this session so manual
+  // collapse sticks even after re-renders.
+  const autoExpandedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     const idsToExpand: string[] = [];
     if (activeProjectIdFromUrl) idsToExpand.push(activeProjectIdFromUrl);
+
+    const tabHavingProjects = new Set<string>();
+    for (const p of pinnedProjects) if (p.openTabsCount > 0) tabHavingProjects.add(p.id);
+    for (const p of projects) if (p.openTabsCount > 0) tabHavingProjects.add(p.id);
+    for (const id of tabHavingProjects) {
+      if (!autoExpandedRef.current.has(id)) idsToExpand.push(id);
+    }
+
     if (!isMobile) {
       for (const id of Object.keys(activeChats.byProject)) {
         if (activeChats.byProject[id].count > 0) idsToExpand.push(id);
       }
     }
+
     if (idsToExpand.length === 0) return;
     setExpanded(prev => {
       const next = new Set(prev);
@@ -993,11 +1118,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       return changed ? next : prev;
     });
     for (const id of idsToExpand) {
+      autoExpandedRef.current.add(id);
       if (!chatsByProject[id]) {
         fetchProjectChats(id, false, oldestActionableActivity(id));
       }
     }
-  }, [isMobile, activeChats, activeProjectIdFromUrl, chatsByProject, fetchProjectChats, oldestActionableActivity]);
+  }, [isMobile, activeChats, activeProjectIdFromUrl, pinnedProjects, projects, chatsByProject, fetchProjectChats, oldestActionableActivity]);
 
   // Reusable project row renderer. Used for Home, Pinned, Recents, and search
   // results. When `drag` is provided, the DnD ref/listeners are attached to
@@ -1162,6 +1288,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
                   onMouseLeave={handleChatMouseLeave}
                   onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
+                  onCloseTab={() => closeChatTabLocal(project.id, chat.chatId)}
                 />
               ))}
               {isLoading && (
@@ -1379,8 +1506,12 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
         {user && (
           <Popover open={accountPopoverOpen} onOpenChange={setAccountPopoverOpen}>
             <PopoverTrigger asChild>
-              <button className="w-full px-2 py-2.5 md:py-2 flex items-center gap-2 rounded-lg hover:bg-bg-hover transition-colors cursor-pointer text-left">
-                <div className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+              <button
+                className="w-full px-2 py-2.5 md:py-2 flex items-center gap-2 rounded-lg hover:bg-bg-hover transition-colors cursor-pointer text-left"
+                aria-label={`Account · ${connected ? 'Connected' : 'Disconnected'}`}
+                title={connected ? 'Connected' : 'Disconnected'}
+              >
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-success' : 'bg-danger animate-pulse'}`} />
                 <span className="text-sm md:text-xs font-medium text-text truncate">
                   {user.username}
                 </span>
@@ -1458,6 +1589,33 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                 </a>
               )}
 
+              <Separator className="my-1" />
+
+              {/* Connection status */}
+              <div className="px-3 py-2 flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-success' : 'bg-danger animate-pulse'}`} />
+                <span className="text-xs text-text-muted">{connected ? 'Connected' : 'Disconnected'}</span>
+                <button
+                  onClick={handleToggleConnection}
+                  className="ml-auto text-[11px] text-primary hover:underline"
+                >
+                  {connected ? 'Disconnect' : 'Reconnect'}
+                </button>
+              </div>
+
+              {/* Shut down host (gated on local-computer service) */}
+              {localComputerEnabled && (
+                <button
+                  onClick={() => { setAccountPopoverOpen(false); setConfirmShutdown(true); }}
+                  className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-danger hover:bg-bg-hover transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                  </svg>
+                  Shut down My Computer
+                </button>
+              )}
+
               {/* Logout */}
               <button
                 onClick={() => {
@@ -1475,6 +1633,27 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           </Popover>
         )}
       </SidebarFooter>
+
+      <AlertDialog open={confirmShutdown} onOpenChange={setConfirmShutdown}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Shut down your computer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will issue a system shutdown command. Any unsaved work will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={shuttingDown}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleShutdown(); }}
+              disabled={shuttingDown}
+              className="bg-danger hover:bg-danger/90 text-white"
+            >
+              {shuttingDown ? 'Shutting down…' : 'Shut down'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Sidebar chat long-press / hover context menu */}
       <ContextMenu
@@ -1513,12 +1692,22 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
             onAction: () => setChatCategory(sidebarCtx.projectId, sidebarCtx.chat.chatId, null),
           }] : []),
-          ...(sidebarCtx.chat.status === 'unread' ? [] : [{
-            label: 'Set as unread',
-            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
-            onAction: () => {
-              api.put(`/api/projects/${sidebarCtx.projectId}/chats/${sidebarCtx.chat.chatId}/unread`).catch(() => {});
-            },
+          // Sidebar tab actions: Pin/Unpin and Close. Pinned tabs are sticky
+          // (no close X on the row) — Unpin first, then Close. Auto-reopen
+          // on a new reply still applies to closed tabs.
+          sidebarCtx.chat.tabPinnedAt ? {
+            label: 'Unpin from sidebar',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M9 9v6m6-6v6M5 7h14l-1 12H6L5 7zm2-4h10" /></svg>,
+            onAction: () => unpinChatTabLocal(sidebarCtx.projectId, sidebarCtx.chat.chatId),
+          } : {
+            label: 'Pin to sidebar',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4m0 0H8m8 0l-4 4m-3 9l-3 3m0 0v-6h6m-3 3l9-9" /></svg>,
+            onAction: () => pinChatTabLocal(sidebarCtx.projectId, sidebarCtx.chat.chatId),
+          },
+          ...(sidebarCtx.chat.tabPinnedAt ? [] : [{
+            label: 'Close tab',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            onAction: () => closeChatTabLocal(sidebarCtx.projectId, sidebarCtx.chat.chatId),
           }]),
           {
             label: 'Delete',

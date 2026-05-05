@@ -9,8 +9,25 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import db from './database.ts';
 import projectManager from './projectManager.ts';
+import sidebarSync from './sidebarSync.ts';
 import type { UnifiedStatus, SessionStateContext } from '../../shared/types/session.ts';
 import type { ActiveChat, GlobalActiveChats, ActiveProjectChats } from '../../shared/types/socket-events.ts';
+
+// Auto-promote a chat to an open sidebar tab and broadcast the change.
+// Called whenever a chat enters an "interesting" state (working, awaiting,
+// unread) so closed tabs reappear when the agent has something to say.
+// No-op if the tab was already open. Broadcasts only when state actually
+// changed, to keep socket traffic clean during chatty agent runs.
+function autoOpenTab(chatId: string, projectId: string): void {
+  if (!projectManager.openChatTab(chatId)) return;
+  const state = projectManager.getChatTabState(chatId);
+  sidebarSync.chatMetaChanged({
+    projectId,
+    chatId,
+    tabOpenedAt: state?.tabOpenedAt ?? null,
+    tabPinnedAt: state?.tabPinnedAt ?? null,
+  });
+}
 
 // Statuses that count as live-actionable for the sidebar / badge
 const INTERESTING_STATUSES: Set<string> = new Set([
@@ -81,6 +98,7 @@ function onSessionStateChange(
         lastActivityAt: info.lastActivityAt,
       });
     }
+    autoOpenTab(chatId, projectId);
     scheduleBroadcast();
   } else if (existing) {
     existing.sessionStatus = null;
@@ -109,6 +127,7 @@ function onChatUnread(chatId: string, projectId: string, label: string): void {
       lastActivityAt: info?.lastActivityAt ?? new Date().toISOString(),
     });
   }
+  autoOpenTab(chatId, projectId);
   scheduleBroadcast();
 }
 

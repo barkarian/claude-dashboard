@@ -11,6 +11,7 @@ import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
 import ModelPicker from './ModelPicker.tsx';
+import ActivityBar from './ActivityBar.tsx';
 import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 import type { ChatArtifact } from '../../../../shared/types/models.ts';
@@ -36,6 +37,7 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   const {
     messages,
     status,
+    activity,
     pendingPermission,
     pendingQuestion,
     lastResult,
@@ -300,6 +302,11 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             trailingArtifacts={trailingArtifacts}
             projectId={projectId}
           />
+
+          {/* Live "what is the agent doing" hint — replaces the old 3-dots
+              streaming indicator with contextual labels (tool name, thinking,
+              retry, awaiting permission). */}
+          <ActivityBar label={activity} />
 
           {/* Cost badge */}
           {lastResult && status === 'idle' && <CostBadge result={lastResult} />}

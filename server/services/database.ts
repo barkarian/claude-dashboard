@@ -462,6 +462,61 @@ try {
   console.error('claude-agent-sdk retirement migration failed:', err);
 }
 
+// === Sidebar tabs (browser/VSCode-style "open chats" model) =============
+// chat is "in the sidebar" iff tab_opened_at IS NOT NULL.
+// chat is "pinned to sidebar" (sticky tab) iff tab_pinned_at IS NOT NULL —
+// pinned implies opened. Sort order within a project: pinned first
+// (tab_pinned_at DESC), then unpinned tabs (tab_opened_at DESC). Closing a
+// tab clears both columns; pinning sets both.
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN tab_opened_at TEXT`);
+} catch {
+  // Already exists — ignore
+}
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN tab_pinned_at TEXT`);
+} catch {
+  // Already exists — ignore
+}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_chats_tab_opened ON chats(project_id, tab_opened_at)`);
+} catch {
+  // Already exists — ignore
+}
+
+// One-shot backfill on first boot after this migration ships: open the top
+// 5 most recent chats per project + every currently-unread chat. Without
+// this, every user wakes up to an empty sidebar after the upgrade. Gated
+// by a settings flag so it runs at most once per database.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.tabs_backfill_at'").get();
+  if (!flag) {
+    db.prepare(`
+      UPDATE chats
+      SET tab_opened_at = COALESCE(last_activity_at, created_at)
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY project_id
+            ORDER BY COALESCE(last_activity_at, created_at) DESC
+          ) AS rn
+          FROM chats
+        ) WHERE rn <= 5
+      )
+    `).run();
+    db.prepare(`
+      UPDATE chats
+      SET tab_opened_at = COALESCE(last_activity_at, created_at)
+      WHERE unread = 1 AND tab_opened_at IS NULL
+    `).run();
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.tabs_backfill_at', ?)"
+    ).run(new Date().toISOString());
+  }
+} catch (err) {
+  console.error('tabs backfill migration failed:', err);
+}
+
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
   return row?.value;

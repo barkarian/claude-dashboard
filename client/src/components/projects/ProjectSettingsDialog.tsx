@@ -123,6 +123,10 @@ export default function ProjectSettingsDialog({
   const [dirExists, setDirExists] = useState<boolean | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Advanced section is collapsed by default — Mode/Shell/AI-Naming are
+  // changed irregularly so they shouldn't compete with everyday settings.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setLocalShellOverride(shellOverride || '');
@@ -230,98 +234,39 @@ export default function ProjectSettingsDialog({
           </DrawerHeader>
 
           {/* Scrollable body — vaul's handleOnly keeps this scroll area independent of the close gesture. */}
-          <div className="overflow-y-auto overscroll-contain px-4 pb-6 space-y-5" style={{ maxHeight: 'calc(90vh - 72px)' }}>
-            {/* Project info */}
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Name</label>
-                <p className="text-sm text-text mt-0.5">{projectName}</p>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Path</label>
-                <p className="text-xs text-text-muted font-mono mt-0.5 break-all">{projectPath}</p>
-              </div>
+          <div className="overflow-y-auto overscroll-contain px-4 pb-6 space-y-4" style={{ maxHeight: 'calc(90vh - 72px)' }}>
+            {/* Project info — compact single block */}
+            <div>
+              <p className="text-base font-semibold text-text truncate">{projectName}</p>
+              <p className="text-xs text-text-muted font-mono mt-0.5 break-all">{projectPath}</p>
             </div>
 
             {/* Pin to sidebar */}
-            <div className="border-t border-border pt-4">
-              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Sidebar</label>
-              <div className="flex items-center justify-between mt-2">
-                <p className="text-sm text-text">
-                  {pinned ? 'Pinned to sidebar' : 'Pin to sidebar'}
+            <div className="border-t border-border pt-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-text">{pinned ? 'Pinned to sidebar' : 'Pin to sidebar'}</p>
+                <p className="text-xs text-text-muted mt-0.5">
+                  {pinned ? 'Stays at the top of the sidebar.' : 'Pinned workspaces show instead of recent ones.'}
                 </p>
-                <Button
-                  size="sm"
-                  variant={pinned ? 'outline' : 'default'}
-                  onClick={handleTogglePin}
-                  disabled={pinning}
-                >
-                  {pinning ? '...' : pinned ? 'Unpin' : 'Pin'}
-                </Button>
               </div>
-              <p className="text-xs text-text-muted mt-1">
-                {pinned
-                  ? 'This workspace stays at the top of the sidebar.'
-                  : 'Pinned workspaces show in the sidebar instead of recent ones.'}
-              </p>
+              <Button
+                size="sm"
+                variant={pinned ? 'outline' : 'default'}
+                onClick={handleTogglePin}
+                disabled={pinning}
+                className="flex-shrink-0"
+              >
+                {pinning ? '...' : pinned ? 'Unpin' : 'Pin'}
+              </Button>
             </div>
 
-            {/* Workspace mode (Simple vs Dev) — placed above Chat Agents because mode controls which adapters appear below */}
-            <div className="border-t border-border pt-4">
-              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Mode</label>
-              <p className="text-xs text-text-muted mt-0.5 mb-2">
-                {localMode === 'simple'
-                  ? 'Clean Chats + Files surface. The agent uses the SDK adapter.'
-                  : 'Power surface — Scripts tab, file path breadcrumb, and adapter choice.'}
-              </p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
-                  <button
-                    type="button"
-                    onClick={() => setLocalMode('simple')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
-                      localMode === 'simple'
-                        ? 'bg-primary text-white'
-                        : 'text-text-muted hover:text-text'
-                    }`}
-                  >
-                    Simple
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLocalMode('dev')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
-                      localMode === 'dev'
-                        ? 'bg-primary text-white'
-                        : 'text-text-muted hover:text-text'
-                    }`}
-                  >
-                    Dev
-                  </button>
-                </div>
-                {modeChanged && (
-                  <Button size="sm" onClick={handleSaveMode} disabled={savingMode}>
-                    {savingMode ? 'Saving...' : 'Save'}
-                  </Button>
-                )}
-              </div>
-              {modeChanged && localMode === 'simple' && (
-                <p className="text-xs text-text-muted mt-2">
-                  Existing Dev chats keep working in this workspace; new chats use the Simple adapter.
-                </p>
-              )}
-              {modeChanged && localMode === 'simple' && unpushedCount > 0 && (
-                <p className="text-xs text-warning mt-2">
-                  You have {unpushedCount} unpushed change{unpushedCount !== 1 ? 's' : ''} that won't be visible in Simple mode. Push from the Git tab first if you want them on your remote.
-                </p>
-              )}
-            </div>
-
-            {/* Chat adapters (reorder + default) — only Dev mode surfaces the multi-adapter picker. */}
-            {mode === 'dev' && enabledAdapters.length > 1 && (
-              <div className="border-t border-border pt-4">
+            {/* Chat Agents — drag-and-drop reorder. Visible in both modes whenever
+                there are 2+ eligible adapters; mode controls eligibility (terminal
+                adapters are dev-only). */}
+            {enabledAdapters.length > 1 && (
+              <div className="border-t border-border pt-3">
                 <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Chat Agents</label>
-                <p className="text-xs text-text-muted mt-0.5 mb-3">
+                <p className="text-xs text-text-muted mt-0.5 mb-2">
                   Drag to reorder. The top agent is the default for new chats.
                 </p>
                 <SortableAdapterList
@@ -332,72 +277,149 @@ export default function ProjectSettingsDialog({
               </div>
             )}
 
-            {/* Shell configuration */}
-            <div className="border-t border-border pt-4">
-              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Terminal Shell</label>
-              <p className="text-xs text-text-muted mt-0.5 mb-2">
-                Account default: <span className="font-mono font-semibold text-text">{shellPref?.accountShell || '...'}</span>
-              </p>
-              <div className="flex items-center gap-2">
-                <select
-                  value={localShellOverride}
-                  onChange={(e) => setLocalShellOverride(e.target.value)}
-                  className="flex-1 bg-bg-surface border border-border rounded-md px-2.5 py-1.5 text-sm text-text focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors appearance-none cursor-pointer"
-                >
-                  <option value="">Use account default ({shellPref?.accountShell || '...'})</option>
-                  {(shellPref?.availableShells || []).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                {shellChanged && (
-                  <Button size="sm" onClick={handleSaveShell} disabled={savingShell}>
-                    {savingShell ? 'Saving...' : 'Save'}
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {/* AI Chat Naming */}
-            <div className="border-t border-border pt-4">
-              <label className="text-xs font-medium text-text-dim uppercase tracking-wider">AI Chat Naming</label>
-              <p className="text-xs text-text-muted mt-0.5 mb-2">
-                Auto-generate descriptive chat titles using AI on first message.
-              </p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
-                  <button
-                    type="button"
-                    onClick={() => setLocalAiNaming('none')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
-                      localAiNaming === 'none'
-                        ? 'bg-primary text-white'
-                        : 'text-text-muted hover:text-text'
-                    }`}
-                  >
-                    Off
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLocalAiNaming('on')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
-                      localAiNaming === 'on'
-                        ? 'bg-primary text-white'
-                        : 'text-text-muted hover:text-text'
-                    }`}
-                  >
-                    On
-                  </button>
+            {/* Advanced — collapsed by default (Mode, Terminal Shell, AI Naming
+                are changed irregularly). */}
+            <div className="border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen(o => !o)}
+                className="w-full flex items-center justify-between gap-2 text-left"
+                aria-expanded={advancedOpen}
+              >
+                <div>
+                  <span className="text-xs font-medium text-text-dim uppercase tracking-wider">Advanced</span>
+                  <p className="text-xs text-text-muted mt-0.5">Mode, terminal shell, AI naming</p>
                 </div>
-                {aiNamingChanged && (
-                  <Button size="sm" onClick={handleSaveAiNaming} disabled={savingAiNaming}>
-                    {savingAiNaming ? 'Saving...' : 'Save'}
-                  </Button>
-                )}
-              </div>
+                <svg
+                  className={`w-4 h-4 text-text-dim transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </button>
+
+              {advancedOpen && (
+                <div className="mt-3 space-y-4">
+                  {/* Workspace mode (Simple vs Dev) */}
+                  <div>
+                    <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Mode</label>
+                    <p className="text-xs text-text-muted mt-0.5 mb-2">
+                      {localMode === 'simple'
+                        ? 'Clean Chats + Files surface. The agent uses the SDK adapter.'
+                        : 'Power surface — Scripts tab, file path breadcrumb, and adapter choice.'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setLocalMode('simple')}
+                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                            localMode === 'simple'
+                              ? 'bg-primary text-white'
+                              : 'text-text-muted hover:text-text'
+                          }`}
+                        >
+                          Simple
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLocalMode('dev')}
+                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                            localMode === 'dev'
+                              ? 'bg-primary text-white'
+                              : 'text-text-muted hover:text-text'
+                          }`}
+                        >
+                          Dev
+                        </button>
+                      </div>
+                      {modeChanged && (
+                        <Button size="sm" onClick={handleSaveMode} disabled={savingMode}>
+                          {savingMode ? 'Saving...' : 'Save'}
+                        </Button>
+                      )}
+                    </div>
+                    {modeChanged && localMode === 'simple' && (
+                      <p className="text-xs text-text-muted mt-2">
+                        Existing Dev chats keep working in this workspace; new chats use the Simple adapter.
+                      </p>
+                    )}
+                    {modeChanged && localMode === 'simple' && unpushedCount > 0 && (
+                      <p className="text-xs text-warning mt-2">
+                        You have {unpushedCount} unpushed change{unpushedCount !== 1 ? 's' : ''} that won't be visible in Simple mode. Push from the Git tab first if you want them on your remote.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Shell configuration */}
+                  <div>
+                    <label className="text-xs font-medium text-text-dim uppercase tracking-wider">Terminal Shell</label>
+                    <p className="text-xs text-text-muted mt-0.5 mb-2">
+                      Account default: <span className="font-mono font-semibold text-text">{shellPref?.accountShell || '...'}</span>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={localShellOverride}
+                        onChange={(e) => setLocalShellOverride(e.target.value)}
+                        className="flex-1 bg-bg-surface border border-border rounded-md px-2.5 py-1.5 text-sm text-text focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors appearance-none cursor-pointer"
+                      >
+                        <option value="">Use account default ({shellPref?.accountShell || '...'})</option>
+                        {(shellPref?.availableShells || []).map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      {shellChanged && (
+                        <Button size="sm" onClick={handleSaveShell} disabled={savingShell}>
+                          {savingShell ? 'Saving...' : 'Save'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* AI Chat Naming */}
+                  <div>
+                    <label className="text-xs font-medium text-text-dim uppercase tracking-wider">AI Chat Naming</label>
+                    <p className="text-xs text-text-muted mt-0.5 mb-2">
+                      Auto-generate descriptive chat titles using AI on first message.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex gap-1 p-0.5 bg-bg rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setLocalAiNaming('none')}
+                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                            localAiNaming === 'none'
+                              ? 'bg-primary text-white'
+                              : 'text-text-muted hover:text-text'
+                          }`}
+                        >
+                          Off
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLocalAiNaming('on')}
+                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                            localAiNaming === 'on'
+                              ? 'bg-primary text-white'
+                              : 'text-text-muted hover:text-text'
+                          }`}
+                        >
+                          On
+                        </button>
+                      </div>
+                      {aiNamingChanged && (
+                        <Button size="sm" onClick={handleSaveAiNaming} disabled={savingAiNaming}>
+                          {savingAiNaming ? 'Saving...' : 'Save'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Danger zone */}
-            <div className="border-t border-border pt-4">
+            <div className="border-t border-border pt-3">
               <label className="text-xs font-medium text-danger uppercase tracking-wider">Danger Zone</label>
               <p className="text-xs text-text-muted mt-0.5 mb-2">
                 Permanently delete this workspace and all its chats and scripts.

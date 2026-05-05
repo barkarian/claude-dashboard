@@ -195,6 +195,17 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   const [creating, setCreating] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const { enabledIds, adapters: adapterInfos, loading: adaptersLoading } = useAdapterSettings();
+  // Mode-eligible enabled adapters: simple mode hides terminal-only adapters
+  // (claude-code) since they require the dev surface. Use this — not raw
+  // enabledIds — when deciding picker behavior so the simple-mode chooser
+  // surfaces every non-terminal adapter the user has set up in the catalog.
+  const eligibleEnabledIds = useMemo(() => {
+    const isSimple = project?.mode === 'simple';
+    return adapterInfos
+      .filter(a => a.enabled)
+      .filter(a => !isSimple || !a.metadata.capabilities.terminal)
+      .map(a => a.metadata.id);
+  }, [adapterInfos, project?.mode]);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -393,23 +404,23 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   }
 
   function handleNewChat() {
-    if (enabledIds.length === 0) {
-      // No adapters enabled → navigate to settings
+    if (eligibleEnabledIds.length === 0) {
+      // No mode-eligible adapters → navigate to catalog
       navigate('/catalog');
       return;
     }
-    if (enabledIds.length === 1) {
-      // Only one adapter → use it directly
-      createChatWithAdapter(enabledIds[0]);
+    if (eligibleEnabledIds.length === 1) {
+      // Only one eligible adapter → use it directly
+      createChatWithAdapter(eligibleEnabledIds[0]);
       return;
     }
-    // Check if project has a default adapter that is enabled
+    // Use the project's default only if it's eligible in the current mode
+    // (a stale claude-code default in simple mode falls through to the picker).
     const defaultAdapter = project?.defaultAdapter;
-    if (defaultAdapter && enabledIds.includes(defaultAdapter)) {
+    if (defaultAdapter && eligibleEnabledIds.includes(defaultAdapter)) {
       createChatWithAdapter(defaultAdapter);
       return;
     }
-    // Multiple enabled, no valid default → show picker
     setPickerOpen(true);
   }
 
@@ -431,7 +442,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
   }
 
   function handleForcePickerOpen() {
-    if (enabledIds.length === 0) {
+    if (eligibleEnabledIds.length === 0) {
       navigate('/catalog');
       return;
     }
@@ -499,9 +510,29 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     }
   }
 
-  function handleSetUnread(chat: Chat) {
-    setUnreadIds(prev => new Set(prev).add(chat.id));
-    api.put(`/api/projects/${projectId}/chats/${chat.id}/unread`).catch(() => {});
+  // "Mark as unread" used to be a manual menu item — removed in favour of the
+  // tab-pin model. The unread *state* (auto-set when an agent replies) is
+  // still tracked by the activeChatsTracker and shown via unreadIds.
+
+  // Sidebar tab toggles. Optimistic — server broadcast via useSidebarSync
+  // returns and we de-dupe.
+  function handlePinToSidebar(chat: Chat) {
+    const now = new Date().toISOString();
+    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, tabPinnedAt: now, tabOpenedAt: c.tabOpenedAt ?? now } : c));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/tab`, { pinned: true }).catch(() => {});
+  }
+  function handleUnpinFromSidebar(chat: Chat) {
+    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, tabPinnedAt: null } : c));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/tab`, { pinned: false }).catch(() => {});
+  }
+  function handleCloseTab(chat: Chat) {
+    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, tabOpenedAt: null, tabPinnedAt: null } : c));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/tab`, { opened: false }).catch(() => {});
+  }
+  function handleOpenInSidebar(chat: Chat) {
+    const now = new Date().toISOString();
+    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, tabOpenedAt: now } : c));
+    api.put(`/api/projects/${projectId}/chats/${chat.id}/tab`, { opened: true }).catch(() => {});
   }
 
   // Desktop hover popover: show extra actions (favorite, unread, view summary)
@@ -641,7 +672,7 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               </svg>
               {creating ? 'Creating...' : 'New Chat'}
             </Button>
-            {enabledIds.length > 1 && (
+            {eligibleEnabledIds.length > 1 && (
               <Button onClick={handleForcePickerOpen} disabled={creating} variant="outline" className="px-2">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -883,12 +914,16 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    {chat.category ? (
+                    {chat.tabPinnedAt ? (
+                      <svg className="flex-shrink-0 w-3.5 h-3.5 text-text" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4m0 0H8m8 0l-4 4m-3 9l-3 3m0 0v-6h6m-3 3l9-9" />
+                      </svg>
+                    ) : chat.category ? (
                       <span className="flex-shrink-0 text-[13px] leading-none" aria-hidden>{chat.category.emoji}</span>
                     ) : unreadIds.has(chat.id) ? (
                       <span className="flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
                     ) : null}
-                    <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
+                    <h4 className={`font-medium group-hover-hover:text-primary transition-colors truncate ${chat.tabPinnedAt ? 'text-text font-bold' : unreadIds.has(chat.id) ? 'text-text font-semibold' : 'text-text'}`}>
                       {generatingTitle === chat.id ? (
                         <span className="flex items-center gap-1.5">
                           <span className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full flex-shrink-0" />
@@ -1084,11 +1119,28 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
             icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
             onAction: () => setManagerOpen(true),
           },
-          ...(!unreadIds.has(hoverCtx.chat.id) ? [{
-            label: 'Set as unread',
-            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
-            onAction: () => handleSetUnread(hoverCtx.chat),
-          }] : []),
+          // Sidebar tab actions — Pin/Unpin (sticky), Open/Close (dismissable
+          // tab). Auto-reopen still applies if the closed chat gets a reply.
+          hoverCtx.chat.tabPinnedAt ? {
+            label: 'Unpin from sidebar',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M9 9v6m6-6v6M5 7h14l-1 12H6L5 7zm2-4h10" /></svg>,
+            onAction: () => handleUnpinFromSidebar(hoverCtx.chat),
+          } : {
+            label: 'Pin to sidebar',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4m0 0H8m8 0l-4 4m-3 9l-3 3m0 0v-6h6m-3 3l9-9" /></svg>,
+            onAction: () => handlePinToSidebar(hoverCtx.chat),
+          },
+          ...(hoverCtx.chat.tabPinnedAt ? [] : [
+            hoverCtx.chat.tabOpenedAt ? {
+              label: 'Close tab',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+              onAction: () => handleCloseTab(hoverCtx.chat),
+            } : {
+              label: 'Open in sidebar',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>,
+              onAction: () => handleOpenInSidebar(hoverCtx.chat),
+            },
+          ]),
           // Edit + Delete only appear on mobile here — desktop already has them inline.
           ...(isMobile ? [
             {

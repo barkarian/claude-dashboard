@@ -12,7 +12,7 @@ const manifest: AdapterMetadata = {
     messages: true,
     resume: true,
     fileWatching: false,
-    permissions: false,       // tool permissions UX deferred — slice c v1 is text-only
+    permissions: true,
     questions: false,
     prerequisites: true,      // requires `opencode` binary + auth.json
     concurrentSessions: true,
