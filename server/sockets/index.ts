@@ -7,12 +7,14 @@ import registerAIGenerateEvents from './ai-generate.ts';
 import registerToolEvents from './tools.ts';
 import registerAdapterOrchestrator from './adapter-orchestrator.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
+import sidebarSync from '../services/sidebarSync.ts';
 import { loadAdapters } from '../adapters/loader.ts';
 import { wireAdapterEvents } from '../adapters/wire-events.ts';
 
 export default async function registerSocketHandlers(io: SocketIOServer): Promise<void> {
-  // Initialize global active chats tracker
+  // Initialize global active chats tracker + sidebar live-sync emitter
   activeChatsTracker.init(io);
+  sidebarSync.init(io);
 
   // Auto-discover and register all adapters from adapters/ directory
   await loadAdapters();

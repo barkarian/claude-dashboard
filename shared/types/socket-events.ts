@@ -169,3 +169,57 @@ export interface GlobalActiveChats {
   /** Count of unread + awaiting chats only (excludes plain working) — used for dock/app badge */
   badgeCount: number;
 }
+
+// === Sidebar live-sync events ===
+// Broadcast on the existing global:active-chats room. Used to keep every
+// connected client (mobile, desktop, second laptop) in lockstep on the
+// sidebar's view of projects + chats without polling. See server/services/
+// sidebarSync.ts for the emit helpers.
+
+import type { Chat, ProjectSummary } from './models.ts';
+
+export interface SidebarChatCreated {
+  projectId: string;
+  chat: Chat;
+}
+
+export interface SidebarChatDeleted {
+  projectId: string;
+  chatId: string;
+}
+
+/** Fields that may change for a chat outside of session-status updates.
+ *  Any field omitted means "no change". `categoryEmoji` is sent alongside
+ *  `categoryId` so clients don't have to look up the emoji themselves. */
+export interface SidebarChatMetaChanged {
+  projectId: string;
+  chatId: string;
+  label?: string;
+  categoryId?: string | null;
+  categoryEmoji?: string | null;
+  lastActivityAt?: string;
+}
+
+export interface SidebarProjectPinChanged {
+  projectId: string;
+  pinned: boolean;
+  pinnedAt: string | null;
+}
+
+export interface SidebarProjectReordered {
+  /** Pinned-project ids in their new order, top-first. */
+  orderedIds: string[];
+}
+
+export interface SidebarProjectActivity {
+  projectId: string;
+  lastActivityAt: string;
+}
+
+export interface SidebarProjectCreated {
+  project: ProjectSummary;
+}
+
+export interface SidebarProjectDeleted {
+  projectId: string;
+}

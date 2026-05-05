@@ -5,7 +5,16 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import db, { resolveDefaultAdapter, getDefaultModel } from './database.ts';
 import gitService from './gitService.ts';
+import sidebarSync from './sidebarSync.ts';
 import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, ChatCategory, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
+
+// Read project_id for a chat — used by activity broadcasts. Tiny prepared
+// statement, cached at module scope so the hot path doesn't re-prepare.
+const getChatProjectIdStmt = db.prepare('SELECT project_id FROM chats WHERE id = ?');
+function getChatProjectId(chatId: string): string | null {
+  const row = getChatProjectIdStmt.get(chatId) as { project_id: string } | undefined;
+  return row?.project_id ?? null;
+}
 
 // === Project Methods ===
 
@@ -629,6 +638,8 @@ function updateChat(chatId: string, updates: { label?: string; description?: str
 
 function touchChatActivity(chatId: string): void {
   db.prepare("UPDATE chats SET last_activity_at = datetime('now') WHERE id = ?").run(chatId);
+  const projectId = getChatProjectId(chatId);
+  if (projectId) sidebarSync.projectActivity({ projectId, lastActivityAt: new Date().toISOString() });
 }
 
 function updateDraft(chatId: string, text: string): void {
@@ -781,6 +792,12 @@ function addMessage(chatId: string, message: { role: string; content: unknown; t
 
   // Update last_activity_at on the chat
   db.prepare("UPDATE chats SET last_activity_at = datetime('now') WHERE id = ?").run(chatId);
+
+  // Sidebar live-sync: bump Recents ordering. Debounced inside sidebarSync
+  // so a chatty agent run doesn't saturate the socket — at most one emit
+  // per project every 2 seconds.
+  const projectId = getChatProjectId(chatId);
+  if (projectId) sidebarSync.projectActivity({ projectId, lastActivityAt: new Date().toISOString() });
 
   return {
     id,

@@ -48,10 +48,21 @@ import {
 import { haptics } from '../../utils/haptics.ts';
 import type { Chat, ChatCategory, ProjectSummary } from '../../../../shared/types/models.ts';
 import { useProject } from '../../context/ProjectContext.tsx';
-import type { ActiveChat } from '../../../../shared/types/socket-events.ts';
+import type {
+  ActiveChat,
+  SidebarChatCreated,
+  SidebarChatDeleted,
+  SidebarChatMetaChanged,
+  SidebarProjectPinChanged,
+  SidebarProjectReordered,
+  SidebarProjectActivity,
+  SidebarProjectCreated,
+  SidebarProjectDeleted,
+} from '../../../../shared/types/socket-events.ts';
 import EnvironmentToggle from './EnvironmentToggle.tsx';
 import { useNewProjectDrawer } from '../../context/NewProjectDrawerContext.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
+import { useSidebarSync } from '../../hooks/useSidebarSync.ts';
 import { useNewAgent } from '../../hooks/useNewAgent.ts';
 
 export interface SidebarHandle {
@@ -723,6 +734,169 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   useImperativeHandle(ref, () => ({
     refreshProjects: loadInitial,
   }));
+
+  // ── Live sidebar sync (mobile ↔ desktop) ────────────────────────────
+  // Server broadcasts on global:active-chats; we apply each event to the
+  // local sidebar state so that chats created elsewhere, pin/unpin actions
+  // from another device, category emoji changes from the chat list view,
+  // and project deletions all show up immediately without a refresh.
+  // Optimistic local updates already happen in handleQuickNewChat /
+  // pinProject / etc., so handlers must be idempotent — dedupe on id.
+
+  const onChatCreated = useCallback((e: SidebarChatCreated) => {
+    setChatsByProject(prev => {
+      const entry = prev[e.projectId];
+      if (!entry) return prev; // project not lazy-fetched yet — first expand will load it
+      if (entry.chats.some(c => c.id === e.chat.id)) return prev;
+      return {
+        ...prev,
+        [e.projectId]: { chats: [e.chat, ...entry.chats], total: entry.total + 1 },
+      };
+    });
+  }, []);
+
+  const onChatDeleted = useCallback((e: SidebarChatDeleted) => {
+    setChatsByProject(prev => {
+      const entry = prev[e.projectId];
+      if (!entry) return prev;
+      const filtered = entry.chats.filter(c => c.id !== e.chatId);
+      if (filtered.length === entry.chats.length) return prev;
+      return {
+        ...prev,
+        [e.projectId]: { chats: filtered, total: Math.max(0, entry.total - 1) },
+      };
+    });
+  }, []);
+
+  const onChatMetaChanged = useCallback((e: SidebarChatMetaChanged) => {
+    setChatsByProject(prev => {
+      const entry = prev[e.projectId];
+      if (!entry) return prev;
+      let changed = false;
+      const chats = entry.chats.map(c => {
+        if (c.id !== e.chatId) return c;
+        changed = true;
+        const next: typeof c = { ...c };
+        if (e.label !== undefined) next.label = e.label;
+        if (e.categoryId !== undefined) next.categoryId = e.categoryId;
+        if (e.categoryEmoji !== undefined) {
+          // category is `{ emoji, ... } | null` — preserve the rest if we can.
+          if (e.categoryEmoji === null) {
+            next.category = null;
+          } else if (next.category) {
+            next.category = { ...next.category, emoji: e.categoryEmoji };
+          }
+        }
+        if (e.lastActivityAt !== undefined) next.lastActivityAt = e.lastActivityAt;
+        return next;
+      });
+      if (!changed) return prev;
+      return { ...prev, [e.projectId]: { chats, total: entry.total } };
+    });
+  }, []);
+
+  const onProjectPinChanged = useCallback((e: SidebarProjectPinChanged) => {
+    if (e.pinned) {
+      // Pin: move from Recents → Pinned (top by default). If we don't have
+      // the project in either list yet, fetch a fresh summary in the next
+      // loadInitial — the user will see it when they refresh.
+      setProjects(prevRecents => {
+        let project: ProjectSummary | undefined = prevRecents.find(p => p.id === e.projectId);
+        const recents = project ? prevRecents.filter(p => p.id !== e.projectId) : prevRecents;
+        setPinnedProjects(prevPinned => {
+          if (!project) project = prevPinned.find(p => p.id === e.projectId);
+          if (!project) return prevPinned; // unknown project; ignore
+          const without = prevPinned.filter(p => p.id !== e.projectId);
+          const updated: ProjectSummary = { ...project, pinned: true, pinnedAt: e.pinnedAt };
+          return [updated, ...without];
+        });
+        return recents;
+      });
+    } else {
+      // Unpin: move from Pinned → Recents (insert by lastActivityAt).
+      setPinnedProjects(prevPinned => {
+        const project = prevPinned.find(p => p.id === e.projectId);
+        if (!project) return prevPinned;
+        const without = prevPinned.filter(p => p.id !== e.projectId);
+        setProjects(prevRecents => {
+          if (prevRecents.some(p => p.id === e.projectId)) return prevRecents;
+          const updated: ProjectSummary = { ...project, pinned: false, pinnedAt: null };
+          return [...prevRecents, updated].sort(sortByActivity);
+        });
+        return without;
+      });
+    }
+  }, [sortByActivity]);
+
+  const onProjectReordered = useCallback((e: SidebarProjectReordered) => {
+    setPinnedProjects(prev => {
+      const byId = new Map(prev.map(p => [p.id, p]));
+      const reordered: ProjectSummary[] = [];
+      for (const id of e.orderedIds) {
+        const p = byId.get(id);
+        if (p) { reordered.push(p); byId.delete(id); }
+      }
+      // Append any pinned items the server didn't mention (defensive).
+      for (const p of byId.values()) reordered.push(p);
+      return reordered;
+    });
+  }, []);
+
+  const onProjectActivity = useCallback((e: SidebarProjectActivity) => {
+    setProjects(prev => {
+      const idx = prev.findIndex(p => p.id === e.projectId);
+      if (idx < 0) return prev;
+      if (prev[idx].lastActivityAt === e.lastActivityAt) return prev;
+      const updated: ProjectSummary = { ...prev[idx], lastActivityAt: e.lastActivityAt };
+      const next = [...prev];
+      next[idx] = updated;
+      next.sort(sortByActivity);
+      return next;
+    });
+    // Pinned projects don't need re-sorting on activity (manual order), but
+    // we still keep their lastActivityAt fresh for any UI that reads it.
+    setPinnedProjects(prev => {
+      const idx = prev.findIndex(p => p.id === e.projectId);
+      if (idx < 0) return prev;
+      if (prev[idx].lastActivityAt === e.lastActivityAt) return prev;
+      const next = [...prev];
+      next[idx] = { ...prev[idx], lastActivityAt: e.lastActivityAt };
+      return next;
+    });
+  }, [sortByActivity]);
+
+  const onProjectCreated = useCallback((e: SidebarProjectCreated) => {
+    if (e.project.pinned) {
+      setPinnedProjects(prev => prev.some(p => p.id === e.project.id) ? prev : [e.project, ...prev]);
+    } else {
+      setProjects(prev => {
+        if (prev.some(p => p.id === e.project.id)) return prev;
+        return [e.project, ...prev].sort(sortByActivity);
+      });
+    }
+  }, [sortByActivity]);
+
+  const onProjectDeleted = useCallback((e: SidebarProjectDeleted) => {
+    setPinnedProjects(prev => prev.filter(p => p.id !== e.projectId));
+    setProjects(prev => prev.filter(p => p.id !== e.projectId));
+    setChatsByProject(prev => {
+      if (!prev[e.projectId]) return prev;
+      const next = { ...prev };
+      delete next[e.projectId];
+      return next;
+    });
+  }, []);
+
+  useSidebarSync({
+    onChatCreated,
+    onChatDeleted,
+    onChatMetaChanged,
+    onProjectPinChanged,
+    onProjectReordered,
+    onProjectActivity,
+    onProjectCreated,
+    onProjectDeleted,
+  });
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;

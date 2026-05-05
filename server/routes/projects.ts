@@ -14,6 +14,7 @@ import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts
 import { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import config from '../config.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
+import sidebarSync from '../services/sidebarSync.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +76,7 @@ router.post('/reorder-pinned', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'orderedIds must be a string array' });
     }
     projectManager.reorderPinnedProjects(orderedIds);
+    sidebarSync.projectReordered({ orderedIds });
     res.json({ success: true });
   } catch (err) {
     console.error('Error reordering pinned projects:', err);
@@ -112,6 +114,12 @@ router.post('/', async (req: Request, res: Response) => {
       projectManager.updateProject(result.project.id, { mode });
       result.project.mode = mode;
     }
+    // Sidebar live-sync — broadcast the new workspace to every connected
+    // client (other tabs, mobile + desktop) so they all show it immediately.
+    if (result.project) {
+      const summary = projectManager.getProjectSummary(result.project.id);
+      if (summary) sidebarSync.projectCreated({ project: summary });
+    }
     res.status(201).json(result);
   } catch (err) {
     console.error('Error creating project:', err);
@@ -139,6 +147,8 @@ router.post('/register', async (req: Request, res: Response) => {
       projectManager.updateProject(project.id, { mode });
       project.mode = mode;
     }
+    const summary = projectManager.getProjectSummary(project.id);
+    if (summary) sidebarSync.projectCreated({ project: summary });
     res.status(201).json({ project });
   } catch (err: any) {
     console.error('Error registering project:', err);
@@ -158,6 +168,16 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
       return res.status(400).json({ error: "mode must be 'simple' or 'dev'" });
     }
     const project = projectManager.updateProject(req.params.id, req.body);
+    // Sidebar live-sync: only the pinned toggle changes the sidebar's view of
+    // a project's section membership. Label / mode / etc. don't move the row,
+    // so we skip the broadcast for those.
+    if (req.body.pinned !== undefined && project) {
+      sidebarSync.projectPinChanged({
+        projectId: req.params.id,
+        pinned: !!project.pinned,
+        pinnedAt: project.pinnedAt ?? null,
+      });
+    }
     res.json({ project });
   } catch (err: any) {
     if (err.message === 'Path does not exist or is not a directory') {
@@ -185,6 +205,7 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const deleteFolder = req.body?.deleteFolder !== false;
     await projectManager.deleteProject(req.params.id, deleteFolder);
+    sidebarSync.projectDeleted({ projectId: req.params.id });
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting project:', err);
@@ -661,6 +682,10 @@ router.post('/:id/chats', async (req: Request<{ id: string }>, res: Response) =>
     }
 
     const chat = projectManager.createChat(req.params.id, label, chatAdapter);
+    // Sidebar live-sync: tell every connected client about the new chat so
+    // it appears in the sidebar immediately (not only once it starts
+    // thinking and the active-chats tracker picks it up).
+    sidebarSync.chatCreated({ projectId: req.params.id, chat });
     res.status(201).json({ chat });
   } catch (err) {
     console.error('Error creating chat:', err);
@@ -684,6 +709,11 @@ router.patch('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: str
         io.to(`claude:${req.params.chatId}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: req.body.label });
       }
       activeChatsTracker.onChatRenamed(req.params.chatId, req.body.label);
+      sidebarSync.chatMetaChanged({
+        projectId: req.params.id,
+        chatId: req.params.chatId,
+        label: req.body.label,
+      });
     }
 
     res.json({ chat: updated });
@@ -748,6 +778,15 @@ router.put('/:id/chats/:chatId/category', async (req: Request<{ id: string; chat
     projectManager.setChatCategory(req.params.chatId, categoryId);
     activeChatsTracker.refreshChatMeta(req.params.chatId, req.params.id);
     const updated = projectManager.getChat(req.params.chatId);
+    // Sidebar live-sync: broadcast the category change so every connected
+    // client (including ones where the chat isn't actionable, so the
+    // tracker wouldn't pick it up) updates its visible emoji marker.
+    sidebarSync.chatMetaChanged({
+      projectId: req.params.id,
+      chatId: req.params.chatId,
+      categoryId: updated?.categoryId ?? null,
+      categoryEmoji: updated?.category?.emoji ?? null,
+    });
     res.json({ success: true, chat: updated });
   } catch (err: any) {
     console.error('Error setting chat category:', err);
@@ -857,6 +896,11 @@ router.post('/:id/chats/:chatId/generate-title', async (req: Request<{ id: strin
       io.to(`claude:${req.params.chatId}`).emit('claude:chat-renamed', { chatId: req.params.chatId, label: result.title });
     }
     activeChatsTracker.onChatRenamed(req.params.chatId, result.title);
+    sidebarSync.chatMetaChanged({
+      projectId: req.params.id,
+      chatId: req.params.chatId,
+      label: result.title,
+    });
 
     res.json({ title: result.title, description: result.description });
   } catch (err) {
@@ -869,6 +913,7 @@ router.delete('/:id/chats/:chatId', async (req: Request<{ id: string; chatId: st
   try {
     projectManager.deleteChat(req.params.chatId);
     activeChatsTracker.onChatRemoved(req.params.chatId);
+    sidebarSync.chatDeleted({ projectId: req.params.id, chatId: req.params.chatId });
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting chat:', err);

@@ -24,6 +24,7 @@ import ContextMenu from '../ui/ContextMenu.tsx';
 import MobileSearchSheet from '../ui/MobileSearchSheet.tsx';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
 import { useGlobalActiveChats } from '../../hooks/useGlobalActiveChats.ts';
+import { useSidebarSync } from '../../hooks/useSidebarSync.ts';
 import type { Project, Chat, ChatCategory } from '../../../../shared/types/models.ts';
 import type { SessionStateContext } from '../../../../shared/types/session.ts';
 import { getClientAdapter, listClientAdapters } from '../../adapters/registry.ts';
@@ -255,6 +256,63 @@ export default function ChatList({ projectId, project, sessionStates = {} }: Cha
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // ── Live sync from server (mirrors the sidebar's useSidebarSync) ────
+  // Keeps the chat list view in lockstep with sidebar mutations from other
+  // devices/tabs: new chats from another client appear here, category emoji
+  // changes flip live, deleted chats disappear without a refetch.
+  const onSyncChatCreated = useCallback((e: { projectId: string; chat: Chat }) => {
+    if (e.projectId !== projectId) return;
+    setChats(prev => prev.some(c => c.id === e.chat.id) ? prev : [e.chat, ...prev]);
+    setTotal(t => t + 1);
+  }, [projectId]);
+
+  const onSyncChatDeleted = useCallback((e: { projectId: string; chatId: string }) => {
+    if (e.projectId !== projectId) return;
+    setChats(prev => {
+      const filtered = prev.filter(c => c.id !== e.chatId);
+      if (filtered.length === prev.length) return prev;
+      setTotal(t => Math.max(0, t - 1));
+      return filtered;
+    });
+  }, [projectId]);
+
+  const onSyncChatMetaChanged = useCallback((e: {
+    projectId: string;
+    chatId: string;
+    label?: string;
+    categoryId?: string | null;
+    categoryEmoji?: string | null;
+    lastActivityAt?: string;
+  }) => {
+    if (e.projectId !== projectId) return;
+    setChats(prev => {
+      let changed = false;
+      const next = prev.map(c => {
+        if (c.id !== e.chatId) return c;
+        changed = true;
+        const updated: Chat = { ...c };
+        if (e.label !== undefined) updated.label = e.label;
+        if (e.categoryId !== undefined) updated.categoryId = e.categoryId;
+        if (e.categoryEmoji !== undefined) {
+          if (e.categoryEmoji === null) {
+            updated.category = null;
+          } else if (updated.category) {
+            updated.category = { ...updated.category, emoji: e.categoryEmoji };
+          }
+        }
+        if (e.lastActivityAt !== undefined) updated.lastActivityAt = e.lastActivityAt;
+        return updated;
+      });
+      return changed ? next : prev;
+    });
+  }, [projectId]);
+
+  useSidebarSync({
+    onChatCreated: onSyncChatCreated,
+    onChatDeleted: onSyncChatDeleted,
+    onChatMetaChanged: onSyncChatMetaChanged,
+  });
 
   // Fetch chats (initial or on search/filter change)
   useEffect(() => {
