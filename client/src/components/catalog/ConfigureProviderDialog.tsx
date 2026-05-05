@@ -43,7 +43,7 @@ function StatusDot({ status }: { status: SectionStatus }) {
 }
 
 function SectionShell({
-  title, status, expanded, onToggle, children, action,
+  title, status, expanded, onToggle, children, action, meta,
 }: {
   title: string;
   status: SectionStatus;
@@ -51,6 +51,8 @@ function SectionShell({
   onToggle: () => void;
   children?: React.ReactNode;
   action?: React.ReactNode;
+  /** Dim hint shown next to the title when collapsed (e.g. current default model). */
+  meta?: string;
 }) {
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -62,6 +64,9 @@ function SectionShell({
         <div className="flex items-center gap-2 min-w-0">
           <StatusDot status={status} />
           <span className="text-sm font-medium text-text truncate">{title}</span>
+          {!expanded && meta && (
+            <span className="text-xs text-text-muted truncate">· {meta}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {action}
@@ -177,13 +182,14 @@ function AuthSection({
 // ── Per-adapter section ─────────────────────────────────────────────
 
 function AdapterSection({
-  adapter, label, description, optional, onChanged,
+  adapter, label, description, optional, onChanged, defaultExpanded = false,
 }: {
   adapter: AdapterInfo;
   label: string;
   description: string;
   optional: boolean;
   onChanged: () => void;
+  defaultExpanded?: boolean;
 }) {
   const { metadata, prerequisites, enabled } = adapter;
   const { socket } = useSocket();
@@ -195,7 +201,10 @@ function AdapterSection({
     enabled ? 'green' :
     (optional ? 'green' : 'amber');
 
-  const [expanded, setExpanded] = useState(!prereqOk || (!enabled && !optional));
+  // Expand if anything is incomplete, OR the dialog asked us to (e.g. provider
+  // has only one adapter and no auth section, so leaving everything collapsed
+  // would render an empty-looking drawer).
+  const [expanded, setExpanded] = useState(defaultExpanded || !prereqOk || (!enabled && !optional));
   const [installing, setInstalling] = useState(false);
   const [installOutput, setInstallOutput] = useState('');
   const [models, setModels] = useState<ModelInfo[] | null>(null);
@@ -204,10 +213,11 @@ function AdapterSection({
   const [savingDefault, setSavingDefault] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
 
-  // Load models + defaults whenever section opens (and adapter is registered)
+  // Load models + defaults on mount. Used to be lazy-on-expand, but the
+  // collapsed header now shows a "Default: …" hint that needs the models
+  // list to map an id to a friendly label.
   useEffect(() => {
     let cancelled = false;
-    if (!expanded) return;
     api.get<{ models: ModelInfo[] }>(`/api/adapters/${metadata.id}/models`)
       .then(d => { if (!cancelled) setModels(d.models || []); })
       .catch(() => { if (!cancelled) setModels([]); });
@@ -218,7 +228,21 @@ function AdapterSection({
       .then(d => { if (!cancelled) setFavorites(d.favoriteModels || []); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [expanded, metadata.id]);
+  }, [metadata.id]);
+
+  // Friendly hint for the collapsed header: "Default: <label> · N favorites"
+  const collapsedMeta = (() => {
+    if (!defaultModel && favorites.length === 0) return undefined;
+    const parts: string[] = [];
+    if (defaultModel) {
+      const found = models?.find(m => m.id === defaultModel);
+      parts.push(`Default: ${found?.label ?? defaultModel}`);
+    }
+    if (favorites.length > 0) {
+      parts.push(`${favorites.length} favorite${favorites.length === 1 ? '' : 's'}`);
+    }
+    return parts.join(' · ');
+  })();
 
   const hasModels = models !== null && models.length > 0;
 
@@ -296,7 +320,7 @@ function AdapterSection({
       aria-label={enabled ? `Disable ${label}` : `Enable ${label}`}
     >
       <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-        enabled ? 'translate-x-4.5' : 'translate-x-0.5'
+        enabled ? 'translate-x-5' : 'translate-x-0.5'
       }`} />
     </button>
   );
@@ -308,6 +332,7 @@ function AdapterSection({
       expanded={expanded}
       onToggle={() => setExpanded(e => !e)}
       action={action}
+      meta={collapsedMeta}
     >
       <p className="text-xs text-text-muted">{description}</p>
 
@@ -379,13 +404,20 @@ function AdapterSection({
       {/* Favorites — only adapters with models */}
       {hasModels && models && (() => {
         const q = modelSearch.trim().toLowerCase();
-        const filtered = q
+        const matched = q
           ? models.filter(m =>
               m.id.toLowerCase().includes(q)
               || m.label.toLowerCase().includes(q)
               || (m.family ?? '').toLowerCase().includes(q),
             )
           : models;
+        // Pin currently-favorited models to the top so the user can see
+        // their selections at a glance — stable within each group.
+        const favSet = new Set(favorites);
+        const filtered = [
+          ...matched.filter(m => favSet.has(m.id)),
+          ...matched.filter(m => !favSet.has(m.id)),
+        ];
         return (
           <div>
             <div className="text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
@@ -468,6 +500,12 @@ export default function ConfigureProviderDialog({ open, onOpenChange, provider }
   // adapter handles its own auth — used by future OpenCode/Cursor).
   const authAdapter = provider.sharedAuth ? sections[0]?.info ?? null : null;
 
+  // If the dialog would otherwise render a single collapsed adapter row
+  // (single adapter + no auth section), force-expand it. Otherwise the
+  // user opens "Configure OpenCode" and sees what looks like an empty
+  // drawer with just a chevron.
+  const expandSingleSection = !authAdapter && sections.length === 1;
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="max-h-[90vh]">
@@ -500,6 +538,7 @@ export default function ConfigureProviderDialog({ open, onOpenChange, provider }
                   description={providerAdapter.description}
                   optional={!!providerAdapter.optional}
                   onChanged={refresh}
+                  defaultExpanded={expandSingleSection}
                 />
               ))}
             </>
