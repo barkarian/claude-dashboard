@@ -44,7 +44,7 @@ export default class ClawChatAdapter extends EventEmitter implements IChatAdapte
     // forced fallback at this layer.
     const model = chat?.model ?? null;
 
-    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true, model });
+    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true, withBrowser: true, model });
 
     return { chatId, projectId, status: 'idle' };
   }

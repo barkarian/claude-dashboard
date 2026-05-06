@@ -1,6 +1,7 @@
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
@@ -42,6 +43,17 @@ import permissionManagerService from './services/permissionManager.ts';
 
 // Override default session secret with auto-generated one
 config.sessionSecret = getOrCreateSessionSecret();
+
+// Make our bundled @playwright/cli and the claw-browser shim resolvable from
+// any child process (PTY) and the SDK's in-process Bash tool. node_modules/.bin
+// is added by package managers but only for `npm run`-style invocations; we
+// need it on PATH for arbitrary descendants too.
+const __serverDir = path.dirname(fileURLToPath(import.meta.url));
+const __binDirs = [
+  path.join(__serverDir, 'bin'),
+  path.join(__serverDir, 'node_modules', '.bin'),
+];
+process.env.PATH = `${__binDirs.join(path.delimiter)}${path.delimiter}${process.env.PATH || ''}`;
 
 // --- SQLite session store (uses existing better-sqlite3 db) ---
 class SQLiteSessionStore extends session.Store {

@@ -14,7 +14,7 @@ import ModelPicker from './ModelPicker.tsx';
 import ActivityBar from './ActivityBar.tsx';
 import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
-import type { ChatArtifact } from '../../../../shared/types/models.ts';
+import type { ChatArtifact, ChatBrowserSession } from '../../../../shared/types/models.ts';
 
 interface SDKChatViewProps {
   projectId: string;
@@ -76,6 +76,47 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     socket.on('chat:artifact', handleArtifact);
     return () => { socket.off('chat:artifact', handleArtifact); };
   }, [socket, chatId]);
+
+  // Browser session cards (claw_browser MCP — display_browser_session).
+  // Initial fetch + live append. Same pattern as artifacts.
+  const [browserSessions, setBrowserSessions] = useState<ChatBrowserSession[]>([]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    let cancelled = false;
+    api.get<{ sessions: ChatBrowserSession[] }>(`/api/projects/${projectId}/chats/${chatId}/browser-sessions`)
+      .then((data) => {
+        if (!cancelled) setBrowserSessions(data.sessions || []);
+      })
+      .catch(() => {
+        // 404 / not yet wired — silently empty
+      });
+    return () => { cancelled = true; };
+  }, [projectId, chatId]);
+
+  useEffect(() => {
+    if (!socket || !chatId) return;
+    function handleBrowserSession({ chatId: cid, session }: { chatId: string; session: ChatBrowserSession }) {
+      if (cid !== chatId) return;
+      setBrowserSessions((prev) => prev.some(s => s.id === session.id) ? prev : [...prev, session]);
+    }
+    socket.on('chat:browser-session', handleBrowserSession);
+    return () => { socket.off('chat:browser-session', handleBrowserSession); };
+  }, [socket, chatId]);
+
+  const { browserSessionsByMessageId, trailingBrowserSessions } = useMemo(() => {
+    const byMsg: Record<string, ChatBrowserSession[]> = {};
+    const trailing: ChatBrowserSession[] = [];
+    const messageIds = new Set(messages.map(m => m.id));
+    for (const s of browserSessions) {
+      if (s.messageId && messageIds.has(s.messageId)) {
+        (byMsg[s.messageId] ||= []).push(s);
+      } else {
+        trailing.push(s);
+      }
+    }
+    return { browserSessionsByMessageId: byMsg, trailingBrowserSessions: trailing };
+  }, [browserSessions, messages]);
 
   const { artifactsByMessageId, trailingArtifacts } = useMemo(() => {
     const byMsg: Record<string, ChatArtifact[]> = {};
@@ -300,6 +341,8 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             messages={messages}
             artifactsByMessageId={artifactsByMessageId}
             trailingArtifacts={trailingArtifacts}
+            browserSessionsByMessageId={browserSessionsByMessageId}
+            trailingBrowserSessions={trailingBrowserSessions}
             projectId={projectId}
           />
 

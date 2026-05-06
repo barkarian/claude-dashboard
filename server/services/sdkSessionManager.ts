@@ -14,6 +14,8 @@ import type {
 } from '../../shared/types/sdk.ts';
 import projectManager from './projectManager.ts';
 import activeChatsTracker from './activeChatsTracker.ts';
+import playwrightSessionManager from './playwrightSessionManager.ts';
+import { isBrowserEnabled } from '../config.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -42,6 +44,7 @@ const INTERACTIVE_TOOLS = new Set([
 // renders a dedicated affordance for them (artifact cards in this case).
 const HIDDEN_TOOLS = new Set([
   'mcp__claw_artifacts__display_artifact',
+  'mcp__claw_browser__display_browser_session',
 ]);
 
 // Union of unsupported + interactive + hidden — used to filter these tool blocks from the chat stream
@@ -73,6 +76,8 @@ interface SDKSession {
   lastActivityAt: number;
   /** Enable the display_artifact MCP tool (claw-chat adapter). */
   withArtifacts: boolean;
+  /** Enable the claw_browser MCP server (Playwright integration). Local-only. */
+  withBrowser: boolean;
   /**
    * Model id passed to query(). NULL means the SDK picks its own default.
    * Read from chat.model at session start; the chat-header model picker
@@ -85,6 +90,7 @@ interface SDKSession {
 
 interface InitSessionOptions {
   withArtifacts?: boolean;
+  withBrowser?: boolean;
   model?: string | null;
 }
 
@@ -220,6 +226,64 @@ function buildArtifactsMcpServer(session: SDKSession) {
   });
 }
 
+/**
+ * Per-session MCP server exposing the Playwright browser. Two tools:
+ *   - `run`: forwards an argv array to playwright-cli scoped to this chat's
+ *     workspace + tab. Returns stdout/stderr/exit code as text content.
+ *   - `display_browser_session`: emits a chat:browser-session event so the UI
+ *     can render a live browser artifact card. The agent should call this
+ *     once per browser session to surface the live view to the user.
+ */
+function buildBrowserMcpServer(session: SDKSession) {
+  return createSdkMcpServer({
+    name: 'claw_browser',
+    version: '1.0.0',
+    tools: [
+      tool(
+        'run',
+        'Run a Playwright agent CLI command against this chat\'s browser tab. Pass the command and args as you would on the command line — the dashboard scopes execution to this chat\'s workspace and tab automatically. Common: open <url> | snapshot | click <ref> | fill <ref> <text> | type <text> | viewport <desktop|tablet|mobile> | screenshot | back | reload. Always re-snapshot after navigation; refs (e5, e10) are invalidated by page changes.',
+        {
+          argv: z.array(z.string()).min(1).describe('Argv passed to playwright-cli (e.g. ["open", "https://example.com"]).'),
+        },
+        async (args: { argv: string[] }) => {
+          const result = await playwrightSessionManager.execForChat(
+            session.projectId,
+            session.chatId,
+            args.argv,
+            session.projectPath,
+          );
+          // Build a single-text-block result the agent can read. Include exit
+          // code only when non-zero so happy-path output stays clean.
+          let text = result.stdout;
+          if (result.stderr) text += (text ? '\n' : '') + result.stderr;
+          if (result.code !== 0) text += `\n[exit ${result.code}]`;
+          if (result.paused) text += '\nThe browser is paused — wait for the user to resume before issuing more commands.';
+          if (!text) text = `[exit ${result.code}]`;
+          return { content: [{ type: 'text' as const, text }] };
+        },
+      ),
+      tool(
+        'display_browser_session',
+        'Surface a live browser session card to the user in this chat. Call this ONCE the first time you start a browser task, so the user can see what the browser is doing. Subsequent commands automatically update the same artifact — no need to call this again per command.',
+        {
+          label: z.string().optional().describe('Optional title shown on the card. Defaults to "Browser session".'),
+        },
+        async (args: { label?: string }) => {
+          const record = projectManager.createBrowserSession(session.chatId, {
+            label: args.label || null,
+            messageId: session.currentAssistantMsgId || null,
+          });
+          session.io.to(`claude:${session.chatId}`).emit('chat:browser-session', {
+            chatId: session.chatId,
+            session: record,
+          });
+          return { content: [{ type: 'text' as const, text: `Browser session card displayed (${record.id}).` }] };
+        },
+      ),
+    ],
+  });
+}
+
 function initSession(
   chatId: string,
   projectId: string,
@@ -246,6 +310,7 @@ function initSession(
     queryStartTime: null,
     lastActivityAt: Date.now(),
     withArtifacts: !!options?.withArtifacts,
+    withBrowser: !!options?.withBrowser && isBrowserEnabled,
     model: options?.model ?? null,
   };
 
@@ -402,10 +467,17 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
   // Each session gets its own instance so the closure can resolve paths against
   // its own workspace and emit on the right room.
   const artifactsMcp = session.withArtifacts ? buildArtifactsMcpServer(session) : null;
+  const browserMcp = session.withBrowser ? buildBrowserMcpServer(session) : null;
+  if (browserMcp) {
+    // Lazy-start the per-workspace IPC socket (used by CC chats) so the same
+    // workspace state machine handles both. Cheap if already running.
+    playwrightSessionManager.ensureWorkspaceServer(session.projectId);
+  }
 
   const allowedToolNames = [
     'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch',
     ...(artifactsMcp ? ['mcp__claw_artifacts__display_artifact'] : []),
+    ...(browserMcp ? ['mcp__claw_browser__run', 'mcp__claw_browser__display_browser_session'] : []),
   ];
 
   const artifactsSystemPrompt = artifactsMcp
@@ -427,6 +499,27 @@ DO NOT call display_artifact for:
 NEVER respond with "I can't send files" or "the chat is text-only" — you can. If the user asks for a file and it doesn't exist yet, create it (using Write or Bash), then call display_artifact with its path.`
     : '';
 
+  const browserSystemPrompt = browserMcp
+    ? `
+
+=== PLAYWRIGHT BROWSER (claw_browser MCP) ===
+You have a real Chromium browser at your disposal via the \`mcp__claw_browser__run\` tool. The browser uses the user's persistent profile — they may already be logged into services like GitHub, Linear, Gmail. Be careful with destructive actions (delete, send, pay, post): ask the user before doing anything irreversible in their accounts.
+
+WORKFLOW:
+1. The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees a live view artifact. You don't need to call it again — subsequent commands update the same artifact automatically.
+2. Then call \`mcp__claw_browser__run\` with an argv array to drive the browser. Examples:
+   - { argv: ["open", "https://example.com"] }
+   - { argv: ["snapshot"] }                    // accessibility tree with refs (e5, e10, ...)
+   - { argv: ["click", "e7"] }                 // click by snapshot ref
+   - { argv: ["fill", "e3", "hello"] }
+   - { argv: ["type", "hello world"] }
+   - { argv: ["screenshot"] }
+3. Default viewport is desktop. Use \`{ argv: ["viewport", "mobile"] }\` (or "tablet" / "desktop") when the task is mode-specific or the user asks. Switching is sequential — same tab, new viewport.
+4. Refs (e5, e10) are valid only within a single snapshot — ALWAYS re-snapshot after navigation or any action that changed the page.
+
+The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop issuing browser commands and wait for the next user message; it will summarize what they did.`
+    : '';
+
   for (let attempt = 0; attempt < 2; attempt++) {
     const queryOptions: any = {
       cwd: session.projectPath,
@@ -440,7 +533,7 @@ NEVER respond with "I can't send files" or "the chat is text-only" — you can. 
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: `\n\nIMPORTANT: Your project root directory is ${session.projectPath}. All files you create, read, or modify MUST be within this directory. When the user refers to "root directory", "project root", or "here", they mean ${session.projectPath}. Never create files outside this directory.${artifactsSystemPrompt}`,
+        append: `\n\nIMPORTANT: Your project root directory is ${session.projectPath}. All files you create, read, or modify MUST be within this directory. When the user refers to "root directory", "project root", or "here", they mean ${session.projectPath}. Never create files outside this directory.${artifactsSystemPrompt}${browserSystemPrompt}`,
       },
       stderr: (data: string) => {
         console.error(`[sdk:${chatId}:stderr] ${data}`);
@@ -451,8 +544,11 @@ NEVER respond with "I can't send files" or "the chat is text-only" — you can. 
       },
     };
 
-    if (artifactsMcp) {
-      queryOptions.mcpServers = { claw_artifacts: artifactsMcp };
+    const mcpServers: Record<string, any> = {};
+    if (artifactsMcp) mcpServers.claw_artifacts = artifactsMcp;
+    if (browserMcp) mcpServers.claw_browser = browserMcp;
+    if (Object.keys(mcpServers).length > 0) {
+      queryOptions.mcpServers = mcpServers;
     }
 
     if (session.model) {

@@ -27,4 +27,9 @@ const config: ServerConfig = {
   dashboardEnv: (process.env.DASHBOARD_ENV === 'vps' ? 'vps' : 'local') as 'local' | 'vps',
 };
 
+// Browser automation (Playwright) is local-only. On a VPS, Chromium would run
+// with the user's credentials on shared infrastructure, which is the wrong
+// privacy posture. Re-enable once we have a tunnel-back-to-local model.
+export const isBrowserEnabled = config.dashboardEnv === 'local';
+
 export default config;

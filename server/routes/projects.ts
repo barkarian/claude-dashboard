@@ -974,6 +974,17 @@ router.get('/:id/chats/:chatId/artifacts', async (req: Request<{ id: string; cha
   }
 });
 
+// Browser session cards (display_browser_session tool output) — list for a chat
+router.get('/:id/chats/:chatId/browser-sessions', async (req: Request<{ id: string; chatId: string }>, res: Response) => {
+  try {
+    const sessions = projectManager.listBrowserSessionsByChat(req.params.chatId);
+    res.json({ sessions });
+  } catch (err) {
+    console.error('Error listing browser sessions:', err);
+    res.status(500).json({ error: 'Failed to list browser sessions' });
+  }
+});
+
 // --- Saved recordings ---
 
 router.get('/:id/recordings', async (req: Request<{ id: string }>, res: Response) => {

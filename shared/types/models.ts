@@ -104,6 +104,37 @@ export interface ChatArtifact {
   createdAt: string;
 }
 
+export type BrowserViewportMode = 'desktop' | 'tablet' | 'mobile';
+
+export interface ChatBrowserTab {
+  chatId: string;
+  projectId: string;
+  tabId: string;
+  currentUrl: string | null;
+  viewportMode: BrowserViewportMode;
+  createdAt: string;
+}
+
+export interface ChatBrowserSession {
+  id: string;
+  chatId: string;
+  messageId: string | null;
+  label: string | null;
+  status: 'active' | 'closed';
+  createdAt: string;
+  closedAt: string | null;
+}
+
+export interface BrowserTakeoverEvent {
+  id: number;
+  chatId: string;
+  takeoverId: string;
+  eventType: string;
+  description: string;
+  raw: string | null;
+  ts: string;
+}
+
 export interface ProjectSummary {
   id: string;
   name: string;

@@ -6,6 +6,7 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import pty, { type IPty } from 'node-pty';
 import projectManager from '../services/projectManager.ts';
 import processManager, { killProcessTree } from '../services/processManager.ts';
+import playwrightSessionManager from '../services/playwrightSessionManager.ts';
 import jsonlWatcher, { readFirstUserPrompt } from '../services/jsonlWatcher.ts';
 import pidSessionWatcher from '../services/pidSessionWatcher.ts';
 import { generateChatTitleAndDescription } from '../services/aiTitleGenerator.ts';
@@ -43,12 +44,20 @@ function tryAiTitle(chatId: string, projectId: string, promptText: string, io: S
 // Env vars set by the dashboard that should NOT leak into child processes
 const DASHBOARD_ENV_KEYS = ['PORT', 'TUNNEL_API_KEY', 'TUNNEL_USER_SUBDOMAIN', 'SESSION_SECRET', 'TUNNEL_MODE', 'NGROK_AUTHTOKEN', 'TUNNEL_SERVICE_URL'];
 
-function getChildEnv(): Record<string, string> {
+function getChildEnv(opts?: { chatId?: string; projectId?: string }): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   for (const key of DASHBOARD_ENV_KEYS) {
     delete env[key];
   }
   env.TERM = 'xterm-256color';
+  if (opts?.projectId) {
+    env.PLAYWRIGHT_CLI_SESSION = `workspace_${opts.projectId}`;
+    env.CLAW_PROJECT_ID = opts.projectId;
+  }
+  if (opts?.chatId) {
+    env.CLAW_TAB = `chat_${opts.chatId}`;
+    env.CLAW_CHAT_ID = opts.chatId;
+  }
   return env;
 }
 
@@ -118,12 +127,16 @@ export default function registerClaudeCodeEvents(socket: Socket, io: SocketIOSer
         projectManager.updateChat(chatId, { ccConversationId: sessionId, sessionId });
       }
 
+      // Lazy-start the per-workspace browser IPC socket so `claw-browser`
+      // calls inside this CC chat have a listener to talk to.
+      playwrightSessionManager.ensureWorkspaceServer(projectId);
+
       const ptyProcess = pty.spawn('claude', args, {
         name: 'xterm-256color',
         cols: cols || 120,
         rows: rows || 30,
         cwd: projectPath,
-        env: getChildEnv(),
+        env: getChildEnv({ chatId, projectId }),
       });
 
       const buffer: string[] = [];

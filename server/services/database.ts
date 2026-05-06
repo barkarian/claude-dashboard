@@ -387,6 +387,52 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chat_artifacts_chat ON chat_artifacts(chat_id, created_at);
 `);
 
+// --- Browser automation (Playwright) ---
+// One persistent Chromium per workspace, one tab per chat. See plan:
+// /Users/theodorosbarkas/.claude/plans/no-sequential-of-course-vectorized-abelson.md
+db.exec(`
+  CREATE TABLE IF NOT EXISTS browser_workspaces (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    cli_session_name TEXT NOT NULL,
+    cdp_port INTEGER,
+    pid INTEGER,
+    user_data_dir TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_browser_tabs (
+    chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tab_id TEXT NOT NULL,
+    current_url TEXT,
+    viewport_mode TEXT NOT NULL DEFAULT 'desktop',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_browser_tabs_project ON chat_browser_tabs(project_id);
+
+  CREATE TABLE IF NOT EXISTS chat_browser_sessions (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id TEXT,
+    label TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_browser_sessions_chat ON chat_browser_sessions(chat_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS browser_takeover_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    takeover_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    raw TEXT,
+    ts TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_browser_takeover_events_chat ON browser_takeover_events(chat_id, takeover_id);
+`);
+
 
 // --- Adapter settings (per-adapter key-value store) ---
 

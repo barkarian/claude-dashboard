@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db, { resolveDefaultAdapter, getDefaultModel } from './database.ts';
 import gitService from './gitService.ts';
 import sidebarSync from './sidebarSync.ts';
-import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, ChatCategory, SavedRecording, SavedRecordingScript } from '../../shared/types/models.ts';
+import type { Project, ProjectSummary, ProjectMode, Script, Chat, ChatHistoryEntry, ChatAdapter, ChatArtifact, ChatCategory, SavedRecording, SavedRecordingScript, ChatBrowserTab, ChatBrowserSession, BrowserViewportMode, BrowserTakeoverEvent } from '../../shared/types/models.ts';
 
 // Read project_id for a chat — used by activity broadcasts. Tiny prepared
 // statement, cached at module scope so the hot path doesn't re-prepare.
@@ -939,6 +939,139 @@ function listArtifactsByChat(chatId: string): ChatArtifact[] {
   }));
 }
 
+// === Browser Tab + Session Methods ===
+
+function getOrCreateBrowserTab(chatId: string, projectId: string): ChatBrowserTab {
+  const existing = db.prepare(
+    'SELECT chat_id, project_id, tab_id, current_url, viewport_mode, created_at FROM chat_browser_tabs WHERE chat_id = ?'
+  ).get(chatId) as any;
+  if (existing) {
+    return {
+      chatId: existing.chat_id,
+      projectId: existing.project_id,
+      tabId: existing.tab_id,
+      currentUrl: existing.current_url || null,
+      viewportMode: (existing.viewport_mode || 'desktop') as BrowserViewportMode,
+      createdAt: existing.created_at,
+    };
+  }
+  // Tab id is opaque to the dashboard — playwrightSessionManager assigns it on
+  // tab creation. We seed a deterministic placeholder; the manager replaces it
+  // via updateBrowserTab once the real tab exists.
+  const tabId = `chat_${chatId}`;
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO chat_browser_tabs (chat_id, project_id, tab_id, viewport_mode, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(chatId, projectId, tabId, 'desktop', now);
+  return { chatId, projectId, tabId, currentUrl: null, viewportMode: 'desktop', createdAt: now };
+}
+
+function updateBrowserTab(
+  chatId: string,
+  updates: { tabId?: string; currentUrl?: string | null; viewportMode?: BrowserViewportMode },
+): void {
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.tabId !== undefined) { fields.push('tab_id = ?'); values.push(updates.tabId); }
+  if (updates.currentUrl !== undefined) { fields.push('current_url = ?'); values.push(updates.currentUrl); }
+  if (updates.viewportMode !== undefined) { fields.push('viewport_mode = ?'); values.push(updates.viewportMode); }
+  if (fields.length === 0) return;
+  values.push(chatId);
+  db.prepare(`UPDATE chat_browser_tabs SET ${fields.join(', ')} WHERE chat_id = ?`).run(...values);
+}
+
+function listBrowserTabsByProject(projectId: string): ChatBrowserTab[] {
+  const rows = db.prepare(
+    'SELECT chat_id, project_id, tab_id, current_url, viewport_mode, created_at FROM chat_browser_tabs WHERE project_id = ? ORDER BY created_at ASC'
+  ).all(projectId) as any[];
+  return rows.map(r => ({
+    chatId: r.chat_id,
+    projectId: r.project_id,
+    tabId: r.tab_id,
+    currentUrl: r.current_url || null,
+    viewportMode: (r.viewport_mode || 'desktop') as BrowserViewportMode,
+    createdAt: r.created_at,
+  }));
+}
+
+function createBrowserSession(
+  chatId: string,
+  params: { label?: string | null; messageId?: string | null },
+): ChatBrowserSession {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO chat_browser_sessions (id, chat_id, message_id, label, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, chatId, params.messageId || null, params.label || null, 'active', now);
+  return {
+    id,
+    chatId,
+    messageId: params.messageId || null,
+    label: params.label || null,
+    status: 'active',
+    createdAt: now,
+    closedAt: null,
+  };
+}
+
+function closeBrowserSession(sessionId: string): void {
+  db.prepare(
+    "UPDATE chat_browser_sessions SET status = 'closed', closed_at = ? WHERE id = ?"
+  ).run(new Date().toISOString(), sessionId);
+}
+
+function listBrowserSessionsByChat(chatId: string): ChatBrowserSession[] {
+  const rows = db.prepare(
+    'SELECT id, chat_id, message_id, label, status, created_at, closed_at FROM chat_browser_sessions WHERE chat_id = ? ORDER BY created_at ASC'
+  ).all(chatId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    chatId: r.chat_id,
+    messageId: r.message_id || null,
+    label: r.label || null,
+    status: r.status as 'active' | 'closed',
+    createdAt: r.created_at,
+    closedAt: r.closed_at || null,
+  }));
+}
+
+function recordTakeoverEvent(
+  chatId: string,
+  takeoverId: string,
+  eventType: string,
+  description: string,
+  raw?: string | null,
+): BrowserTakeoverEvent {
+  const result = db.prepare(
+    'INSERT INTO browser_takeover_events (chat_id, takeover_id, event_type, description, raw) VALUES (?, ?, ?, ?, ?)'
+  ).run(chatId, takeoverId, eventType, description, raw ?? null);
+  const ts = new Date().toISOString();
+  return {
+    id: Number(result.lastInsertRowid),
+    chatId,
+    takeoverId,
+    eventType,
+    description,
+    raw: raw ?? null,
+    ts,
+  };
+}
+
+function listTakeoverEvents(chatId: string, takeoverId: string): BrowserTakeoverEvent[] {
+  const rows = db.prepare(
+    'SELECT id, chat_id, takeover_id, event_type, description, raw, ts FROM browser_takeover_events WHERE chat_id = ? AND takeover_id = ? ORDER BY id ASC'
+  ).all(chatId, takeoverId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    chatId: r.chat_id,
+    takeoverId: r.takeover_id,
+    eventType: r.event_type,
+    description: r.description,
+    raw: r.raw || null,
+    ts: r.ts,
+  }));
+}
+
 // === Recording Methods ===
 
 const MAX_RECORDINGS_PER_PROJECT = 20;
@@ -1066,6 +1199,15 @@ export default {
   // Artifacts
   createArtifact,
   listArtifactsByChat,
+  // Browser
+  getOrCreateBrowserTab,
+  updateBrowserTab,
+  listBrowserTabsByProject,
+  createBrowserSession,
+  closeBrowserSession,
+  listBrowserSessionsByChat,
+  recordTakeoverEvent,
+  listTakeoverEvents,
   // Recordings
   saveRecording,
   listRecordings,
