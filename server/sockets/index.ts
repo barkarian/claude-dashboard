@@ -6,8 +6,10 @@ import registerFileEvents from './files.ts';
 import registerAIGenerateEvents from './ai-generate.ts';
 import registerToolEvents from './tools.ts';
 import registerAdapterOrchestrator from './adapter-orchestrator.ts';
+import registerBrowserEvents from './browser.ts';
 import activeChatsTracker from '../services/activeChatsTracker.ts';
 import sidebarSync from '../services/sidebarSync.ts';
+import playwrightSessionManager from '../services/playwrightSessionManager.ts';
 import { loadAdapters } from '../adapters/loader.ts';
 import { wireAdapterEvents } from '../adapters/wire-events.ts';
 
@@ -15,6 +17,10 @@ export default async function registerSocketHandlers(io: SocketIOServer): Promis
   // Initialize global active chats tracker + sidebar live-sync emitter
   activeChatsTracker.init(io);
   sidebarSync.init(io);
+
+  // Hand the IO server to playwrightSessionManager so screencast + state events
+  // can reach connected clients.
+  playwrightSessionManager.attachIO(io);
 
   // Auto-discover and register all adapters from adapters/ directory
   await loadAdapters();
@@ -43,6 +49,9 @@ export default async function registerSocketHandlers(io: SocketIOServer): Promis
     registerFileEvents(socket, io);
     registerAIGenerateEvents(socket, io);
     registerToolEvents(socket, io);
+
+    // Browser (Playwright) artifact controls — pause/resume/lock/input/viewport
+    registerBrowserEvents(socket, io);
 
     socket.on('disconnect', (reason: string) => {
       console.log(`Client disconnected: ${socket.id} (${reason})`);

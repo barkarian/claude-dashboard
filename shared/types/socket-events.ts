@@ -1,3 +1,62 @@
+// === Browser (Playwright) Socket Event Payloads ===
+
+import type { BrowserViewportMode } from './models.ts';
+
+/** Server → clients: a new screencast frame for a chat's browser tab. */
+export interface BrowserFramePayload {
+  chatId: string;
+  /** Base64-encoded JPEG, no data: prefix. */
+  frame: string;
+  /** Native pixel dimensions of the captured viewport. */
+  width: number;
+  height: number;
+  /** Server-side timestamp (ms epoch) when the frame was emitted. */
+  ts: number;
+  /** Current viewport mode of the tab when the frame was captured. */
+  viewportMode: BrowserViewportMode;
+}
+
+/** Server → clients: pause/resume + lock state for a chat's browser. */
+export interface BrowserStatePayload {
+  chatId: string;
+  paused: boolean;
+  /** Socket id holding the input lock; null = no client has control. */
+  lockedBy: string | null;
+}
+
+/** Client → server: pause / resume the workspace's browser. */
+export interface BrowserPauseRequestPayload {
+  chatId: string;
+}
+
+/** Client → server: take or release the input lock for this chat. */
+export interface BrowserLockRequestPayload {
+  chatId: string;
+  acquire: boolean;
+}
+
+/** Client → server: forwarded user input while holding the lock. */
+export interface BrowserInputPayload {
+  chatId: string;
+  /** Coordinates are in the captured frame's pixel space (native). */
+  kind: 'mouse-move' | 'mouse-down' | 'mouse-up' | 'mouse-click' | 'mouse-wheel' | 'key-down' | 'key-up' | 'type';
+  x?: number;
+  y?: number;
+  button?: 'left' | 'middle' | 'right';
+  deltaX?: number;
+  deltaY?: number;
+  /** For key-down / key-up: a Playwright key string (e.g. "Enter", "a"). */
+  key?: string;
+  /** For type: the literal text to type. */
+  text?: string;
+}
+
+/** Client → server: switch viewport mode for the chat's tab. */
+export interface BrowserViewportRequestPayload {
+  chatId: string;
+  mode: BrowserViewportMode;
+}
+
 // === Terminal Socket Event Payloads ===
 
 export interface TerminalStartPayload {
