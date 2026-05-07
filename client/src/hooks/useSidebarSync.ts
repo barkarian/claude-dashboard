@@ -4,6 +4,7 @@ import type {
   SidebarChatCreated,
   SidebarChatDeleted,
   SidebarChatMetaChanged,
+  SidebarChatTabsReordered,
   SidebarProjectPinChanged,
   SidebarProjectReordered,
   SidebarProjectActivity,
@@ -15,6 +16,7 @@ export interface SidebarSyncHandlers {
   onChatCreated?: (e: SidebarChatCreated) => void;
   onChatDeleted?: (e: SidebarChatDeleted) => void;
   onChatMetaChanged?: (e: SidebarChatMetaChanged) => void;
+  onChatTabsReordered?: (e: SidebarChatTabsReordered) => void;
   onProjectPinChanged?: (e: SidebarProjectPinChanged) => void;
   onProjectReordered?: (e: SidebarProjectReordered) => void;
   onProjectActivity?: (e: SidebarProjectActivity) => void;
@@ -44,6 +46,7 @@ export function useSidebarSync(handlers: SidebarSyncHandlers): void {
     bind<SidebarChatCreated>('sidebar:chat-created', handlers.onChatCreated);
     bind<SidebarChatDeleted>('sidebar:chat-deleted', handlers.onChatDeleted);
     bind<SidebarChatMetaChanged>('sidebar:chat-meta-changed', handlers.onChatMetaChanged);
+    bind<SidebarChatTabsReordered>('sidebar:chat-tabs-reordered', handlers.onChatTabsReordered);
     bind<SidebarProjectPinChanged>('sidebar:project-pin-changed', handlers.onProjectPinChanged);
     bind<SidebarProjectReordered>('sidebar:project-reordered', handlers.onProjectReordered);
     bind<SidebarProjectActivity>('sidebar:project-activity', handlers.onProjectActivity);
@@ -58,6 +61,7 @@ export function useSidebarSync(handlers: SidebarSyncHandlers): void {
     handlers.onChatCreated,
     handlers.onChatDeleted,
     handlers.onChatMetaChanged,
+    handlers.onChatTabsReordered,
     handlers.onProjectPinChanged,
     handlers.onProjectReordered,
     handlers.onProjectActivity,

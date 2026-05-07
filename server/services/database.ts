@@ -563,6 +563,49 @@ try {
   console.error('tabs backfill migration failed:', err);
 }
 
+// User-controlled sidebar tab order. Lower values appear higher in the list.
+// NULL means "no explicit order" — falls back to tab_opened_at as a tiebreaker.
+// Pinned tabs sort independently above unpinned (separate ORDER BY priority).
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN tab_order INTEGER`);
+} catch {
+  // Already exists — ignore
+}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_chats_tab_order ON chats(project_id, tab_order)`);
+} catch {
+  // Already exists — ignore
+}
+
+// One-shot backfill: assign tab_order to every currently-open tab so the
+// existing visible order (tab_opened_at DESC) is preserved when we switch
+// the ORDER BY to tab_order ASC. Gated by a settings flag.
+try {
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration.tab_order_backfill_at'").get();
+  if (!flag) {
+    db.prepare(`
+      UPDATE chats
+      SET tab_order = (
+        SELECT rn FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY project_id
+            ORDER BY tab_opened_at DESC
+          ) AS rn
+          FROM chats
+          WHERE tab_opened_at IS NOT NULL
+        ) AS ranks
+        WHERE ranks.id = chats.id
+      )
+      WHERE tab_opened_at IS NOT NULL AND tab_order IS NULL
+    `).run();
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration.tab_order_backfill_at', ?)"
+    ).run(new Date().toISOString());
+  }
+} catch (err) {
+  console.error('tab_order backfill migration failed:', err);
+}
+
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
   return row?.value;

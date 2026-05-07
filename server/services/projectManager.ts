@@ -525,8 +525,12 @@ function listChatsPaginated(
     if (coverRow.cnt > limit) limit = coverRow.cnt;
   }
 
+  // Sidebar tabs: pinned first (newest pin on top — pin order is still
+  // chronological for now), then unpinned by user-controlled tab_order
+  // ascending. tab_opened_at is the tiebreaker for legacy rows that haven't
+  // been assigned an order yet (NULLS LAST keeps them at the bottom).
   const orderClause = opts.tabsOnly
-    ? 'ORDER BY (c.tab_pinned_at IS NOT NULL) DESC, c.tab_pinned_at DESC, c.tab_opened_at DESC'
+    ? 'ORDER BY (c.tab_pinned_at IS NOT NULL) DESC, c.tab_pinned_at DESC, (c.tab_order IS NULL), c.tab_order ASC, c.tab_opened_at DESC'
     : CHAT_ORDER_CLAUSE;
   const rows = db.prepare(
     `${CHAT_SELECT} WHERE ${where} ${orderClause} LIMIT ? OFFSET ?`
@@ -573,6 +577,7 @@ function mapRowToChat(r: any): Chat {
     category: rowToCategory(r),
     tabOpenedAt: r.tab_opened_at || null,
     tabPinnedAt: r.tab_pinned_at || null,
+    tabOrder: r.tab_order ?? null,
   };
 }
 
@@ -596,6 +601,7 @@ function mapRowToChatLite(r: any): Chat {
     category: rowToCategory(r),
     tabOpenedAt: r.tab_opened_at || null,
     tabPinnedAt: r.tab_pinned_at || null,
+    tabOrder: r.tab_order ?? null,
   };
 }
 
@@ -606,12 +612,15 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
   // Seed chat.model from the adapter's default_model setting (if any). NULL
   // is fine — runtime falls back to the same default at session start.
   const model = getDefaultModel(chatAdapter);
+  const order = nextTabOrder(projectId);
   // Auto-open as a sidebar tab on creation: a brand-new chat the user just
   // explicitly created is, by definition, something they want to see in the
-  // sidebar. (Tabs are dismissable — they can close it with the X.)
+  // sidebar. (Tabs are dismissable — they can close it with the X.) New
+  // chats land at the bottom of the unpinned tab list; the user reorders
+  // explicitly via drag-drop.
   db.prepare(
-    'INSERT INTO chats (id, project_id, label, adapter, model, created_at, last_activity_at, tab_opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, projectId, label || 'New Chat', chatAdapter, model, now, now, now);
+    'INSERT INTO chats (id, project_id, label, adapter, model, created_at, last_activity_at, tab_opened_at, tab_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, projectId, label || 'New Chat', chatAdapter, model, now, now, now, order);
   return {
     id,
     label: label || 'New Chat',
@@ -631,6 +640,7 @@ function createChat(projectId: string, label?: string, adapter?: ChatAdapter): C
     category: null,
     tabOpenedAt: now,
     tabPinnedAt: null,
+    tabOrder: order,
   };
 }
 
@@ -644,6 +654,8 @@ function updateChat(chatId: string, updates: { label?: string; description?: str
   const row = db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId) as any;
   if (!row) return null;
 
+  const labelChanged = updates.label !== undefined && updates.label !== row.label;
+
   if (updates.label !== undefined) db.prepare('UPDATE chats SET label = ? WHERE id = ?').run(updates.label, chatId);
   if (updates.description !== undefined) db.prepare('UPDATE chats SET description = ? WHERE id = ?').run(updates.description, chatId);
   if (updates.sdkSessionId !== undefined) db.prepare('UPDATE chats SET sdk_session_id = ? WHERE id = ?').run(updates.sdkSessionId, chatId);
@@ -651,6 +663,19 @@ function updateChat(chatId: string, updates: { label?: string; description?: str
   if (updates.sessionId !== undefined) db.prepare('UPDATE chats SET session_id = ? WHERE id = ?').run(updates.sessionId, chatId);
   if (updates.draftMessage !== undefined) db.prepare('UPDATE chats SET draft_message = ? WHERE id = ?').run(updates.draftMessage, chatId);
   if (updates.model !== undefined) db.prepare('UPDATE chats SET model = ? WHERE id = ?').run(updates.model, chatId);
+
+  // Push label changes through the sidebar sync channel so every client's
+  // lazy-fetched chat cache picks up the new name. Without this, sockets
+  // that already loaded the project see "New Chat" forever even after
+  // auto-rename. (route handlers also push their own meta-changed for
+  // belt-and-braces — sidebarSync.chatMetaChanged is idempotent.)
+  if (labelChanged) {
+    sidebarSync.chatMetaChanged({
+      projectId: row.project_id,
+      chatId,
+      label: updates.label!,
+    });
+  }
 
   return getChat(chatId);
 }
@@ -681,28 +706,51 @@ function markChatRead(chatId: string): void {
 // Returns true iff the call actually changed the chat's tab state, so callers
 // can skip a sync broadcast when nothing moved (avoids noise on auto-promote
 // hot paths where the chat was already an open tab).
+
+// Compute the next tab_order value within a project — newly opened tabs go
+// to the bottom of the unpinned list. (Pinned tabs sort separately above.)
+function nextTabOrder(projectId: string): number {
+  const row = db.prepare(
+    'SELECT COALESCE(MAX(tab_order), 0) + 1 AS next FROM chats WHERE project_id = ?'
+  ).get(projectId) as { next: number };
+  return row.next;
+}
+
 function openChatTab(chatId: string): boolean {
+  const projectIdRow = db.prepare('SELECT project_id FROM chats WHERE id = ?').get(chatId) as
+    | { project_id: string } | undefined;
+  if (!projectIdRow) return false;
+  const order = nextTabOrder(projectIdRow.project_id);
   const result = db.prepare(
-    "UPDATE chats SET tab_opened_at = COALESCE(tab_opened_at, datetime('now')) WHERE id = ? AND tab_opened_at IS NULL"
-  ).run(chatId);
+    "UPDATE chats SET tab_opened_at = COALESCE(tab_opened_at, datetime('now')), tab_order = COALESCE(tab_order, ?) WHERE id = ? AND tab_opened_at IS NULL"
+  ).run(order, chatId);
   return result.changes > 0;
 }
 
 function closeChatTab(chatId: string): boolean {
+  // Closing clears tab_order too — a future re-open should re-append at the
+  // bottom rather than slot back into the user's old position.
   const result = db.prepare(
-    'UPDATE chats SET tab_opened_at = NULL, tab_pinned_at = NULL WHERE id = ? AND tab_opened_at IS NOT NULL'
+    'UPDATE chats SET tab_opened_at = NULL, tab_pinned_at = NULL, tab_order = NULL WHERE id = ? AND tab_opened_at IS NOT NULL'
   ).run(chatId);
   return result.changes > 0;
 }
 
 function pinChatTab(chatId: string): boolean {
   // Pin always implies open. Idempotent on already-pinned (changes=0).
+  // Also assigns tab_order if the chat wasn't already an open tab so the
+  // unpin path puts it at a sensible spot.
+  const projectIdRow = db.prepare('SELECT project_id FROM chats WHERE id = ?').get(chatId) as
+    | { project_id: string } | undefined;
+  if (!projectIdRow) return false;
+  const order = nextTabOrder(projectIdRow.project_id);
   const result = db.prepare(`
     UPDATE chats
     SET tab_pinned_at = datetime('now'),
-        tab_opened_at = COALESCE(tab_opened_at, datetime('now'))
+        tab_opened_at = COALESCE(tab_opened_at, datetime('now')),
+        tab_order = COALESCE(tab_order, ?)
     WHERE id = ? AND tab_pinned_at IS NULL
-  `).run(chatId);
+  `).run(order, chatId);
   return result.changes > 0;
 }
 
@@ -712,6 +760,21 @@ function unpinChatTab(chatId: string): boolean {
     'UPDATE chats SET tab_pinned_at = NULL WHERE id = ? AND tab_pinned_at IS NOT NULL'
   ).run(chatId);
   return result.changes > 0;
+}
+
+/** Reorder open tabs in a project. `orderedIds` is the new top-to-bottom
+ *  order. Chats not in the list keep their existing tab_order — useful when
+ *  the client only reorders the unpinned section but pinned tabs stay put.
+ *  Returns true on success, false if the project doesn't exist. */
+function reorderChatTabs(projectId: string, orderedIds: string[]): boolean {
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+  if (!project) return false;
+  const stmt = db.prepare('UPDATE chats SET tab_order = ? WHERE id = ? AND project_id = ? AND tab_opened_at IS NOT NULL');
+  const tx = db.transaction((ids: string[]) => {
+    ids.forEach((id, idx) => stmt.run(idx + 1, id, projectId));
+  });
+  tx(orderedIds);
+  return true;
 }
 
 /** Read the current tab state — used by routes to build the broadcast
@@ -1184,6 +1247,7 @@ export default {
   closeChatTab,
   pinChatTab,
   unpinChatTab,
+  reorderChatTabs,
   getChatTabState,
   touchChatActivity,
   deleteChat,

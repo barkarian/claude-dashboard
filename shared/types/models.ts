@@ -68,6 +68,11 @@ export interface Chat {
   /** When the tab was pinned (sticky in the sidebar). NULL = unpinned.
    *  Pinned implies opened. */
   tabPinnedAt: string | null;
+  /** User-controlled sidebar position. Lower values appear higher in the
+   *  list. NULL = no explicit order (falls back to tabOpenedAt). The
+   *  sidebar is sorted by this value, never by activity, so the order
+   *  doesn't shuffle on every new message. */
+  tabOrder: number | null;
 }
 
 export interface Project {

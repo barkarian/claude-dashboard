@@ -14,6 +14,7 @@ import type {
   SidebarChatCreated,
   SidebarChatDeleted,
   SidebarChatMetaChanged,
+  SidebarChatTabsReordered,
   SidebarProjectPinChanged,
   SidebarProjectReordered,
   SidebarProjectActivity,
@@ -49,6 +50,10 @@ function chatDeleted(payload: SidebarChatDeleted): void {
 
 function chatMetaChanged(payload: SidebarChatMetaChanged): void {
   emit('sidebar:chat-meta-changed', payload);
+}
+
+function chatTabsReordered(payload: SidebarChatTabsReordered): void {
+  emit('sidebar:chat-tabs-reordered', payload);
 }
 
 // ── Projects ────────────────────────────────────────────────────────
@@ -93,6 +98,7 @@ export default {
   chatCreated,
   chatDeleted,
   chatMetaChanged,
+  chatTabsReordered,
   projectPinChanged,
   projectReordered,
   projectCreated,

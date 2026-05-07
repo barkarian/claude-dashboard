@@ -18,15 +18,28 @@ import type { ActiveChat, GlobalActiveChats, ActiveProjectChats } from '../../sh
 // unread) so closed tabs reappear when the agent has something to say.
 // No-op if the tab was already open. Broadcasts only when state actually
 // changed, to keep socket traffic clean during chatty agent runs.
+//
+// Emits `sidebar:chat-created` (full Chat row) on the transition so each
+// client's lazy-fetched chat cache picks the chat up immediately. Without
+// this, the chat would only live in the in-memory tracker, and the moment
+// the user reads it (which drops the tracker entry) it would vanish from
+// the sidebar even though its tab is still open in the DB.
 function autoOpenTab(chatId: string, projectId: string): void {
   if (!projectManager.openChatTab(chatId)) return;
-  const state = projectManager.getChatTabState(chatId);
-  sidebarSync.chatMetaChanged({
-    projectId,
-    chatId,
-    tabOpenedAt: state?.tabOpenedAt ?? null,
-    tabPinnedAt: state?.tabPinnedAt ?? null,
-  });
+  const chat = projectManager.getChat(chatId);
+  if (chat) {
+    sidebarSync.chatCreated({ projectId, chat });
+  } else {
+    // Chat row vanished between openChatTab and getChat — fall back to a
+    // meta event so at least pinned/opened state is in sync.
+    const state = projectManager.getChatTabState(chatId);
+    sidebarSync.chatMetaChanged({
+      projectId,
+      chatId,
+      tabOpenedAt: state?.tabOpenedAt ?? null,
+      tabPinnedAt: state?.tabPinnedAt ?? null,
+    });
+  }
 }
 
 // Statuses that count as live-actionable for the sidebar / badge

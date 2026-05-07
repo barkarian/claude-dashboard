@@ -772,6 +772,26 @@ router.put('/:id/chats/:chatId/unread', async (req: Request<{ id: string; chatId
   }
 });
 
+// Reorder the open chat tabs in a project. Body: { orderedIds: string[] }
+// where orderedIds is the new top-to-bottom order. Used by the sidebar's
+// drag-and-drop. Server is authoritative — it rewrites tab_order then
+// broadcasts so other clients reorder optimistically too.
+router.post('/:id/chats/reorder-tabs', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const orderedIds = req.body?.orderedIds;
+    if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === 'string')) {
+      return res.status(400).json({ error: 'orderedIds must be a string array' });
+    }
+    const ok = projectManager.reorderChatTabs(req.params.id, orderedIds);
+    if (!ok) return res.status(404).json({ error: 'Project not found' });
+    sidebarSync.chatTabsReordered({ projectId: req.params.id, orderedIds });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering chat tabs:', err);
+    res.status(500).json({ error: 'Failed to reorder chat tabs' });
+  }
+});
+
 // Update sidebar-tab state for a chat. Body fields are independent:
 //   { opened: false }              → close the tab (clears both opened+pinned)
 //   { opened: true }               → ensure tab is open (no-op if already)

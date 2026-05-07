@@ -53,6 +53,7 @@ import type {
   SidebarChatCreated,
   SidebarChatDeleted,
   SidebarChatMetaChanged,
+  SidebarChatTabsReordered,
   SidebarProjectPinChanged,
   SidebarProjectReordered,
   SidebarProjectActivity,
@@ -131,11 +132,14 @@ interface ChatRowProps {
   onMouseLeave: () => void;
   onContextMenuNative: (e: React.MouseEvent) => void;
   onCloseTab: () => void;
+  /** Optional dnd-kit drag props attached to the row's <li>. Provided by
+   *  SortableChatItem when the row participates in the sortable list. */
+  drag?: RowDragProps;
 }
 
 function ChatRow({
   chat, isActive, onSelect, onTouchStart, onTouchEndCancel,
-  onMouseEnter, onMouseLeave, onContextMenuNative, onCloseTab,
+  onMouseEnter, onMouseLeave, onContextMenuNative, onCloseTab, drag,
 }: ChatRowProps) {
   // Category emoji acts as the inline marker. Falls back to the live status
   // dot when the chat is uncategorised. Idle (lazy-fetched) chats with no
@@ -152,8 +156,19 @@ function ChatRow({
   ) : (
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(chat.status)}`} />
   );
+  // dnd-kit listeners are spread onto the <li> so the whole row is the
+  // drag handle. The PointerSensor's distance and TouchSensor's delay
+  // gate when a drag actually engages, so a tap still selects the chat
+  // and a long press still opens the menu — drag arms only on press +
+  // drift past the threshold.
   return (
-    <li className="group relative">
+    <li
+      ref={drag?.setNodeRef as ((el: HTMLLIElement | null) => void) | undefined}
+      style={{ ...(drag?.style ?? {}), ...NO_CALLOUT_STYLE }}
+      {...(drag?.attributes ?? {})}
+      {...(drag?.listeners ?? {})}
+      className="group relative"
+    >
       <button
         onClick={onSelect}
         onTouchStart={onTouchStart}
@@ -167,7 +182,7 @@ function ChatRow({
         } ${chat.tabPinnedAt ? 'font-medium text-text' : ''}`}
       >
         {marker}
-        <span className="truncate flex-1 text-left">{chat.label}</span>
+        <span className="truncate flex-1 text-left">{chat.label || 'Untitled Chat'}</span>
         {chat.status !== 'idle' && (
           <span className="flex-shrink-0 text-[9px] opacity-70">
             {statusLabel(chat.status as ActiveChat['status'])}
@@ -213,11 +228,24 @@ interface SidebarChatRow {
   categoryEmoji: string | null;
   lastActivityAt: string;
   tabPinnedAt: string | null;
+  /** User-controlled order. Lower = higher in the list. NULL means "no
+   *  explicit order" (legacy or tracker-only entries). */
+  tabOrder: number | null;
+  /** When the tab was first opened. Used as a stable tiebreaker for
+   *  unordered rows (newest open at the bottom). */
+  tabOpenedAt: string | null;
 }
 
 /** Merge live tracker chats with lazy-fetched tab chats. Tracker entries
- *  win on duplicate id (they carry fresh status). Sort: pinned tabs first
- *  (newest pin on top), then unpinned by activity. */
+ *  win on duplicate id (they carry fresh status). Order is user-controlled
+ *  via tab_order, not activity — a new message no longer bumps the chat to
+ *  the top. Sort priority:
+ *    1. pinned tabs first (newest pin on top — pin order is chronological
+ *       for now; can be added to drag-drop later if needed)
+ *    2. then unpinned by tab_order ascending
+ *    3. tiebreaker: tab_opened_at ascending (older opens above newer ones
+ *       so a freshly-opened tab lands at the bottom of an unordered set,
+ *       matching the server's `nextTabOrder` policy). */
 function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatRow[] {
   const byId = new Map<string, SidebarChatRow>();
   for (const f of fetched) {
@@ -229,20 +257,27 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
       categoryEmoji: f.category?.emoji ?? null,
       lastActivityAt: f.lastActivityAt || f.createdAt,
       tabPinnedAt: f.tabPinnedAt,
+      tabOrder: f.tabOrder,
+      tabOpenedAt: f.tabOpenedAt,
     });
   }
   for (const t of tracker) {
     const prev = byId.get(t.chatId);
     byId.set(t.chatId, {
       chatId: t.chatId,
-      label: t.label,
+      // Prefer the lazy-fetched label when present (DB is authoritative for
+      // labels — tracker can briefly carry an older label before
+      // `onChatRenamed` fires). Fall back to tracker label if no fetched
+      // copy exists yet.
+      label: prev?.label || t.label,
       status: t.status,
       categoryId: t.categoryId,
       categoryEmoji: t.categoryEmoji,
       lastActivityAt: t.lastActivityAt,
-      // Tracker payloads don't carry tab state; preserve whatever the
-      // lazy-fetched copy knew.
+      // Tracker payloads don't carry tab state — preserve fetched values.
       tabPinnedAt: prev?.tabPinnedAt ?? null,
+      tabOrder: prev?.tabOrder ?? null,
+      tabOpenedAt: prev?.tabOpenedAt ?? null,
     });
   }
   return [...byId.values()].sort((a, b) => {
@@ -250,7 +285,17 @@ function mergeProjectChats(tracker: ActiveChat[], fetched: Chat[]): SidebarChatR
     const bPinned = b.tabPinnedAt ? 1 : 0;
     if (aPinned !== bPinned) return bPinned - aPinned;
     if (aPinned && bPinned) return new Date(b.tabPinnedAt!).getTime() - new Date(a.tabPinnedAt!).getTime();
-    return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+    // Unpinned: tab_order ascending, NULLs last (legacy / tracker-only rows
+    // that never had an order assigned sit below the explicitly-ordered
+    // ones).
+    const aHasOrder = a.tabOrder !== null;
+    const bHasOrder = b.tabOrder !== null;
+    if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+    if (aHasOrder && bHasOrder) return a.tabOrder! - b.tabOrder!;
+    // Both unordered: stable tiebreaker by tab_opened_at ascending.
+    const ao = a.tabOpenedAt ? new Date(a.tabOpenedAt).getTime() : 0;
+    const bo = b.tabOpenedAt ? new Date(b.tabOpenedAt).getTime() : 0;
+    return ao - bo;
   });
 }
 
@@ -287,6 +332,34 @@ function SortableProjectItem({ id, render }: {
   render: (drag: RowDragProps) => ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+  return <>{render({
+    setNodeRef,
+    attributes: attributes as unknown as Record<string, unknown>,
+    listeners: listeners as unknown as Record<string, (e: unknown) => void> | undefined,
+    style,
+  })}</>;
+}
+
+// Sortable wrapper for sidebar chat tabs. Uses the same hook as projects
+// but with a chat:-prefixed id so handleDragEnd can dispatch on type. The
+// item exposes its own attributes/listeners; ChatRow stays unaware. The
+// `data` field carries the projectId + chatId so the drop handler can
+// route the reorder to the right project without scanning state.
+function SortableChatItem({ id, projectId, chatId, render }: {
+  id: string;
+  projectId: string;
+  chatId: string;
+  render: (drag: RowDragProps) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    data: { type: 'chat', projectId, chatId },
+  });
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -612,6 +685,25 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     }
   }, []);
 
+  // Reorder open chat tabs within a project. Optimistically reorders the
+  // local lazy-fetched cache by writing tab_order into each chat object so
+  // the merge sort picks up the new positions immediately, then POSTs the
+  // new order to the server. The server broadcasts `chat-tabs-reordered`
+  // back; the handler is idempotent so this is fine.
+  const reorderChatTabsLocal = useCallback((projectId: string, orderedIds: string[]) => {
+    setChatsByProject(prev => {
+      const entry = prev[projectId];
+      if (!entry) return prev;
+      const indexById = new Map(orderedIds.map((id, i) => [id, i + 1]));
+      const chats = entry.chats.map(c => {
+        const order = indexById.get(c.id);
+        return order !== undefined ? { ...c, tabOrder: order } : c;
+      });
+      return { ...prev, [projectId]: { chats, total: entry.total } };
+    });
+    api.post(`/api/projects/${projectId}/chats/reorder-tabs`, { orderedIds }).catch(() => {});
+  }, []);
+
   // ── DnD wiring ────────────────────────────────────────────────────────
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -637,6 +729,31 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     if (!over) return;
     const activeId = String(active.id);
     const overId = String(over.id);
+
+    // Chat-tab reorder. The active item carries `{ type: 'chat', projectId,
+    // chatId }` in its sortable data; we accept drops only inside the same
+    // project's chat list (cross-project moves aren't meaningful here —
+    // a chat belongs to exactly one project). The order we persist is
+    // built from the live merged list so tracker-only chats aren't
+    // accidentally dropped.
+    const activeData = active.data.current as { type?: string; projectId?: string; chatId?: string } | undefined;
+    const overData = over.data.current as { type?: string; projectId?: string; chatId?: string } | undefined;
+    if (activeData?.type === 'chat' && overData?.type === 'chat'
+        && activeData.projectId && overData.projectId
+        && activeData.projectId === overData.projectId
+        && activeData.chatId && overData.chatId
+        && activeData.chatId !== overData.chatId) {
+      const projectId = activeData.projectId;
+      const trackerChats = activeChats.byProject[projectId]?.chats ?? [];
+      const fetched = chatsByProject[projectId]?.chats ?? [];
+      const merged = mergeProjectChats(trackerChats, fetched);
+      const oldIndex = merged.findIndex(c => c.chatId === activeData.chatId);
+      const newIndex = merged.findIndex(c => c.chatId === overData.chatId);
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+      const reordered = arrayMove(merged, oldIndex, newIndex);
+      reorderChatTabsLocal(projectId, reordered.map(c => c.chatId));
+      return;
+    }
 
     const fromPinned = pinnedProjects.find(p => p.id === activeId);
     const fromRecents = projects.find(p => p.id === activeId);
@@ -905,6 +1022,27 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     });
   }, []);
 
+  // Another client (or another tab) reordered this project's chat tabs —
+  // mirror the new order locally by writing tab_order onto each cached
+  // chat. The merge sort picks it up on next render. Idempotent: if we
+  // initiated the drag, we already optimistically applied the same order.
+  const onChatTabsReordered = useCallback((e: SidebarChatTabsReordered) => {
+    setChatsByProject(prev => {
+      const entry = prev[e.projectId];
+      if (!entry) return prev;
+      const indexById = new Map(e.orderedIds.map((id, i) => [id, i + 1]));
+      let changed = false;
+      const chats = entry.chats.map(c => {
+        const order = indexById.get(c.id);
+        if (order === undefined || order === c.tabOrder) return c;
+        changed = true;
+        return { ...c, tabOrder: order };
+      });
+      if (!changed) return prev;
+      return { ...prev, [e.projectId]: { chats, total: entry.total } };
+    });
+  }, []);
+
   const onProjectPinChanged = useCallback((e: SidebarProjectPinChanged) => {
     if (e.pinned) {
       // Pin: move from Recents → Pinned (top by default). If we don't have
@@ -1001,6 +1139,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     onChatCreated,
     onChatDeleted,
     onChatMetaChanged,
+    onChatTabsReordered,
     onProjectPinChanged,
     onProjectReordered,
     onProjectActivity,
@@ -1272,23 +1411,38 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
             });
           }
 
+          // SortableContext wraps the visible chat tabs so the user can
+          // drag-reorder them. We pass `chat:`-prefixed ids to keep the
+          // chat sortable separate from the project sortable that lives
+          // in the same outer DndContext — handleDragEnd dispatches by
+          // checking active.data.current.type.
+          const sortableIds = visible.map(c => `chat:${c.chatId}`);
           return (
-            <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
+            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+              <ul className="ml-5 mt-0.5 mb-1 space-y-0.5">
               {visible.map((chat) => (
-                <ChatRow
+                <SortableChatItem
                   key={chat.chatId}
-                  chat={chat}
-                  isActive={location.pathname.includes(chat.chatId)}
-                  onSelect={() => {
-                    setOpenMobile(false);
-                    navigate(`/project/${project.id}/chats/${chat.chatId}`);
-                  }}
-                  onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
-                  onTouchEndCancel={handleSidebarChatTouchEndCancel}
-                  onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
-                  onMouseLeave={handleChatMouseLeave}
-                  onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
-                  onCloseTab={() => closeChatTabLocal(project.id, chat.chatId)}
+                  id={`chat:${chat.chatId}`}
+                  projectId={project.id}
+                  chatId={chat.chatId}
+                  render={(drag) => (
+                    <ChatRow
+                      chat={chat}
+                      isActive={location.pathname.includes(chat.chatId)}
+                      onSelect={() => {
+                        setOpenMobile(false);
+                        navigate(`/project/${project.id}/chats/${chat.chatId}`);
+                      }}
+                      onTouchStart={(e) => handleSidebarChatTouchStart(e, chat, project.id, project.path)}
+                      onTouchEndCancel={handleSidebarChatTouchEndCancel}
+                      onMouseEnter={(e) => handleChatMouseEnter(e, chat, project.id, project.path)}
+                      onMouseLeave={handleChatMouseLeave}
+                      onContextMenuNative={(e) => handleChatContextMenu(e, project.path)}
+                      onCloseTab={() => closeChatTabLocal(project.id, chat.chatId)}
+                      drag={drag}
+                    />
+                  )}
                 />
               ))}
               {isLoading && (
@@ -1316,7 +1470,8 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
                   </button>
                 </li>
               )}
-            </ul>
+              </ul>
+            </SortableContext>
           );
         })()}
       </SidebarMenuItem>

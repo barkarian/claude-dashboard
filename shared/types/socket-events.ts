@@ -274,6 +274,13 @@ export interface SidebarProjectReordered {
   orderedIds: string[];
 }
 
+/** Per-project chat-tab reorder. `orderedIds` lists every open tab in the
+ *  project in its new top-to-bottom order, including pinned tabs. */
+export interface SidebarChatTabsReordered {
+  projectId: string;
+  orderedIds: string[];
+}
+
 export interface SidebarProjectActivity {
   projectId: string;
   lastActivityAt: string;
