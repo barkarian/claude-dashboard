@@ -192,10 +192,21 @@ export default function BrowserArtifact({ session }: BrowserArtifactProps) {
                 onMouseMove={isMyLock ? (e) => emitInput({ kind: 'mouse-move', ...toFramePoint(e) }) : undefined}
                 onMouseDown={isMyLock ? (e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-down', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); } : undefined}
                 onMouseUp={isMyLock ? (e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-up', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); } : undefined}
-                onClick={isMyLock ? (e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-click', ...p }); } : undefined}
                 onWheel={isMyLock ? (e) => emitInput({ kind: 'mouse-wheel', deltaX: e.deltaX, deltaY: e.deltaY }) : undefined}
-                onKeyDown={isMyLock ? (e) => { e.preventDefault(); emitInput({ kind: 'key-down', key: mapKey(e.key) }); if (e.key.length === 1) emitInput({ kind: 'type', text: e.key }); } : undefined}
-                onKeyUp={isMyLock ? (e) => { e.preventDefault(); emitInput({ kind: 'key-up', key: mapKey(e.key) }); } : undefined}
+                onKeyDown={isMyLock ? (e) => {
+                  e.preventDefault();
+                  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    emitInput({ kind: 'type', text: e.key });
+                  } else {
+                    emitInput({ kind: 'key-down', key: mapKey(e.key) });
+                  }
+                } : undefined}
+                onKeyUp={isMyLock ? (e) => {
+                  e.preventDefault();
+                  if (!(e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+                    emitInput({ kind: 'key-up', key: mapKey(e.key) });
+                  }
+                } : undefined}
                 tabIndex={isMyLock ? 0 : -1}
               />
             </div>

@@ -224,10 +224,25 @@ export default function ProjectBrowserPanel({ projectId }: ProjectBrowserPanelPr
               onMouseMove={(e) => emitInput({ kind: 'mouse-move', ...toFramePoint(e) })}
               onMouseDown={(e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-down', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); }}
               onMouseUp={(e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-up', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); }}
-              onClick={(e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-click', ...p }); }}
               onWheel={(e) => emitInput({ kind: 'mouse-wheel', deltaX: e.deltaX, deltaY: e.deltaY })}
-              onKeyDown={(e) => { e.preventDefault(); emitInput({ kind: 'key-down', key: mapKey(e.key) }); if (e.key.length === 1) emitInput({ kind: 'type', text: e.key }); }}
-              onKeyUp={(e) => { e.preventDefault(); emitInput({ kind: 'key-up', key: mapKey(e.key) }); }}
+              onKeyDown={(e) => {
+                e.preventDefault();
+                // Printable single character → type (Playwright generates the
+                // proper down/press/up sequence). Non-printable → keyboard.down.
+                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  emitInput({ kind: 'type', text: e.key });
+                } else {
+                  emitInput({ kind: 'key-down', key: mapKey(e.key) });
+                }
+              }}
+              onKeyUp={(e) => {
+                e.preventDefault();
+                // Pair only with the key-down branch above. Single-char types
+                // already emitted their up via Playwright's keyboard.type.
+                if (!(e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+                  emitInput({ kind: 'key-up', key: mapKey(e.key) });
+                }
+              }}
               tabIndex={0}
             />
           </div>

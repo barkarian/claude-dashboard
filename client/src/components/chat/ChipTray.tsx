@@ -44,9 +44,12 @@ export default function ChipTray({ chatId, armedTools, informational }: ChipTray
   const [localArmed, setLocalArmed] = useState<string[]>(armedTools);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Server may emit chat:armed-tools-changed in response to other clients
-  // toggling — keep local in sync.
-  useEffect(() => { setLocalArmed(armedTools); }, [armedTools]);
+  // Sync from prop only when the chat changes (mount or navigation). Once
+  // mounted we treat local state + the chat:armed-tools-changed socket event
+  // as authoritative — otherwise an optimistic arm gets stomped when the
+  // parent's project context hasn't refreshed yet.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setLocalArmed(armedTools); }, [chatId]);
 
   useEffect(() => {
     if (!socket) return;

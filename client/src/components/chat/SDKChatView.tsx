@@ -186,6 +186,23 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     };
   }, [socket, chatId]);
 
+  // When the user arms/disarms a tool, the server ends the SDK session so the
+  // next session re-inits with the new MCP set. Refresh the project context
+  // (so chat.armedTools reflects the persisted state) and trigger a fresh
+  // sdk:start so the agent picks up the change without a manual reload.
+  useEffect(() => {
+    if (!socket || !chatId) return;
+    function handleArmedChanged({ chatId: cid }: { chatId: string; armedTools: string[] }) {
+      if (cid !== chatId) return;
+      refreshRef.current();
+      // Best-effort restart. If the session is still streaming, the server
+      // will end it; sdk:start is idempotent (initSession ends-then-creates).
+      socket?.emit('sdk:start', { projectId, chatId });
+    }
+    socket.on('chat:armed-tools-changed', handleArmedChanged);
+    return () => { socket.off('chat:armed-tools-changed', handleArmedChanged); };
+  }, [socket, chatId, projectId]);
+
   // Refresh project data when result arrives (history saved)
   useEffect(() => {
     if (lastResult) refreshRef.current();

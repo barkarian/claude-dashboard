@@ -182,8 +182,11 @@ async function launchContext(ws: WorkspaceState): Promise<Browser> {
 
   // Persistent context preserves cookies/localStorage across restarts —
   // the user's "real" Chromium for this workspace.
+  // Headless: the dashboard renders the screencast as the canonical view.
+  // A headed window would pop up alongside the dashboard mirror, which is
+  // confusing and out of scope for the panel UX.
   const context = await pw.chromium.launchPersistentContext(userDataDir, {
-    headless: false, // we want a real Chromium so the agent can do real work
+    headless: true,
     args: [
       `--remote-debugging-port=${port}`,
       '--no-first-run',
