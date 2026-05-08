@@ -502,24 +502,79 @@ NEVER respond with "I can't send files" or "the chat is text-only" — you can. 
   const browserSystemPrompt = browserMcp
     ? `
 
-=== PLAYWRIGHT BROWSER (claw_browser MCP) ===
-You have a real Chromium browser at your disposal via the \`mcp__claw_browser__run\` tool. The browser uses the user's persistent profile — they may already be logged into services like GitHub, Linear, Gmail. Be careful with destructive actions (delete, send, pay, post): ask the user before doing anything irreversible in their accounts.
+=== PLAYWRIGHT BROWSER ===
+You have a real Chromium with a persistent profile. The command surface is Microsoft's documented playwright-cli — same flags, same semantics. The dashboard auto-scopes execution to this chat's tab and your project's profile.
 
-WORKFLOW:
-1. The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees a live view artifact. You don't need to call it again — subsequent commands update the same artifact automatically.
-2. Then call \`mcp__claw_browser__run\` with an argv array to drive the browser. Examples:
-   - { argv: ["open", "https://example.com"] }
-   - { argv: ["snapshot"] }                    // accessibility tree with refs (e5, e10, ...)
-   - { argv: ["click", "e7"] }                 // click by snapshot ref
-   - { argv: ["fill", "e3", "hello"] }
-   - { argv: ["type", "hello world"] }
-   - { argv: ["screenshot"] }
-3. Default viewport is desktop. Use \`{ argv: ["viewport", "mobile"] }\` (or "tablet" / "desktop") when the task is mode-specific or the user asks. Switching is sequential — same tab, new viewport.
-4. Refs (e5, e10) are valid only within a single snapshot — ALWAYS re-snapshot after navigation or any action that changed the page.
+HOW TO INVOKE
+You drive the browser through \`mcp__claw_browser__run\` with an \`argv\` array. The argv is exactly the playwright-cli argument vector — what you'd type after \`playwright-cli\` at a shell. So \`playwright-cli click e7\` becomes \`{ argv: ["click", "e7"] }\`. That is the only translation; everything else below is literal CLI syntax.
 
-The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop issuing browser commands and wait for the next user message; it will summarize what they did.
+The user's profile may already be signed into GitHub, Gmail, Linear, etc. Be careful with destructive actions (delete, send, pay, post) — ask before anything irreversible.
 
-CAPTCHAS / HUMAN-VERIFICATION: If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate, STOP. Do not attempt to click through it, refresh, or work around it. Reply to the user with: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Then wait for the user to take over and resume. CAPTCHAs exist precisely to block automated agents; bypassing them violates the site's terms and rarely works anyway.`
+WORKFLOW
+1. The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees the live view. Don't call it again — the same view updates with subsequent commands.
+2. Drive the browser with the commands below.
+
+CORE COMMANDS
+- \`open <url>\`               open and navigate
+- \`goto <url>\`               navigate without re-launching
+- \`snapshot\`                 accessibility tree with element refs (e5, e10, ...)
+- \`snapshot "#main"\`         scope to a CSS selector
+- \`snapshot --depth=4\`       shallow tree when the full one is too large
+- \`click <ref>\`               click by ref or selector
+- \`dblclick <ref>\`
+- \`fill <ref> <text>\`         fill an input
+- \`fill <ref> <text> --submit\`  fill then press Enter (cleanest form submit)
+- \`type <text>\`               type into the currently-focused element
+- \`press <key>\`               single key: \`Enter\`, \`Tab\`, \`ArrowDown\`, \`Escape\`, ...
+- \`check <ref>\` / \`uncheck <ref>\`
+- \`select <ref> <value>\`
+- \`hover <ref>\`
+- \`go-back\` / \`go-forward\` / \`reload\`
+- \`screenshot\` / \`screenshot <ref>\`
+- \`console\`                  read browser console messages — use this for debugging instead of guessing
+- \`eval "el => el.id" <ref>\`  inspect attributes the snapshot hides
+- \`run-code "<async page => {...}>"\`  arbitrary Playwright code (see SPA section)
+
+REFS
+Snapshot refs (e5, e10, ...) are valid only for the snapshot you just took. Re-snapshot after any action that changed the DOM. Treat refs as one-shot tokens.
+
+SPAs AND DYNAMIC CONTENT — READ THIS, IT IS THE COMMON FAILURE MODE
+
+Modern web apps render asynchronously: the initial document loads fast, then JS hydrates, fetches data, and paints. You WILL see loading spinners, skeleton placeholders, and "Loading…" text — this is NORMAL behavior during normal use, not a sign that the page is broken. \`reload\` is almost never the right response — it discards client-side state and the SPA spins again from scratch.
+
+When the page looks unfinished, your tool is \`run-code\` with an explicit wait:
+
+\`\`\`
+argv: ["run-code", "async page => { await page.waitForLoadState('networkidle'); }"]
+argv: ["run-code", "async page => { await page.locator('.loading').waitFor({ state: 'hidden' }); }"]
+argv: ["run-code", "async page => { await page.locator('h1').waitFor({ timeout: 10000 }); }"]
+argv: ["run-code", "async page => { await page.waitForFunction(() => window.appReady === true); }"]
+\`\`\`
+
+\`networkidle\` is a good default. After the wait returns, snapshot and proceed. Reload ONLY when the user asks or after 30+ seconds of confirmed no-progress.
+
+If a click or fill seems to do nothing, **don't reload** — instead:
+1. \`console\` — check for an error/warning the page logged
+2. Re-\`snapshot\` — the DOM may have already updated, your ref is just stale
+3. \`run-code\` to wait for the expected next state, then continue
+
+LOCATORS WHEN REFS AREN'T STABLE
+For elements in lists, modals, virtualized scrollers — refs change between snapshots. Use Playwright locators directly:
+- \`click "getByRole('button', { name: 'Submit' })"\`
+- \`click "getByTestId('submit-button')"\`
+- \`click "#main > button.submit"\`
+
+TABS
+- \`tab-list\` / \`tab-new <url>\` / \`tab-close [n]\` / \`tab-select <n>\`
+
+VIEWPORT
+- \`viewport desktop\` / \`viewport tablet\` / \`viewport mobile\` — same tab, switches device emulation including UA + touch + DPR.
+
+PAUSE & TAKEOVER
+The user may pause the browser to take over. If \`run\` returns "workspace paused — user has control", stop. Wait for the next user message; it will summarize what they did and you continue from there.
+
+CAPTCHAS / HUMAN-VERIFICATION
+If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate: STOP. Do not click through, refresh, or try to bypass. Reply: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Bypassing them violates terms and rarely works anyway.`
     : '';
 
   for (let attempt = 0; attempt < 2; attempt++) {
