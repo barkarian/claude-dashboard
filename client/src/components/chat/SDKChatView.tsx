@@ -8,6 +8,7 @@ import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import ToolInstallBanner from './ToolInstallBanner.tsx';
+import BrowserArtifact from './BrowserArtifact.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
@@ -105,19 +106,9 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     return () => { socket.off('chat:browser-session', handleBrowserSession); };
   }, [socket, chatId]);
 
-  const { browserSessionsByMessageId, trailingBrowserSessions } = useMemo(() => {
-    const byMsg: Record<string, ChatBrowserSession[]> = {};
-    const trailing: ChatBrowserSession[] = [];
-    const messageIds = new Set(messages.map(m => m.id));
-    for (const s of browserSessions) {
-      if (s.messageId && messageIds.has(s.messageId)) {
-        (byMsg[s.messageId] ||= []).push(s);
-      } else {
-        trailing.push(s);
-      }
-    }
-    return { browserSessionsByMessageId: byMsg, trailingBrowserSessions: trailing };
-  }, [browserSessions, messages]);
+  // Browser sessions used to be grouped by message id and rendered inline;
+  // they now live in a persistent strip above the prompt. We just consume
+  // the flat browserSessions array directly in the JSX below.
 
   const { artifactsByMessageId, trailingArtifacts } = useMemo(() => {
     const byMsg: Record<string, ChatArtifact[]> = {};
@@ -358,10 +349,23 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             messages={messages}
             artifactsByMessageId={artifactsByMessageId}
             trailingArtifacts={trailingArtifacts}
-            browserSessionsByMessageId={browserSessionsByMessageId}
-            trailingBrowserSessions={trailingBrowserSessions}
             projectId={projectId}
           />
+
+          {/* Persistent browser strip — shows the latest browser session this
+              chat opened, with a live thumbnail and "agent driving" indicator.
+              Click to expand into the full canvas dialog. Stays visible while
+              browser is armed; doesn't pollute the message stream. */}
+          {browserSessions.length > 0 && (
+            <div className="flex-shrink-0 px-3 pt-2 space-y-2 border-t border-border bg-bg-surface">
+              {browserSessions
+                .filter(s => s.status !== 'closed')
+                .slice(-3) // cap visible strip at 3 most recent active sessions
+                .map(s => (
+                  <BrowserArtifact key={s.id} session={s} />
+                ))}
+            </div>
+          )}
 
           {/* Live "what is the agent doing" hint — replaces the old 3-dots
               streaming indicator with contextual labels (tool name, thinking,

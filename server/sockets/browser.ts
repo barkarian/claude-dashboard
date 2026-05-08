@@ -177,6 +177,15 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
     }
   });
 
+  // Client requests a fresh frame — used when the dialog opens on a static
+  // page where CDP screencast hasn't emitted anything yet.
+  socket.on('chat:browser-refresh-frame', async ({ chatId }: { chatId: string }) => {
+    const projectId = projectIdFor(chatId);
+    if (!projectId) return;
+    socket.join(`claude:${chatId}`);
+    await playwrightSessionManager.refreshFrameForChat(projectId, chatId);
+  });
+
   socket.on('chat:browser-viewport', async (payload: BrowserViewportRequestPayload) => {
     const projectId = projectIdFor(payload.chatId);
     if (!projectId) return;

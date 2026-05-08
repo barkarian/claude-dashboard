@@ -517,7 +517,9 @@ WORKFLOW:
 3. Default viewport is desktop. Use \`{ argv: ["viewport", "mobile"] }\` (or "tablet" / "desktop") when the task is mode-specific or the user asks. Switching is sequential — same tab, new viewport.
 4. Refs (e5, e10) are valid only within a single snapshot — ALWAYS re-snapshot after navigation or any action that changed the page.
 
-The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop issuing browser commands and wait for the next user message; it will summarize what they did.`
+The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop issuing browser commands and wait for the next user message; it will summarize what they did.
+
+CAPTCHAS / HUMAN-VERIFICATION: If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate, STOP. Do not attempt to click through it, refresh, or work around it. Reply to the user with: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Then wait for the user to take over and resume. CAPTCHAs exist precisely to block automated agents; bypassing them violates the site's terms and rarely works anyway.`
     : '';
 
   for (let attempt = 0; attempt < 2; attempt++) {

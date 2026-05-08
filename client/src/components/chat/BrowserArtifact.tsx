@@ -48,6 +48,10 @@ export default function BrowserArtifact({ session }: BrowserArtifactProps) {
   const [lockedBy, setLockedBy] = useState<string | null>(null);
   const [frameState, setFrameState] = useState<FrameState>({ width: 1440, height: 900, viewportMode: 'desktop' });
   const [hasFrame, setHasFrame] = useState(false);
+  // Pulses while the agent (or user) is actively driving the browser.
+  // Driven by frame arrivals — a frame within ~1.5s = something happened.
+  const [driving, setDriving] = useState(false);
+  const drivingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Two canvases: one for the inline thumbnail, one for the dialog full-size
   // view. We draw the same image into whichever is mounted.
@@ -73,6 +77,10 @@ export default function BrowserArtifact({ session }: BrowserArtifactProps) {
         drawTo(fullCanvasRef.current, img, p.width, p.height);
       };
       img.src = `data:image/jpeg;base64,${p.frame}`;
+      // Mark the browser as actively driven; clear after a short idle window.
+      setDriving(true);
+      if (drivingTimerRef.current) clearTimeout(drivingTimerRef.current);
+      drivingTimerRef.current = setTimeout(() => setDriving(false), 1500);
     }
     function handleState(p: BrowserStatePayload) {
       if (p.chatId !== chatId) return;
@@ -88,12 +96,17 @@ export default function BrowserArtifact({ session }: BrowserArtifactProps) {
   }, [socket, chatId]);
 
   // When the dialog opens, blast the cached image onto the full canvas so the
-  // user doesn't see a blank frame for up to FRAME_INTERVAL_MS.
+  // user doesn't see a blank frame for up to FRAME_INTERVAL_MS, and ask the
+  // server to push a fresh screenshot in case CDP screencast hasn't emitted
+  // one yet (static page → no visual changes → no frames).
   useEffect(() => {
-    if (open && lastImageRef.current) {
-      drawTo(fullCanvasRef.current, lastImageRef.current, frameState.width, frameState.height);
+    if (open) {
+      if (lastImageRef.current) {
+        drawTo(fullCanvasRef.current, lastImageRef.current, frameState.width, frameState.height);
+      }
+      socket?.emit('chat:browser-refresh-frame', { chatId });
     }
-  }, [open, frameState.width, frameState.height]);
+  }, [open, frameState.width, frameState.height, socket, chatId]);
 
   const isMyLock = !!socket && !!lockedBy && socket.id === lockedBy;
   const isViewOnly = !isMyLock && !!lockedBy;
@@ -140,14 +153,21 @@ export default function BrowserArtifact({ session }: BrowserArtifactProps) {
         onClick={() => setOpen(true)}
         className="rounded-md border border-border bg-surface px-3 py-2 text-sm flex items-center gap-3 hover:bg-surface-2 w-full text-left"
       >
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${isClosed ? 'bg-text-muted' : paused ? 'bg-yellow-500' : 'bg-green-500'}`}
-          aria-hidden
-        />
+        <span className="relative inline-block h-2 w-2" aria-hidden>
+          <span
+            className={`absolute inset-0 rounded-full ${isClosed ? 'bg-text-muted' : paused ? 'bg-yellow-500' : 'bg-green-500'}`}
+          />
+          {driving && !isClosed && !paused && (
+            <span className="absolute inset-0 rounded-full bg-green-500/60 animate-ping" />
+          )}
+        </span>
         <div className="flex-1 min-w-0">
           <div className="font-medium truncate">{session.label || 'Browser session'}</div>
           <div className="text-xs text-text-muted truncate">
-            {isClosed ? 'closed' : paused ? 'paused — click to take control' : 'agent driving — click to view'}
+            {isClosed ? 'closed'
+              : paused ? 'paused — click to take control'
+              : driving ? 'agent is interacting…'
+              : 'idle — click to view'}
           </div>
         </div>
         {hasFrame && (

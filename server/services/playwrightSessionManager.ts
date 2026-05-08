@@ -686,29 +686,56 @@ export function ensureWorkspaceServer(projectId: string): void {
 
 // --- Input dispatch (Phase 4) --------------------------------------------
 
+/**
+ * Pick a short, agent-readable label for the element at (x, y) on the page.
+ * Returns role + accessible name when possible (e.g. "button 'Sign in'");
+ * falls back to tag + visible text + nearest input attrs.
+ *
+ * Runs inside the browser via page.evaluate, so it sees the live DOM the user
+ * actually clicked. Best-effort — returns empty string on errors.
+ */
+async function describeElementAt(page: Page, x: number, y: number): Promise<string> {
+  try {
+    return await page.evaluate(({ x, y }: { x: number; y: number }) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (!el) return '';
+      const role = el.getAttribute('role') || el.tagName.toLowerCase();
+      const ariaLabel = el.getAttribute('aria-label')?.trim();
+      const name = (el as HTMLInputElement).name;
+      const placeholder = (el as HTMLInputElement).placeholder;
+      const value = (el as HTMLInputElement).value;
+      const id = el.id;
+      const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      const label = ariaLabel || (text && text.length < 60 ? text : '') || placeholder || name || id || '';
+      return label ? `${role} "${label}"` : role;
+    }, { x, y });
+  } catch {
+    return '';
+  }
+}
+
 /** Build a short natural-language description for a takeover input event. */
 function describeInput(ev: {
   kind: string; x?: number; y?: number; button?: string; deltaX?: number; deltaY?: number; key?: string; text?: string;
-}): string {
+}, elementLabel?: string): string {
   switch (ev.kind) {
-    case 'mouse-click':
-      return `Clicked${ev.button && ev.button !== 'left' ? ` (${ev.button})` : ''} at viewport (${Math.round(ev.x ?? 0)}, ${Math.round(ev.y ?? 0)})`;
-    case 'mouse-down':
-      return `Mouse down at (${Math.round(ev.x ?? 0)}, ${Math.round(ev.y ?? 0)})`;
-    case 'mouse-up':
-      return `Mouse up at (${Math.round(ev.x ?? 0)}, ${Math.round(ev.y ?? 0)})`;
-    case 'mouse-wheel':
-      return `Scrolled (${ev.deltaX ?? 0}, ${ev.deltaY ?? 0})`;
-    case 'mouse-move':
-      return `Moved cursor to (${Math.round(ev.x ?? 0)}, ${Math.round(ev.y ?? 0)})`;
+    case 'mouse-click': {
+      const target = elementLabel || `(${Math.round(ev.x ?? 0)}, ${Math.round(ev.y ?? 0)})`;
+      const btn = ev.button && ev.button !== 'left' ? `(${ev.button}-click) ` : '';
+      return `${btn}Clicked ${target}`;
+    }
+    case 'mouse-wheel': {
+      const dir = (ev.deltaY ?? 0) > 0 ? 'down' : 'up';
+      return `Scrolled ${dir}`;
+    }
     case 'key-down':
       return `Pressed ${ev.key}`;
-    case 'key-up':
-      return `Released ${ev.key}`;
     case 'type':
-      return `Typed: ${JSON.stringify(ev.text ?? '')}`;
+      return `Typed "${ev.text ?? ''}"`;
+    // Drop mouse-move / mouse-down / mouse-up / key-up — they're high-noise,
+    // low-signal events that bury the actually-meaningful actions in the log.
     default:
-      return ev.kind;
+      return '';
   }
 }
 
@@ -769,12 +796,20 @@ export async function dispatchInput(
   }
 
   // If the workspace is paused (i.e. the user is in takeover), append this
-  // event to the takeover log so we can summarize on resume.
+  // event to the takeover log so we can summarize on resume. Skip noisy
+  // events whose description is empty (mouse-move, raw down/up, key-up).
   const takeoverId = ws.takeovers.get(chatId);
   if (takeoverId) {
-    try {
-      projectManager.recordTakeoverEvent(chatId, takeoverId, ev.kind, describeInput(ev));
-    } catch { /* ignore */ }
+    let label = '';
+    if (ev.kind === 'mouse-click' && typeof ev.x === 'number' && typeof ev.y === 'number') {
+      label = await describeElementAt(page, ev.x, ev.y);
+    }
+    const desc = describeInput(ev, label);
+    if (desc) {
+      try {
+        projectManager.recordTakeoverEvent(chatId, takeoverId, ev.kind, desc);
+      } catch { /* ignore */ }
+    }
   }
 }
 
@@ -793,7 +828,33 @@ export function endTakeover(projectId: string, chatId: string): { takeoverId: st
   ws.takeovers.delete(chatId);
   if (!id) return { takeoverId: null, descriptions: [] };
   const events = projectManager.listTakeoverEvents(chatId, id);
-  return { takeoverId: id, descriptions: events.map(e => e.description) };
+
+  // Collapse runs of consecutive 'type' events into a single line so the
+  // agent sees `Typed "hello world"` instead of one entry per character.
+  // Same for consecutive 'mouse-wheel' events — fold into "Scrolled".
+  const out: string[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (e.eventType === 'type') {
+      let combined = '';
+      let j = i;
+      while (j < events.length && events[j].eventType === 'type') {
+        const m = /^Typed "(.*)"$/.exec(events[j].description);
+        combined += m ? m[1] : '';
+        j++;
+      }
+      if (combined) out.push(`Typed "${combined}"`);
+      i = j - 1;
+    } else if (e.eventType === 'mouse-wheel') {
+      let j = i;
+      while (j < events.length && events[j].eventType === 'mouse-wheel') j++;
+      out.push('Scrolled the page');
+      i = j - 1;
+    } else {
+      out.push(e.description);
+    }
+  }
+  return { takeoverId: id, descriptions: out };
 }
 
 /**
@@ -907,6 +968,32 @@ export async function resetProjectBrowser(projectId: string): Promise<void> {
   io?.to(`project:${projectId}`).emit('project:browser-reset', { projectId });
 }
 
+/**
+ * Capture and broadcast a single frame for the chat's tab on demand.
+ * CDP screencast only emits on visual changes — when the user opens the
+ * BrowserArtifact dialog on a static page they'd otherwise see nothing
+ * until something redraws. This pushes one screenshot immediately.
+ */
+export async function refreshFrameForChat(projectId: string, chatId: string): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = ws.tabs.get(chatId);
+  if (!entry) return;
+  try {
+    const buf = await entry.page.screenshot({ type: 'jpeg', quality: FRAME_QUALITY });
+    const v = VIEWPORTS[entry.viewport];
+    io?.to(`claude:${chatId}`).emit('chat:browser-frame', {
+      chatId,
+      frame: buf.toString('base64'),
+      width: v.width,
+      height: v.height,
+      ts: Date.now(),
+      viewportMode: entry.viewport,
+    });
+  } catch (err) {
+    console.error(`[playwright:${projectId}] refresh-frame failed:`, err);
+  }
+}
+
 /** Get a fresh accessibility snapshot for the chat's tab — used in resume summaries. */
 export async function snapshotForChat(projectId: string, chatId: string): Promise<string> {
   const result = await execForChat(projectId, chatId, ['snapshot'], userDataDirFor(projectId));
@@ -947,6 +1034,7 @@ export async function shutdown(): Promise<void> {
 export default {
   ensureWorkspaceServer,
   execForChat,
+  refreshFrameForChat,
   setPaused,
   isPaused,
   acquireLock,
