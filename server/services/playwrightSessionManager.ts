@@ -522,10 +522,12 @@ async function execOnWorkspace(
     }
 
     const env = cliEnvFor(ws, cdpEndpoint);
-    // --persistent makes the daemon's `isolated` flag false, so it shares our
-    // browser context (browser.contexts()[0]) instead of creating a new
-    // isolated context that would be invisible to our screencast.
-    const cliArgs = ['-s', ws.cliSession, '--persistent', ...msg.argv];
+    // --persistent only applies to the daemon-init call. Subsequent
+    // subcommands (goto, snapshot, click, close…) reject it as an unknown
+    // option and print help instead of running. Daemon-init happens on
+    // the first `open` command, so only attach the flag there.
+    const wantsPersistent = msg.argv[0] === 'open';
+    const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...msg.argv];
     const code = await runCli(cliArgs, env, msg.cwd, conn);
     conn.write(JSON.stringify({ type: 'exit', code }) + '\n');
   } finally {
@@ -563,7 +565,8 @@ export async function execForChat(
     const cdpEndpoint = await resolveCdpEndpoint(ws);
 
     const env = cliEnvFor(ws, cdpEndpoint);
-    const cliArgs = ['-s', ws.cliSession, '--persistent', ...argv];
+    const wantsPersistent = argv[0] === 'open';
+    const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...argv];
     return await new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
