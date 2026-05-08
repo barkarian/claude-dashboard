@@ -10,6 +10,7 @@ import type {
   BrowserLockRequestPayload,
   BrowserInputPayload,
   BrowserViewportRequestPayload,
+  ChatToolArmPayload,
 } from '../../shared/types/socket-events.ts';
 
 /** Resolve the workspace id for a chat. Returns null if the chat isn't found. */
@@ -18,7 +19,71 @@ function projectIdFor(chatId: string): string | null {
   return chat?.projectId || null;
 }
 
-export default function registerBrowserEvents(socket: Socket, _io: SocketIOServer): void {
+export default function registerBrowserEvents(socket: Socket, io: SocketIOServer): void {
+  // Arm a tool for this chat. For browser specifically: triggers a one-time
+  // install if needed (lazy Chromium download), then re-inits the SDK session
+  // with the browser MCP attached so the agent can use it next turn.
+  socket.on('chat:tool-arm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] } | { error: string }) => void) => {
+    const projectId = projectIdFor(chatId);
+    if (!projectId) {
+      ack?.({ error: 'chat not found' });
+      return;
+    }
+    const room = `claude:${chatId}`;
+    if (toolId === 'browser') {
+      // Tell clients we're starting (covers the inline progress card).
+      io.to(room).emit('chat:tool-install-progress', {
+        chatId, toolId, percent: null, status: 'starting',
+      });
+      try {
+        // Trigger lazy Chromium launch + ensure CDP endpoint resolves.
+        // playwright-cli internally downloads Chromium on first launch if
+        // needed; we surface that as the install step.
+        io.to(room).emit('chat:tool-install-progress', {
+          chatId, toolId, percent: null, status: 'downloading', message: 'Preparing Chromium…',
+        });
+        playwrightSessionManager.ensureWorkspaceServer(projectId);
+        // Persist the armed state regardless of whether Chromium is fully
+        // up — actual launch happens lazily on first command.
+        const armed = projectManager.armTool(chatId, 'browser');
+        io.to(room).emit('chat:tool-install-progress', {
+          chatId, toolId, percent: 100, status: 'ready',
+        });
+        io.to(room).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
+        ack?.({ armedTools: armed });
+        // Re-init the SDK session so the browser MCP mounts on the next turn.
+        // Best-effort — silently no-op if this isn't an SDK session.
+        try {
+          const session = sdkSessionManager.getSession(chatId);
+          if (session) {
+            sdkSessionManager.endSession(chatId);
+            // The session will re-init on the next sdk:start / chat:start.
+          }
+        } catch { /* not an SDK session — fine */ }
+      } catch (err: any) {
+        io.to(room).emit('chat:tool-install-progress', {
+          chatId, toolId, percent: null, status: 'failed', message: err?.message || String(err),
+        });
+        ack?.({ error: err?.message || String(err) });
+      }
+      return;
+    }
+    ack?.({ error: `unknown tool: ${toolId}` });
+  });
+
+  socket.on('chat:tool-disarm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] }) => void) => {
+    const armed = projectManager.disarmTool(chatId, toolId);
+    io.to(`claude:${chatId}`).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
+    ack?.({ armedTools: armed });
+    // Mirror the arm flow: end the SDK session so the next turn starts
+    // without the disarmed tool's MCP attached.
+    try {
+      const session = sdkSessionManager.getSession(chatId);
+      if (session) sdkSessionManager.endSession(chatId);
+    } catch { /* ignore */ }
+  });
+
+
   socket.on('chat:browser-pause', ({ chatId }: BrowserPauseRequestPayload) => {
     const projectId = projectIdFor(chatId);
     if (!projectId) return;
@@ -108,6 +173,55 @@ export default function registerBrowserEvents(socket: Socket, _io: SocketIOServe
       await playwrightSessionManager.setViewportForChat(projectId, payload.chatId, payload.mode);
     } catch (err) {
       console.error('[browser:viewport] set failed:', err);
+    }
+  });
+
+  // --- Project-level browser panel ---------------------------------------
+
+  // Client joins the project room when opening the panel; emits frames + url.
+  socket.on('project:browser-join', async ({ projectId }: { projectId: string }, ack?: (resp: { url: string } | { error: string }) => void) => {
+    if (!projectId) {
+      ack?.({ error: 'projectId required' });
+      return;
+    }
+    socket.join(`project:${projectId}`);
+    try {
+      const { url } = await playwrightSessionManager.openProjectBrowser(projectId);
+      ack?.({ url });
+    } catch (err: any) {
+      ack?.({ error: err?.message || String(err) });
+    }
+  });
+
+  socket.on('project:browser-leave', ({ projectId }: { projectId: string }) => {
+    if (!projectId) return;
+    socket.leave(`project:${projectId}`);
+    // Tab stays open in Chromium — closing the panel is a viewport-level
+    // action, not a Chromium-level one. Per the UX spec.
+  });
+
+  socket.on('project:browser-navigate', async ({ projectId, url }: { projectId: string; url: string }, ack?: (resp: { url: string } | { error: string }) => void) => {
+    try {
+      const result = await playwrightSessionManager.openProjectBrowser(projectId, url);
+      ack?.(result);
+    } catch (err: any) {
+      ack?.({ error: err?.message || String(err) });
+    }
+  });
+
+  socket.on('project:browser-viewport', async ({ projectId, mode }: { projectId: string; mode: 'desktop' | 'tablet' | 'mobile' }) => {
+    try {
+      await playwrightSessionManager.setProjectViewport(projectId, mode);
+    } catch (err) {
+      console.error('[project:browser-viewport] failed:', err);
+    }
+  });
+
+  socket.on('project:browser-input', async (payload: { projectId: string } & Parameters<typeof playwrightSessionManager.dispatchProjectInput>[1]) => {
+    try {
+      await playwrightSessionManager.dispatchProjectInput(payload.projectId, payload);
+    } catch (err) {
+      console.error('[project:browser-input] failed:', err);
     }
   });
 

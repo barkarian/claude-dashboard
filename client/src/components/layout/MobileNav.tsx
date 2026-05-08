@@ -137,6 +137,17 @@ export default function MobileNav({ projectId, currentTab, scriptCount = 0, chan
       ),
       count: changeCount,
     },
+    {
+      key: 'browser',
+      label: 'Browser',
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <circle cx="12" cy="12" r="9" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+        </svg>
+      ),
+      count: 0,
+    },
   ];
   const tabs = mode === 'simple' ? allTabs.filter(t => t.key !== 'scripts') : allTabs;
 

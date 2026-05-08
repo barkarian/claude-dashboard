@@ -246,19 +246,30 @@ async function resolveCdpEndpoint(ws: WorkspaceState): Promise<string> {
 
 // --- Per-tab + screencast -------------------------------------------------
 
-async function ensurePage(ws: WorkspaceState, chatId: string): Promise<PageEntry> {
-  let entry = ws.tabs.get(chatId);
+/**
+ * Reserved tab id for the project-level browser panel (the user's direct
+ * entry point — Project navbar → Browser). Frames broadcast to the project
+ * room rather than a chat room.
+ */
+export const PROJECT_TAB_ID = '__project__';
+
+async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry> {
+  let entry = ws.tabs.get(tabId);
   if (entry && !entry.page.isClosed()) return entry;
 
   const context = await ensureContext(ws);
   const page = await context.newPage();
-  const viewport = (projectManager.listBrowserTabsByProject(ws.projectId)
-    .find(t => t.chatId === chatId)?.viewportMode) || 'desktop';
+  // Per-chat tabs persist their viewport in the DB; the project-level tab
+  // defaults to desktop and isn't tracked there.
+  const viewport: BrowserViewportMode = tabId === PROJECT_TAB_ID
+    ? 'desktop'
+    : (projectManager.listBrowserTabsByProject(ws.projectId)
+        .find(t => t.chatId === tabId)?.viewportMode) || 'desktop';
   await applyViewport(page, viewport);
 
   const cdp = await context.newCDPSession(page);
   entry = { page, cdp, viewport, lastFrameAt: 0 };
-  ws.tabs.set(chatId, entry);
+  ws.tabs.set(tabId, entry);
 
   // Start a CDP screencast — frames arrive as Page.screencastFrame events,
   // each must be acked or Chromium stops sending more.
@@ -270,17 +281,30 @@ async function ensurePage(ws: WorkspaceState, chatId: string): Promise<PageEntry
   cdp.on('Page.screencastFrame', (params: any) => {
     // Throttle: enforce a server-side floor on broadcast rate.
     const now = Date.now();
-    const tab = ws.tabs.get(chatId);
+    const tab = ws.tabs.get(tabId);
     if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
       tab.lastFrameAt = now;
-      io?.to(`claude:${chatId}`).emit('chat:browser-frame', {
-        chatId,
+      // Project-level tab broadcasts on the project room so every client
+      // viewing the project's browser panel sees frames in lockstep.
+      const room = tabId === PROJECT_TAB_ID
+        ? `project:${ws.projectId}`
+        : `claude:${tabId}`;
+      const eventName = tabId === PROJECT_TAB_ID
+        ? 'project:browser-frame'
+        : 'chat:browser-frame';
+      const payload: any = {
         frame: params.data,
         width: params.metadata?.deviceWidth || VIEWPORTS[tab.viewport].width,
         height: params.metadata?.deviceHeight || VIEWPORTS[tab.viewport].height,
         ts: now,
         viewportMode: tab.viewport,
-      });
+      };
+      if (tabId === PROJECT_TAB_ID) {
+        payload.projectId = ws.projectId;
+      } else {
+        payload.chatId = tabId;
+      }
+      io?.to(room).emit(eventName, payload);
     }
     // Ack regardless of broadcast — required by CDP protocol.
     cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
@@ -289,14 +313,22 @@ async function ensurePage(ws: WorkspaceState, chatId: string): Promise<PageEntry
   // Track URL changes so a Chromium crash can recover state on next launch.
   page.on('framenavigated', async (frame) => {
     if (frame === page.mainFrame()) {
-      try {
-        projectManager.updateBrowserTab(chatId, { currentUrl: frame.url() });
-      } catch { /* ignore */ }
+      const url = frame.url();
+      if (tabId === PROJECT_TAB_ID) {
+        io?.to(`project:${ws.projectId}`).emit('project:browser-url', {
+          projectId: ws.projectId,
+          url,
+        });
+      } else {
+        try {
+          projectManager.updateBrowserTab(tabId, { currentUrl: url });
+        } catch { /* ignore */ }
+      }
     }
   });
 
   page.on('close', () => {
-    ws.tabs.delete(chatId);
+    ws.tabs.delete(tabId);
   });
 
   return entry;
@@ -688,6 +720,117 @@ export function endTakeover(projectId: string, chatId: string): { takeoverId: st
   return { takeoverId: id, descriptions: events.map(e => e.description) };
 }
 
+/**
+ * Open or focus the project-level browser tab. Lazily launches Chromium if
+ * needed. Returns the current URL after the operation completes.
+ */
+export async function openProjectBrowser(projectId: string, url?: string): Promise<{ url: string }> {
+  if (!isBrowserEnabled) throw new Error('Browser disabled in this environment');
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = await ensurePage(ws, PROJECT_TAB_ID);
+  if (url) {
+    try {
+      await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
+    } catch (err: any) {
+      // Don't throw — user can still see the failed-load state in the canvas.
+      console.warn(`[playwright:${projectId}] project goto failed: ${err?.message || err}`);
+    }
+  }
+  return { url: entry.page.url() };
+}
+
+/** Set the viewport mode for the project-level tab. */
+export async function setProjectViewport(
+  projectId: string,
+  mode: BrowserViewportMode,
+): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = await ensurePage(ws, PROJECT_TAB_ID);
+  await applyViewport(entry.page, mode);
+  entry.viewport = mode;
+}
+
+/** Dispatch user input to the project-level tab. No lock — only one user
+ *  driving manually anyway. */
+export async function dispatchProjectInput(
+  projectId: string,
+  ev: Parameters<typeof dispatchInput>[2],
+): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = ws.tabs.get(PROJECT_TAB_ID);
+  if (!entry) return;
+  const { page } = entry;
+  switch (ev.kind) {
+    case 'mouse-move':
+      if (typeof ev.x === 'number' && typeof ev.y === 'number') await page.mouse.move(ev.x, ev.y);
+      break;
+    case 'mouse-down':
+      if (typeof ev.x === 'number' && typeof ev.y === 'number') await page.mouse.move(ev.x, ev.y);
+      await page.mouse.down({ button: ev.button || 'left' });
+      break;
+    case 'mouse-up':
+      if (typeof ev.x === 'number' && typeof ev.y === 'number') await page.mouse.move(ev.x, ev.y);
+      await page.mouse.up({ button: ev.button || 'left' });
+      break;
+    case 'mouse-click':
+      if (typeof ev.x === 'number' && typeof ev.y === 'number') {
+        await page.mouse.click(ev.x, ev.y, { button: ev.button || 'left' });
+      }
+      break;
+    case 'mouse-wheel':
+      await page.mouse.wheel(ev.deltaX || 0, ev.deltaY || 0);
+      break;
+    case 'key-down':
+      if (ev.key) await page.keyboard.down(ev.key);
+      break;
+    case 'key-up':
+      if (ev.key) await page.keyboard.up(ev.key);
+      break;
+    case 'type':
+      if (ev.text) await page.keyboard.type(ev.text);
+      break;
+  }
+}
+
+/**
+ * Reset the project's browser: cancel in-flight commands, close Chromium,
+ * delete the persistent profile dir, drop tab rows. The next browser command
+ * lazily launches fresh Chromium with no cookies/storage.
+ */
+export async function resetProjectBrowser(projectId: string): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  // Cancel any queued execs by clearing the queue (active one finishes naturally).
+  ws.queue = [];
+  ws.paused = false;
+  ws.lockedBy = null;
+  ws.takeovers.clear();
+
+  if (ws.contextPromise) {
+    try {
+      const ctx = await ws.contextPromise;
+      await ctx.close();
+    } catch { /* ignore */ }
+  }
+  ws.contextPromise = null;
+  ws.cdpEndpointPromise = null;
+  ws.tabs.clear();
+
+  // Delete profile dir contents.
+  const dir = userDataDirFor(projectId);
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) fs.rmSync(p, { recursive: true, force: true });
+      else fs.rmSync(p, { force: true });
+    }
+  } catch (err) {
+    console.error(`[playwright:${projectId}] reset profile dir failed:`, err);
+  }
+
+  // Notify clients that browser state is gone.
+  io?.to(`project:${projectId}`).emit('project:browser-reset', { projectId });
+}
+
 /** Get a fresh accessibility snapshot for the chat's tab — used in resume summaries. */
 export async function snapshotForChat(projectId: string, chatId: string): Promise<string> {
   const result = await execForChat(projectId, chatId, ['snapshot'], userDataDirFor(projectId));
@@ -737,6 +880,10 @@ export default {
   endTakeover,
   snapshotForChat,
   setViewportForChat,
+  openProjectBrowser,
+  setProjectViewport,
+  dispatchProjectInput,
+  resetProjectBrowser,
   onSocketDisconnect,
   attachIO,
   shutdown,

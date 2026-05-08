@@ -73,6 +73,30 @@ export interface Chat {
    *  sidebar is sorted by this value, never by activity, so the order
    *  doesn't shuffle on every new message. */
   tabOrder: number | null;
+  /** Tool ids the user has armed for this chat. Drives which MCP servers +
+   *  system-prompt blocks load when the SDK session starts. Empty = no
+   *  optional tools. See browser-tools-ux-spec.md. */
+  armedTools: string[];
+}
+
+export type ToolId = 'browser';
+
+export interface ToolDescriptor {
+  id: ToolId;
+  name: string;
+  description: string;
+  /** Lucide icon name or emoji used in the chip. */
+  icon: string;
+  /** Whether this tool requires a one-time install before first use. */
+  installable: boolean;
+}
+
+export interface ToolInstallProgress {
+  toolId: ToolId;
+  /** 0-100, or null when in indeterminate / pre-progress states. */
+  percent: number | null;
+  status: 'starting' | 'downloading' | 'installing' | 'ready' | 'failed';
+  message?: string;
 }
 
 export interface Project {

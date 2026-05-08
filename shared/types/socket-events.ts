@@ -2,6 +2,27 @@
 
 import type { BrowserViewportMode } from './models.ts';
 
+/** Client → server: arm or disarm a tool for this chat. */
+export interface ChatToolArmPayload {
+  chatId: string;
+  toolId: string;
+}
+
+/** Server → clients: armed-tools changed for a chat (echoed after arm/disarm). */
+export interface ChatArmedToolsChangedPayload {
+  chatId: string;
+  armedTools: string[];
+}
+
+/** Server → clients: tool install progress (browser binary download, etc.). */
+export interface ChatToolInstallProgressPayload {
+  chatId: string;
+  toolId: string;
+  percent: number | null;
+  status: 'starting' | 'downloading' | 'installing' | 'ready' | 'failed';
+  message?: string;
+}
+
 /** Server → clients: a new screencast frame for a chat's browser tab. */
 export interface BrowserFramePayload {
   chatId: string;

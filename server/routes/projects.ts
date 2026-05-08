@@ -1064,6 +1064,22 @@ router.get('/:id/chats/:chatId/browser-sessions', async (req: Request<{ id: stri
   }
 });
 
+// Reset the project's browser state — closes Chromium, deletes the persistent
+// profile dir, drops chat browser tab rows. Destructive. Surfaced in
+// Project Settings → Advanced. See browser-tools-ux-spec.md § 7.
+router.post('/:id/browser/reset', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    // Lazy import to avoid pulling Playwright into module-load when the
+    // route file is required by the express bootstrap.
+    const { default: playwrightSessionManager } = await import('../services/playwrightSessionManager.ts');
+    await playwrightSessionManager.resetProjectBrowser(req.params.id);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('Error resetting browser:', err);
+    res.status(500).json({ error: err?.message || 'Failed to reset browser' });
+  }
+});
+
 // --- Saved recordings ---
 
 router.get('/:id/recordings', async (req: Request<{ id: string }>, res: Response) => {

@@ -557,6 +557,42 @@ function rowToCategory(r: any): ChatCategory | null {
   };
 }
 
+function parseArmedTools(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string');
+  if (typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function getArmedTools(chatId: string): string[] {
+  const row = db.prepare('SELECT armed_tools FROM chats WHERE id = ?').get(chatId) as { armed_tools: string | null } | undefined;
+  return parseArmedTools(row?.armed_tools);
+}
+
+function setArmedTools(chatId: string, tools: string[]): void {
+  // De-dup + filter to known shape; persist as JSON string.
+  const clean = Array.from(new Set(tools.filter(t => typeof t === 'string')));
+  db.prepare('UPDATE chats SET armed_tools = ? WHERE id = ?').run(JSON.stringify(clean), chatId);
+}
+
+function armTool(chatId: string, toolId: string): string[] {
+  const current = getArmedTools(chatId);
+  if (!current.includes(toolId)) current.push(toolId);
+  setArmedTools(chatId, current);
+  return current;
+}
+
+function disarmTool(chatId: string, toolId: string): string[] {
+  const current = getArmedTools(chatId).filter(t => t !== toolId);
+  setArmedTools(chatId, current);
+  return current;
+}
+
 function mapRowToChat(r: any): Chat {
   return {
     id: r.id,
@@ -578,6 +614,7 @@ function mapRowToChat(r: any): Chat {
     tabOpenedAt: r.tab_opened_at || null,
     tabPinnedAt: r.tab_pinned_at || null,
     tabOrder: r.tab_order ?? null,
+    armedTools: parseArmedTools(r.armed_tools),
   };
 }
 
@@ -602,6 +639,7 @@ function mapRowToChatLite(r: any): Chat {
     tabOpenedAt: r.tab_opened_at || null,
     tabPinnedAt: r.tab_pinned_at || null,
     tabOrder: r.tab_order ?? null,
+    armedTools: parseArmedTools(r.armed_tools),
   };
 }
 
@@ -1263,6 +1301,11 @@ export default {
   // Artifacts
   createArtifact,
   listArtifactsByChat,
+  // Per-chat armed tools
+  getArmedTools,
+  setArmedTools,
+  armTool,
+  disarmTool,
   // Browser
   getOrCreateBrowserTab,
   updateBrowserTab,

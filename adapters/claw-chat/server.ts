@@ -44,7 +44,11 @@ export default class ClawChatAdapter extends EventEmitter implements IChatAdapte
     // forced fallback at this layer.
     const model = chat?.model ?? null;
 
-    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true, withBrowser: true, model });
+    // Browser only mounts when the user has armed it for this chat (chip tray).
+    // Other adapter capabilities like artifacts stay always-on.
+    const armedTools = chat?.armedTools || [];
+    const withBrowser = armedTools.includes('browser');
+    sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSessionId, { withArtifacts: true, withBrowser, model });
 
     return { chatId, projectId, status: 'idle' };
   }

@@ -119,6 +119,8 @@ export default function ProjectSettingsDialog({
 
   // Delete state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showResetBrowserConfirm, setShowResetBrowserConfirm] = useState(false);
+  const [resettingBrowser, setResettingBrowser] = useState(false);
   const [deleteFolder, setDeleteFolder] = useState(false);
   const [dirExists, setDirExists] = useState<boolean | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -418,6 +420,18 @@ export default function ProjectSettingsDialog({
               )}
             </div>
 
+            {/* Reset browser — destructive but recoverable, less heavy than delete */}
+            <div className="border-t border-border pt-3">
+              <label className="text-xs font-medium text-text uppercase tracking-wider">Reset browser state</label>
+              <p className="text-xs text-text-muted mt-0.5 mb-2">
+                Close this project's browser, clear all cookies, localStorage, history,
+                and signed-in sessions. Affects every chat in this project.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setShowResetBrowserConfirm(true)}>
+                Reset browser
+              </Button>
+            </div>
+
             {/* Danger zone */}
             <div className="border-t border-border pt-3">
               <label className="text-xs font-medium text-danger uppercase tracking-wider">Danger Zone</label>
@@ -434,6 +448,40 @@ export default function ProjectSettingsDialog({
           </div>
         </DrawerContent>
       </Drawer>
+
+      {/* Reset browser confirmation dialog */}
+      <AlertDialog open={showResetBrowserConfirm} onOpenChange={setShowResetBrowserConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset browser?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This signs you out of every site, clears all cookies and storage,
+              and aborts any browser command currently running. Affects every
+              chat in this project. Cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resettingBrowser}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async (e) => {
+                e.preventDefault();
+                setResettingBrowser(true);
+                try {
+                  await api.post(`/api/projects/${projectId}/browser/reset`, {});
+                  setShowResetBrowserConfirm(false);
+                } catch (err) {
+                  console.error('Reset browser failed:', err);
+                } finally {
+                  setResettingBrowser(false);
+                }
+              }}
+              disabled={resettingBrowser}
+            >
+              {resettingBrowser ? 'Resetting…' : 'Reset'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

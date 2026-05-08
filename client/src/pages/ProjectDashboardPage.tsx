@@ -15,6 +15,7 @@ import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import ChatViewShell from '../components/chat/ChatViewShell.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
+import ProjectBrowserPanel from '../components/browser/ProjectBrowserPanel.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
 import DesktopRecordingControls from '../components/chat/DesktopRecordingControls.tsx';
@@ -333,6 +334,7 @@ export default function ProjectDashboardPage() {
               <FilesPage projectId={id!} repos={repos} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} onRepoRefresh={refreshRepos} />
             </div>
           } />
+          <Route path="browser" element={<ProjectBrowserPanel projectId={id!} />} />
         </Routes>
       )}
 

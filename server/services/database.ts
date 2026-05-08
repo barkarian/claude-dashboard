@@ -622,6 +622,16 @@ try {
   console.error('tab_order backfill migration failed:', err);
 }
 
+// Per-chat armed tools — JSON array of tool ids the user has armed for this
+// chat (e.g. ["browser"]). NULL / "[]" = no tools armed. Drives whether MCP
+// servers + system-prompt blocks for those tools mount when the SDK session
+// starts. See browser-tools-ux-spec.md.
+try {
+  db.exec(`ALTER TABLE chats ADD COLUMN armed_tools TEXT NOT NULL DEFAULT '[]'`);
+} catch {
+  // Column already exists — ignore
+}
+
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
   return row?.value;

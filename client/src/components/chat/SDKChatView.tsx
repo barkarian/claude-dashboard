@@ -7,6 +7,7 @@ import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
 import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
+import ToolInstallBanner from './ToolInstallBanner.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
@@ -383,10 +384,15 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             </div>
           )}
 
+          {/* Tool install progress (browser first-arm Chromium download) */}
+          {chatId && <ToolInstallBanner chatId={chatId} />}
+
           {/* Input */}
           <SDKPromptInput
             key={chatId}
             projectId={projectId}
+            chatId={chatId}
+            armedTools={chat?.armedTools || []}
             status={status}
             onSend={sendPrompt}
             onInterrupt={interrupt}

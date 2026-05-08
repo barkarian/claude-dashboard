@@ -82,9 +82,10 @@ export default function registerSDKClaudeEvents(socket: Socket, io: SocketIOServ
       // adapter. The legacy sdk:* socket handlers don't go through the adapter
       // orchestrator, so without this branch the tool would never load.
       const withArtifacts = chat?.adapter === 'claw-chat';
-      // Browser is local-only; sdkSessionManager additionally gates on isBrowserEnabled.
-      // Mirror withArtifacts for now: any claw-chat session gets browser access.
-      const withBrowser = chat?.adapter === 'claw-chat';
+      // Browser only mounts when armed via the per-chat chip tray. The
+      // adapter no longer auto-attaches it.
+      const armedTools = chat?.armedTools || [];
+      const withBrowser = armedTools.includes('browser');
       const model = chat?.model ?? null;
       sdkSessionManager.initSession(chatId, projectId, projectPath, io, savedSdkSessionId, { withArtifacts, withBrowser, model });
       socket.emit('sdk:status', { chatId, status: 'idle' });
