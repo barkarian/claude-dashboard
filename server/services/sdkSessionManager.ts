@@ -17,6 +17,8 @@ import activeChatsTracker from './activeChatsTracker.ts';
 import playwrightSessionManager from './playwrightSessionManager.ts';
 import { isBrowserEnabled } from '../config.ts';
 import type { SessionStateContext } from '../../shared/types/session.ts';
+import fsSync from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -224,6 +226,57 @@ function buildArtifactsMcpServer(session: SDKSession) {
       ),
     ],
   });
+}
+
+/**
+ * Load the official Playwright SKILL.md shipped with @playwright/cli, strip
+ * sections we manage ourselves (installation, browser sessions, link list to
+ * reference docs we don't load), and cache the result.
+ *
+ * Re-loaded on each server boot so prompt updates track the bundled package
+ * version. If the file isn't found we fall back to a tiny built-in summary
+ * so the agent still has something to work with.
+ */
+let _cachedBrowserSkill: string | null = null;
+
+function loadBrowserSkillContent(): string {
+  if (_cachedBrowserSkill !== null) return _cachedBrowserSkill;
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const candidates = [
+    path.resolve(__dirname, '..', 'node_modules', 'playwright-core', 'lib', 'tools', 'cli-client', 'skill', 'SKILL.md'),
+    path.resolve(__dirname, '..', '..', 'node_modules', 'playwright-core', 'lib', 'tools', 'cli-client', 'skill', 'SKILL.md'),
+  ];
+  let raw: string | null = null;
+  for (const p of candidates) {
+    try {
+      raw = fsSync.readFileSync(p, 'utf-8');
+      break;
+    } catch { /* try next */ }
+  }
+  if (!raw) {
+    _cachedBrowserSkill = '';
+    return '';
+  }
+  // Strip YAML frontmatter (`--- name: ... ---`).
+  raw = raw.replace(/^---\n[\s\S]*?\n---\n/, '');
+  // Sections we DROP because they're either irrelevant or contradict the
+  // dashboard's environment (we manage sessions + installation).
+  const DROP_HEADINGS = new Set([
+    'Installation',                  // bundled
+    'Browser Sessions',              // dashboard owns session naming + lifecycle
+    'Open parameters',               // dashboard owns launch options
+    'Specific tasks',                // links to reference files we don't load
+  ]);
+  // Split into chunks at H2 boundaries while preserving the first part (H1 + body).
+  const chunks = raw.split(/(?=^## )/m);
+  const kept = chunks.filter(chunk => {
+    const m = chunk.match(/^## ([^\n]+)/);
+    if (!m) return true; // H1 / preamble — keep
+    return !DROP_HEADINGS.has(m[1].trim());
+  });
+  _cachedBrowserSkill = kept.join('').trim();
+  return _cachedBrowserSkill;
 }
 
 /**
@@ -500,49 +553,28 @@ NEVER respond with "I can't send files" or "the chat is text-only" — you can. 
     : '';
 
   const browserSystemPrompt = browserMcp
-    ? `
+    ? (() => {
+        const officialSkill = loadBrowserSkillContent();
+        const preamble = `
 
 === PLAYWRIGHT BROWSER ===
-You have a real Chromium with a persistent profile. The command surface is Microsoft's documented playwright-cli — same flags, same semantics. The dashboard auto-scopes execution to this chat's tab and your project's profile.
+You have a real Chromium with a persistent profile. The command surface is Microsoft's official playwright-cli — same flags, same semantics — and the full skill is reproduced verbatim below.
 
-HOW TO INVOKE
-You drive the browser through \`mcp__claw_browser__run\` with an \`argv\` array. The argv is exactly the playwright-cli argument vector — what you'd type after \`playwright-cli\` at a shell. So \`playwright-cli click e7\` becomes \`{ argv: ["click", "e7"] }\`. That is the only translation; everything else below is literal CLI syntax.
+HOW TO INVOKE THESE COMMANDS
+You drive the browser through \`mcp__claw_browser__run\` with an \`argv\` array. The argv is exactly the playwright-cli argument vector — what you'd type after \`playwright-cli\` at a shell. So \`playwright-cli click e7\` becomes \`{ argv: ["click", "e7"] }\`. That is the only translation; everything below is literal CLI syntax. Ignore "Installation" and any \`-s=<session>\` flags you may see in the upstream docs — the dashboard handles session/launch automatically.
 
-The user's profile may already be signed into GitHub, Gmail, Linear, etc. Be careful with destructive actions (delete, send, pay, post) — ask before anything irreversible.
+WORKSPACE PROFILE
+The browser's persistent profile may already be signed into the user's real GitHub, Gmail, Linear, etc. Be careful with destructive actions (delete, send, pay, post) — ask before anything irreversible in the user's accounts.
 
-WORKFLOW
-1. The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees the live view. Don't call it again — the same view updates with subsequent commands.
-2. Drive the browser with the commands below.
+ARTIFACT
+The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees the live view. Don't call it again — the same view updates with subsequent commands.
+`;
+        const addendum = `
 
-CORE COMMANDS
-- \`open <url>\`               open and navigate
-- \`goto <url>\`               navigate without re-launching
-- \`snapshot\`                 accessibility tree with element refs (e5, e10, ...)
-- \`snapshot "#main"\`         scope to a CSS selector
-- \`snapshot --depth=4\`       shallow tree when the full one is too large
-- \`click <ref>\`               click by ref or selector
-- \`dblclick <ref>\`
-- \`fill <ref> <text>\`         fill an input
-- \`fill <ref> <text> --submit\`  fill then press Enter (cleanest form submit)
-- \`type <text>\`               type into the currently-focused element
-- \`press <key>\`               single key: \`Enter\`, \`Tab\`, \`ArrowDown\`, \`Escape\`, ...
-- \`check <ref>\` / \`uncheck <ref>\`
-- \`select <ref> <value>\`
-- \`hover <ref>\`
-- \`go-back\` / \`go-forward\` / \`reload\`
-- \`screenshot\` / \`screenshot <ref>\`
-- \`console\`                  read browser console messages — use this for debugging instead of guessing
-- \`eval "el => el.id" <ref>\`  inspect attributes the snapshot hides
-- \`run-code "<async page => {...}>"\`  arbitrary Playwright code (see SPA section)
-
-REFS
-Snapshot refs (e5, e10, ...) are valid only for the snapshot you just took. Re-snapshot after any action that changed the DOM. Treat refs as one-shot tokens.
-
-SPAs AND DYNAMIC CONTENT — READ THIS, IT IS THE COMMON FAILURE MODE
-
+=== CRITICAL: SPAs AND DYNAMIC CONTENT ===
 Modern web apps render asynchronously: the initial document loads fast, then JS hydrates, fetches data, and paints. You WILL see loading spinners, skeleton placeholders, and "Loading…" text — this is NORMAL behavior during normal use, not a sign that the page is broken. \`reload\` is almost never the right response — it discards client-side state and the SPA spins again from scratch.
 
-When the page looks unfinished, your tool is \`run-code\` with an explicit wait:
+When the page looks unfinished, use \`run-code\` with an explicit wait:
 
 \`\`\`
 argv: ["run-code", "async page => { await page.waitForLoadState('networkidle'); }"]
@@ -558,23 +590,22 @@ If a click or fill seems to do nothing, **don't reload** — instead:
 2. Re-\`snapshot\` — the DOM may have already updated, your ref is just stale
 3. \`run-code\` to wait for the expected next state, then continue
 
-LOCATORS WHEN REFS AREN'T STABLE
-For elements in lists, modals, virtualized scrollers — refs change between snapshots. Use Playwright locators directly:
-- \`click "getByRole('button', { name: 'Submit' })"\`
-- \`click "getByTestId('submit-button')"\`
-- \`click "#main > button.submit"\`
+For elements in lists, modals, or virtualized scrollers where refs change between snapshots, use Playwright locators: \`click "getByRole('button', { name: 'Submit' })"\` or \`click "getByTestId('submit-button')"\`.
 
-TABS
-- \`tab-list\` / \`tab-new <url>\` / \`tab-close [n]\` / \`tab-select <n>\`
+=== VIEWPORT MODES (dashboard-specific) ===
+This dashboard exposes three viewport presets via \`viewport <mode>\`:
+- \`viewport desktop\` (1440×900, no touch)
+- \`viewport tablet\` (1024×768, iPad UA + touch)
+- \`viewport mobile\` (393×852, iPhone UA + touch + DPR 3)
+Switch viewports for device-specific testing or when the user asks. Same tab, applies to subsequent navigations.
 
-VIEWPORT
-- \`viewport desktop\` / \`viewport tablet\` / \`viewport mobile\` — same tab, switches device emulation including UA + touch + DPR.
+=== PAUSE & TAKEOVER (dashboard-specific) ===
+The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop. Wait for the next user message; it will summarize what they did and you continue from there.
 
-PAUSE & TAKEOVER
-The user may pause the browser to take over. If \`run\` returns "workspace paused — user has control", stop. Wait for the next user message; it will summarize what they did and you continue from there.
-
-CAPTCHAS / HUMAN-VERIFICATION
-If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate: STOP. Do not click through, refresh, or try to bypass. Reply: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Bypassing them violates terms and rarely works anyway.`
+=== CAPTCHAS / HUMAN-VERIFICATION ===
+If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate: STOP. Do not click through, refresh, or try to bypass. Reply: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Bypassing them violates terms and rarely works anyway.`;
+        return preamble + (officialSkill ? '\n\n=== OFFICIAL PLAYWRIGHT-CLI SKILL ===\n\n' + officialSkill : '') + addendum;
+      })()
     : '';
 
   for (let attempt = 0; attempt < 2; attempt++) {
