@@ -103,10 +103,8 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
   }
 
   function closeTab(t: TabRow) {
-    if (t.kind === 'chat') {
-      const ok = confirm(`Close this browser tab? The agent in "${t.label}" will need to reopen it if it wants to continue.`);
-      if (!ok) return;
-    }
+    // Optimistically remove from the list so repeated clicks don't stack.
+    setTabs((prev) => prev.filter((p) => p.tabId !== t.tabId));
     setBusyClose((b) => ({ ...b, [t.tabId]: true }));
     socket?.emit('project:browser-close-tab', { projectId, tabId: t.tabId }, () => {
       setBusyClose((b) => { const n = { ...b }; delete n[t.tabId]; return n; });

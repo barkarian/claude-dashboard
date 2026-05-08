@@ -1081,6 +1081,10 @@ function updateBrowserTab(
   db.prepare(`UPDATE chat_browser_tabs SET ${fields.join(', ')} WHERE chat_id = ?`).run(...values);
 }
 
+function deleteBrowserTab(chatId: string): void {
+  db.prepare('DELETE FROM chat_browser_tabs WHERE chat_id = ?').run(chatId);
+}
+
 function listBrowserTabsByProject(projectId: string): ChatBrowserTab[] {
   const rows = db.prepare(
     'SELECT chat_id, project_id, tab_id, current_url, viewport_mode, created_at FROM chat_browser_tabs WHERE project_id = ? ORDER BY created_at ASC'
@@ -1369,6 +1373,7 @@ export default {
   getOrCreateBrowserTab,
   updateBrowserTab,
   listBrowserTabsByProject,
+  deleteBrowserTab,
   createBrowserSession,
   closeBrowserSession,
   listBrowserSessionsByChat,

@@ -649,6 +649,12 @@ try {
   // Table didn't exist on first boot — fine.
 }
 
+// Browser tabs are ephemeral — they exist only while the Chromium process
+// they live in is running. Restart kills Chromium, so every persisted tab
+// row is now a ghost. Wipe them on boot to keep the popover honest.
+try { db.prepare('DELETE FROM manual_browser_tabs').run(); } catch { /* not yet created */ }
+try { db.prepare('DELETE FROM chat_browser_tabs').run(); } catch { /* not yet created */ }
+
 // Per-chat armed tools — JSON array of tool ids the user has armed for this
 // chat (e.g. ["browser"]). NULL / "[]" = no tools armed. Drives whether MCP
 // servers + system-prompt blocks for those tools mount when the SDK session

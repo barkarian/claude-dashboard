@@ -112,6 +112,10 @@ interface WorkspaceState {
   tabs: Map<string, PageEntry>;
   /** Per-chat active takeover id (set on pause, cleared on resume). */
   takeovers: Map<string, string>;
+  /** Tab whose CLI command is currently mid-flight. The page-watcher uses
+   *  this to attribute newly-created daemon pages to the right tab —
+   *  otherwise concurrent chats would race for the same new page. */
+  activeTabId: string | null;
   /** Single-flight queue: only one playwright-cli child runs at a time per workspace. */
   queue: Array<() => void>;
   active: boolean;
@@ -159,6 +163,7 @@ function getOrCreateWorkspace(projectId: string): WorkspaceState {
       lockedBy: null,
       tabs: new Map(),
       takeovers: new Map(),
+      activeTabId: null,
       queue: [],
       active: false,
     };
@@ -269,13 +274,18 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
   if (entry && !entry.page.isClosed()) return entry;
 
   const context = await ensureContext(ws);
-  // Reuse the most recent existing page if any — this matters because
-  // playwright-cli's daemon may have already opened a page in our context
-  // via CDP. Creating a fresh one would leave us screencasting a blank page
-  // while the agent navigates a different page.
-  const existingPages = context.pages().filter(p => !p.isClosed());
-  const page = existingPages.length > 0
-    ? existingPages[existingPages.length - 1]
+  // Each tab owns its own Page — never adopt a page that another tab in
+  // ws.tabs already references, otherwise both tabs end up screencasting
+  // the same Page and mirror each other.
+  const ownedPages = new Set<unknown>();
+  for (const e of ws.tabs.values()) ownedPages.add(e.page);
+  const orphanPages = context.pages().filter(p => !p.isClosed() && !ownedPages.has(p));
+  // If there's exactly one orphan page (e.g. the daemon just created one
+  // in response to our `open` and we haven't claimed it yet), adopt it
+  // for this tab. Otherwise create a fresh page so each chat tab gets
+  // its own Chromium tab.
+  const page = orphanPages.length === 1
+    ? orphanPages[0]
     : await context.newPage();
   // Per-chat tabs persist their viewport in the DB; the project-level tab
   // defaults to desktop and isn't tracked there.
@@ -422,14 +432,23 @@ function startContextPageWatcher(ws: WorkspaceState): void {
     if (!context) return;
     context.on('page', async (page) => {
       console.log(`[playwright:${ws.projectId}] new page in context`);
-      // Adopt the page for any chat tab whose current page is closed/blank.
-      for (const [tabId, entry] of ws.tabs) {
-        if (isManualTab(tabId)) continue; // manual tabs are user-driven; don't auto-retarget
-        if (entry.page.isClosed() || entry.page.url() === 'about:blank') {
-          console.log(`[playwright:${ws.projectId}] retargeting tab ${tabId} to new page`);
-          await retargetTab(ws, tabId, page);
-          return;
-        }
+      // Attribute the new page to the tab whose CLI is currently running.
+      // The queue in execOnWorkspace / execForChat ensures only one tab is
+      // active at a time, so the activeTabId is unambiguous.
+      const targetTabId = ws.activeTabId;
+      if (!targetTabId) {
+        // No CLI in-flight — leave the page floating; ensurePage will adopt
+        // it as an orphan on its next call if needed.
+        return;
+      }
+      const entry = ws.tabs.get(targetTabId);
+      if (!entry) return;
+      // Only retarget if our existing page is blank/dead. If we already
+      // own a non-blank page for this tab, the daemon's new page is a
+      // duplicate — don't switch.
+      if (entry.page.isClosed() || entry.page.url() === 'about:blank') {
+        console.log(`[playwright:${ws.projectId}] retargeting tab ${targetTabId} to new page`);
+        await retargetTab(ws, targetTabId, page);
       }
     });
   }).catch(() => { /* ignore */ });
@@ -520,13 +539,15 @@ async function execOnWorkspace(
     }
 
     const env = cliEnvFor(ws, cdpEndpoint);
-    // --persistent only applies to the daemon-init call. Subsequent
-    // subcommands (goto, snapshot, click, close…) reject it as an unknown
-    // option and print help instead of running. Daemon-init happens on
-    // the first `open` command, so only attach the flag there.
     const wantsPersistent = msg.argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...msg.argv];
-    const code = await runCli(cliArgs, env, msg.cwd, conn);
+    ws.activeTabId = msg.chatId;
+    let code: number;
+    try {
+      code = await runCli(cliArgs, env, msg.cwd, conn);
+    } finally {
+      ws.activeTabId = null;
+    }
     conn.write(JSON.stringify({ type: 'exit', code }) + '\n');
   } finally {
     ws.active = false;
@@ -565,23 +586,28 @@ export async function execForChat(
     const env = cliEnvFor(ws, cdpEndpoint);
     const wantsPersistent = argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...argv];
-    return await new Promise((resolve) => {
-      let stdout = '';
-      let stderr = '';
-      let child: ChildProcess;
-      try {
-        child = spawn('playwright-cli', cliArgs, { cwd, env });
-      } catch (err: any) {
-        resolve({ stdout: '', stderr: `spawn failed: ${err?.message || err}\n`, code: 127 });
-        return;
-      }
-      child.stdout?.on('data', (d) => { stdout += d.toString('utf8'); });
-      child.stderr?.on('data', (d) => { stderr += d.toString('utf8'); });
-      child.on('error', (err: any) => {
-        resolve({ stdout, stderr: stderr + `error: ${err?.message || String(err)}\n`, code: 127 });
+    ws.activeTabId = chatId;
+    try {
+      return await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+        let stdout = '';
+        let stderr = '';
+        let child: ChildProcess;
+        try {
+          child = spawn('playwright-cli', cliArgs, { cwd, env });
+        } catch (err: any) {
+          resolve({ stdout: '', stderr: `spawn failed: ${err?.message || err}\n`, code: 127 });
+          return;
+        }
+        child.stdout?.on('data', (d) => { stdout += d.toString('utf8'); });
+        child.stderr?.on('data', (d) => { stderr += d.toString('utf8'); });
+        child.on('error', (err: any) => {
+          resolve({ stdout, stderr: stderr + `error: ${err?.message || String(err)}\n`, code: 127 });
+        });
+        child.on('exit', (code) => resolve({ stdout, stderr, code: code ?? 0 }));
       });
-      child.on('exit', (code) => resolve({ stdout, stderr, code: code ?? 0 }));
-    });
+    } finally {
+      ws.activeTabId = null;
+    }
   } finally {
     ws.active = false;
     const next = ws.queue.shift();
@@ -865,15 +891,20 @@ export function endTakeover(projectId: string, chatId: string): { takeoverId: st
 export async function openTab(projectId: string, tabId: string, url?: string): Promise<{ url: string }> {
   if (!isBrowserEnabled) throw new Error('Browser disabled in this environment');
   const ws = getOrCreateWorkspace(projectId);
-  const entry = await ensurePage(ws, tabId);
-  if (url) {
-    try {
-      await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
-    } catch (err: any) {
-      console.warn(`[playwright:${projectId}] tab ${tabId} goto failed: ${err?.message || err}`);
+  ws.activeTabId = tabId;
+  try {
+    const entry = await ensurePage(ws, tabId);
+    if (url) {
+      try {
+        await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
+      } catch (err: any) {
+        console.warn(`[playwright:${projectId}] tab ${tabId} goto failed: ${err?.message || err}`);
+      }
     }
+    return { url: entry.page.url() };
+  } finally {
+    ws.activeTabId = null;
   }
-  return { url: entry.page.url() };
 }
 
 /** Set viewport mode for any tab. */
@@ -968,9 +999,15 @@ export async function closeTab(projectId: string, tabId: string): Promise<void> 
     try { await entry.page.close(); } catch { /* ignore */ }
     ws.tabs.delete(tabId);
   }
-  if (isManualTab(tabId)) {
-    try { projectManager.deleteManualTab(tabId); } catch { /* ignore */ }
-  }
+  // Clean up the persistent row so the tab doesn't reappear in the popover
+  // — it's gone, not "closed". A new one will be created lazily next time.
+  try {
+    if (isManualTab(tabId)) {
+      projectManager.deleteManualTab(tabId);
+    } else {
+      projectManager.deleteBrowserTab(tabId);
+    }
+  } catch { /* ignore */ }
   io?.to(`project:${projectId}`).emit('project:browser-tab-closed', { projectId, tabId });
 }
 
