@@ -82,9 +82,14 @@ export default function ChipTray({ chatId, armedTools, informational }: ChipTray
       setBusy(false);
       if (resp?.error) {
         setLocalArmed((prev) => prev.filter(t => t !== toolId));
-        // The install-progress card surfaces specific errors; this is a
-        // belt-and-braces fallback for connectivity failures.
         console.error('arm failed:', resp.error);
+        return;
+      }
+      // Treat the ack as authoritative — it's delivered directly to this
+      // socket regardless of room membership, so it works even if the
+      // chat:armed-tools-changed broadcast doesn't reach us.
+      if (Array.isArray(resp?.armedTools)) {
+        setLocalArmed(resp.armedTools);
       }
     });
   }
@@ -93,7 +98,12 @@ export default function ChipTray({ chatId, armedTools, informational }: ChipTray
     if (busy || informational) return;
     setBusy(true);
     setLocalArmed((prev) => prev.filter(t => t !== toolId));
-    socket?.emit('chat:tool-disarm', { chatId, toolId }, () => setBusy(false));
+    socket?.emit('chat:tool-disarm', { chatId, toolId }, (resp: any) => {
+      setBusy(false);
+      if (Array.isArray(resp?.armedTools)) {
+        setLocalArmed(resp.armedTools);
+      }
+    });
   }
 
   const armedDescriptors = localArmed
