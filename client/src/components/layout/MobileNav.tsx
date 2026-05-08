@@ -150,8 +150,12 @@ export default function MobileNav({
       count: changeCount,
     },
   ];
-  // Browser nav item — popover trigger (not a route). Hidden when no tabs.
-  const browserItem = browserTabCount > 0 ? {
+  // Browser nav item — popover trigger (not a route). Always visible per
+  // project: even when zero tabs exist, clicking it opens the popover with
+  // the "+ Add tab" entry point. Badge shows currently-driving tab count.
+  // browserTabCount is intentionally unused now but kept for parity / future.
+  void browserTabCount;
+  allTabs.push({
     key: 'browser',
     label: 'Browser',
     icon: (
@@ -161,8 +165,7 @@ export default function MobileNav({
       </svg>
     ),
     count: browserDrivingCount,
-  } : null;
-  if (browserItem) allTabs.push(browserItem as any);
+  } as any);
   const tabs = mode === 'simple' ? allTabs.filter(t => t.key !== 'scripts') : allTabs;
 
   return (

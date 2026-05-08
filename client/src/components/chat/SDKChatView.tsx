@@ -8,6 +8,7 @@ import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import ToolInstallBanner from './ToolInstallBanner.tsx';
+import ChatBrowserStrip from '../browser/ChatBrowserStrip.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
@@ -324,8 +325,11 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             projectId={projectId}
           />
 
-          {/* Browser sessions are now surfaced via the project Browser
-              popover in the bottom navbar — no in-chat strip. */}
+          {/* Per-chat browser strip — small live tab card above the prompt
+              for SDK chats only. Click to open the canvas dialog; × closes
+              the tab. The project-level popover (in the bottom navbar) is
+              the broader multi-tab view. */}
+          {chatId && <ChatBrowserStrip projectId={projectId} chatId={chatId} />}
 
           {/* Live "what is the agent doing" hint — replaces the old 3-dots
               streaming indicator with contextual labels (tool name, thinking,

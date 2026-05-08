@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext.tsx';
 import {
   Dialog,
@@ -35,6 +36,7 @@ interface BrowserPopoverProps {
 
 export default function BrowserPopover({ projectId, open, onClose }: BrowserPopoverProps) {
   const { socket } = useSocket();
+  const navigate = useNavigate();
   const [tabs, setTabs] = useState<TabRow[]>([]);
   const [openedTab, setOpenedTab] = useState<TabRow | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -193,6 +195,11 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
               projectId={projectId}
               tabId={openedTab.tabId}
               initialUrl={openedTab.currentUrl || undefined}
+              onGoToChat={openedTab.kind === 'chat' && openedTab.chatId ? () => {
+                navigate(`/project/${projectId}/chats/${openedTab.chatId}`);
+                setOpenedTab(null);
+                onClose();
+              } : undefined}
             />
           )}
         </DialogContent>

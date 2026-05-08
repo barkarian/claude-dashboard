@@ -15,6 +15,8 @@ interface BrowserTabViewerProps {
   tabId: string;
   /** Initial URL hint shown in the address bar. */
   initialUrl?: string;
+  /** When set, renders a "Go to chat" button that calls this. */
+  onGoToChat?: () => void;
 }
 
 interface FrameState {
@@ -29,7 +31,7 @@ const VIEWPORT_CSS_WIDTH: Record<BrowserViewportMode, number> = {
   mobile: 393,
 };
 
-export default function BrowserTabViewer({ projectId, tabId, initialUrl }: BrowserTabViewerProps) {
+export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToChat }: BrowserTabViewerProps) {
   const { socket } = useSocket();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastImageRef = useRef<HTMLImageElement | null>(null);
@@ -122,6 +124,16 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl }: Brows
           <button type="submit" className="rounded border border-border px-3 py-1 text-sm hover:bg-bg-hover">Go</button>
         </form>
         <ViewportSelector value={frameState.viewportMode} onChange={setViewport} />
+        {onGoToChat && (
+          <button
+            type="button"
+            onClick={onGoToChat}
+            className="rounded border border-border px-3 py-1 text-sm hover:bg-bg-hover"
+            title="Open the chat that owns this browser tab"
+          >
+            Go to chat
+          </button>
+        )}
       </div>
 
       <div className="flex-1 flex items-center justify-center bg-bg-surface overflow-auto p-2">
