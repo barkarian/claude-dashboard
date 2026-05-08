@@ -13,10 +13,11 @@ import type {
   ChatToolArmPayload,
 } from '../../shared/types/socket-events.ts';
 
-/** Resolve the workspace id for a chat. Returns null if the chat isn't found. */
+/** Resolve the workspace id for a chat. Returns null if the chat isn't found.
+ *  Uses the dedicated `project_id` SQL helper because the Chat type from
+ *  getChat() doesn't expose projectId directly. */
 function projectIdFor(chatId: string): string | null {
-  const chat = projectManager.getChat(chatId);
-  return chat?.projectId || null;
+  return projectManager.getChatProjectId(chatId);
 }
 
 export default function registerBrowserEvents(socket: Socket, io: SocketIOServer): void {

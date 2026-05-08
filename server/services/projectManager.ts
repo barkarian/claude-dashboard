@@ -1301,6 +1301,8 @@ export default {
   // Artifacts
   createArtifact,
   listArtifactsByChat,
+  // Chat → project lookup (used by features that work with bare chatIds).
+  getChatProjectId,
   // Per-chat armed tools
   getArmedTools,
   setArmedTools,
