@@ -30,6 +30,10 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
       return;
     }
     const room = `claude:${chatId}`;
+    // Make sure the requesting client is in the chat room before we emit to it.
+    // The room is normally joined on sdk:start / sdk:attach, but a user may
+    // arm a tool in a fresh chat before sending their first message.
+    socket.join(room);
     if (toolId === 'browser') {
       // Tell clients we're starting (covers the inline progress card).
       io.to(room).emit('chat:tool-install-progress', {
@@ -72,6 +76,7 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   });
 
   socket.on('chat:tool-disarm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] }) => void) => {
+    socket.join(`claude:${chatId}`);
     const armed = projectManager.disarmTool(chatId, toolId);
     io.to(`claude:${chatId}`).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
     ack?.({ armedTools: armed });
