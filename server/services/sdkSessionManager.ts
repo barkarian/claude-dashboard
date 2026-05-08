@@ -572,9 +572,46 @@ The very first time you open the browser in this chat, call \`mcp__claw_browser_
         const addendum = `
 
 === CRITICAL: SPAs AND DYNAMIC CONTENT ===
-Modern web apps render asynchronously: the initial document loads fast, then JS hydrates, fetches data, and paints. You WILL see loading spinners, skeleton placeholders, and "Loading…" text — this is NORMAL behavior during normal use, not a sign that the page is broken. \`reload\` is almost never the right response — it discards client-side state and the SPA spins again from scratch.
 
-When the page looks unfinished, use \`run-code\` with an explicit wait:
+ANTI-PATTERN — DO NOT DO THIS (this is the failure mode that breaks SPA browsing):
+
+  You opened https://example.com/app.
+  The page is rendering. You see a loader.
+  You think: "let me re-check the page state" → and call \`goto https://example.com/app\` AGAIN.
+  WRONG. \`goto\` is a navigation. Navigating to the same URL **triggers a full page reload** —
+  it kills client-side state, restarts data fetches, and brings the spinner BACK. You then
+  see another spinner, conclude "still loading," and goto again. You are the cause of the spin.
+
+The same is true for \`open <url>\` and \`reload\`. ALL THREE re-navigate. Never use them to "verify"
+or "refresh" your view of the page. They are for changing pages, not for checking pages.
+
+THE GOLDEN RULES:
+  1. \`open\` / \`goto\` / \`reload\` → only when the user asks to navigate, OR you're moving to
+     a genuinely different URL. Once you've opened a URL, that page is yours; do not re-navigate to it.
+  2. To **check page state** → \`snapshot\` (gives you the current DOM tree).
+  3. To **wait for content** → \`run-code\` with \`waitForLoadState\` / \`locator.waitFor\` /
+     \`waitForFunction\`. NOT goto.
+  4. To **see what the page logged** → \`console\`. NOT goto.
+  5. \`reload\` is reserved for when the user explicitly asks for a refresh, OR the page has
+     been genuinely stuck for 30+ seconds with no progress.
+
+DECISION TABLE — when the page looks "not ready":
+
+  Symptom                           → Correct action
+  ─────────────────────────────────────────────────────────────────────────────────────
+  Spinner visible                   → run-code: page.waitForLoadState('networkidle')
+                                      then snapshot. NEVER goto.
+  Skeleton placeholders showing     → run-code: locator('.skeleton').waitFor({state:'hidden'})
+                                      or wait for the actual content selector. NEVER goto.
+  "Loading…" text in DOM            → It's part of the site's UX; wait for the next selector.
+                                      NEVER goto.
+  Snapshot looks empty              → run-code: page.waitForLoadState('domcontentloaded')
+                                      then re-snapshot. NEVER goto.
+  Click did nothing visible         → console (read errors) → re-snapshot (your ref is stale)
+                                      → run-code wait if needed. NEVER goto.
+  You're confused about the page    → snapshot. Read the YAML. NEVER goto to "start fresh."
+
+WAIT IDIOMS (use these, not goto):
 
 \`\`\`
 argv: ["run-code", "async page => { await page.waitForLoadState('networkidle'); }"]
@@ -583,14 +620,19 @@ argv: ["run-code", "async page => { await page.locator('h1').waitFor({ timeout: 
 argv: ["run-code", "async page => { await page.waitForFunction(() => window.appReady === true); }"]
 \`\`\`
 
-\`networkidle\` is a good default. After the wait returns, snapshot and proceed. Reload ONLY when the user asks or after 30+ seconds of confirmed no-progress.
+\`networkidle\` is a good default for "wait until this SPA has settled." After it returns,
+snapshot and proceed. Modern SPAs typically settle in < 1 second; if a wait takes 5+ seconds,
+something specific is fetching — wait for the actual selector you need rather than networkidle.
 
-If a click or fill seems to do nothing, **don't reload** — instead:
-1. \`console\` — check for an error/warning the page logged
-2. Re-\`snapshot\` — the DOM may have already updated, your ref is just stale
-3. \`run-code\` to wait for the expected next state, then continue
+LOCATORS WHEN REFS AREN'T STABLE
+For elements in lists, modals, or virtualized scrollers where refs change between snapshots,
+use Playwright locators directly: \`click "getByRole('button', { name: 'Submit' })"\` or
+\`click "getByTestId('submit-button')"\`.
 
-For elements in lists, modals, or virtualized scrollers where refs change between snapshots, use Playwright locators: \`click "getByRole('button', { name: 'Submit' })"\` or \`click "getByTestId('submit-button')"\`.
+PERCEPTION BIAS — TRUST THE SNAPSHOT
+If the snapshot you just took contains the elements you need to interact with, the page is
+loaded ENOUGH. Don't second-guess based on visual animations, micro-skeleton transitions, or
+"it feels slow." If your target element is in the snapshot, click/fill it and move on.
 
 === VIEWPORT MODES (dashboard-specific) ===
 This dashboard exposes three viewport presets via \`viewport <mode>\`:
