@@ -445,6 +445,22 @@ db.exec(`
   )
 `);
 
+// --- UI state (per user + project K/V; values are JSON strings) ---
+// Used for VSCode-style workspace state: expanded folders in the file tree,
+// open editors, scroll positions, etc. Generic K/V so new state types don't
+// need migrations. user_id falls back to 'local' in single-user/desktop mode.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ui_state (
+    user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, project_id, key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ui_state_project ON ui_state(project_id);
+`);
+
 // One-shot: mirror claude-agent-sdk's enabled state to claw-chat for existing
 // installs. They share authentication; the only delta is the artifacts tool.
 // Without this, simple-mode chat creation would fail "adapter not enabled" for
@@ -682,6 +698,30 @@ export function getFavoriteModels(adapterId: string): string[] {
 
 export function setFavoriteModels(adapterId: string, modelIds: string[]): void {
   setAdapterSetting(adapterId, 'favorite_models', JSON.stringify(modelIds));
+}
+
+// --- UI state helpers (per user + project) ---
+export function getUiState(userId: string, projectId: string, key: string): string | null {
+  const row = db.prepare(
+    'SELECT value FROM ui_state WHERE user_id = ? AND project_id = ? AND key = ?'
+  ).get(userId, projectId, key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setUiState(userId: string, projectId: string, key: string, value: string): void {
+  db.prepare(`
+    INSERT INTO ui_state (user_id, project_id, key, value, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, project_id, key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = datetime('now')
+  `).run(userId, projectId, key, value);
+}
+
+export function deleteUiState(userId: string, projectId: string, key: string): void {
+  db.prepare(
+    'DELETE FROM ui_state WHERE user_id = ? AND project_id = ? AND key = ?'
+  ).run(userId, projectId, key);
 }
 
 // --- Session purge ---

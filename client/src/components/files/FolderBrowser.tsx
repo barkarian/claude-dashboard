@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Tree } from 'react-arborist';
 import { useProjectFiles } from '../../hooks/useProjectFiles.ts';
+import { useUiState } from '../../hooks/useUiState.ts';
 import { buildFileTree, type TreeNode } from '../../utils/buildFileTree.ts';
 import { getFileIcon } from '../../utils/fileIcons.ts';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
@@ -9,6 +10,8 @@ import ContextMenu from '../ui/ContextMenu.tsx';
 import api from '../../utils/api.ts';
 import { downloadProjectFile } from '../../utils/downloadFile.ts';
 import FileContentView from './FileContentView.tsx';
+
+const FOLDER_OPEN_STATE_KEY = 'folder_browser.open';
 
 type FileStatus = 'added' | 'modified' | 'deleted' | 'untracked' | 'renamed';
 
@@ -33,6 +36,24 @@ export default function FolderBrowser({ projectId }: FolderBrowserProps) {
   const [height, setHeight] = useState(0);
   const [changedFiles, setChangedFiles] = useState<Map<string, FileStatus>>(new Map());
   const isMobile = useIsMobile();
+
+  // Persisted folder expand/collapse state. react-arborist reads
+  // `initialOpenState` once at mount, so we gate the Tree render on the
+  // hydration completing — subsequent toggles update the persisted map but
+  // don't remount (the Tree owns its open state internally after mount).
+  const {
+    value: openMap,
+    setValue: setOpenMap,
+    ready: openMapReady,
+  } = useUiState<Record<string, boolean>>(projectId, FOLDER_OPEN_STATE_KEY, {});
+  const handleToggle = useCallback((id: string) => {
+    setOpenMap(prev => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  }, [setOpenMap]);
   const [ctxMenu, setCtxMenu] = useState<{ open: boolean; position: { x: number; y: number }; filePath: string }>({
     open: false,
     position: { x: 0, y: 0 },
@@ -120,11 +141,13 @@ export default function FolderBrowser({ projectId }: FolderBrowserProps) {
         <div className="text-center pt-12">
           <p className="text-text-muted text-sm">No files found</p>
         </div>
-      ) : height > 0 ? (
+      ) : height > 0 && openMapReady ? (
         <Tree<TreeNode>
           data={treeData}
           idAccessor="id"
           openByDefault={false}
+          initialOpenState={openMap}
+          onToggle={handleToggle}
           width="100%"
           height={height}
           indent={16}

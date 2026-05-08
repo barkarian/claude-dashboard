@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import projectManager from '../services/projectManager.ts';
 import gitService from '../services/gitService.ts';
+import { getUiState, setUiState, deleteUiState } from '../services/database.ts';
 import { scanDir } from '../services/dirScan.ts';
 import { getOrBuildPreview, getPreviewInfo } from '../services/previewService.ts';
 import sdkSessionManager from '../services/sdkSessionManager.ts';
@@ -232,6 +233,64 @@ router.get('/:id/repos', async (req: Request<{ id: string }>, res: Response) => 
   } catch (err) {
     console.error('Error discovering repos:', err);
     res.status(500).json({ error: 'Failed to discover repos' });
+  }
+});
+
+// --- Per-project UI state (VSCode-style workspace state K/V) ---------------
+// Scoped to (userId, projectId, key). userId falls back to 'local' for direct
+// desktop access where there's no tunnel session. Values are stored as opaque
+// JSON strings so callers can persist any shape (open-folder map, scroll
+// positions, etc.) without server-side schema changes.
+const UI_STATE_KEY_RE = /^[a-z0-9_.-]{1,64}$/i;
+const UI_STATE_MAX_BYTES = 256 * 1024;
+
+function uiStateUserId(req: Request): string {
+  return req.session?.tunnelService?.userId || 'local';
+}
+
+router.get('/:id/ui-state/:key', (req: Request<{ id: string; key: string }>, res: Response) => {
+  try {
+    const { id, key } = req.params;
+    if (!UI_STATE_KEY_RE.test(key)) {
+      return res.status(400).json({ error: 'Invalid ui-state key' });
+    }
+    const raw = getUiState(uiStateUserId(req), id, key);
+    if (raw == null) return res.json({ value: null });
+    try {
+      res.json({ value: JSON.parse(raw) });
+    } catch {
+      // Stored value is not valid JSON — treat as missing rather than error
+      res.json({ value: null });
+    }
+  } catch (err) {
+    console.error('Error reading ui-state:', err);
+    res.status(500).json({ error: 'Failed to read ui-state' });
+  }
+});
+
+router.put('/:id/ui-state/:key', (req: Request<{ id: string; key: string }>, res: Response) => {
+  try {
+    const { id, key } = req.params;
+    if (!UI_STATE_KEY_RE.test(key)) {
+      return res.status(400).json({ error: 'Invalid ui-state key' });
+    }
+    if (!('value' in (req.body ?? {}))) {
+      return res.status(400).json({ error: 'value is required' });
+    }
+    const value = req.body.value;
+    if (value === null) {
+      deleteUiState(uiStateUserId(req), id, key);
+      return res.json({ success: true });
+    }
+    const serialized = JSON.stringify(value);
+    if (Buffer.byteLength(serialized, 'utf8') > UI_STATE_MAX_BYTES) {
+      return res.status(413).json({ error: 'ui-state value too large' });
+    }
+    setUiState(uiStateUserId(req), id, key, serialized);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error writing ui-state:', err);
+    res.status(500).json({ error: 'Failed to write ui-state' });
   }
 });
 
