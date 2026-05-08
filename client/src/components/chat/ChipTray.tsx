@@ -49,16 +49,27 @@ export default function ChipTray({ chatId, armedTools, informational }: ChipTray
   // as authoritative — otherwise an optimistic arm gets stomped when the
   // parent's project context hasn't refreshed yet.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setLocalArmed(armedTools); }, [chatId]);
+  useEffect(() => {
+    console.log('[ChipTray] sync from prop on chat change', { chatId, armedTools });
+    setLocalArmed(armedTools);
+  }, [chatId]);
+
+  // Also log every render of ChipTray so we can see remounts.
+  console.log('[ChipTray] render', { chatId, propArmed: armedTools, localArmed });
 
   useEffect(() => {
+    console.log('[ChipTray] mount listener', { chatId });
     if (!socket) return;
     function handleChange({ chatId: cid, armedTools: t }: { chatId: string; armedTools: string[] }) {
+      console.log('[ChipTray] chat:armed-tools-changed received', { cid, t, ourChatId: chatId });
       if (cid !== chatId) return;
       setLocalArmed(t);
     }
     socket.on('chat:armed-tools-changed', handleChange);
-    return () => { socket.off('chat:armed-tools-changed', handleChange); };
+    return () => {
+      console.log('[ChipTray] unmount listener', { chatId });
+      socket.off('chat:armed-tools-changed', handleChange);
+    };
   }, [socket, chatId]);
 
   // Close picker on outside click.
@@ -74,22 +85,28 @@ export default function ChipTray({ chatId, armedTools, informational }: ChipTray
   }, [pickerOpen]);
 
   function arm(toolId: string) {
+    console.log('[ChipTray] arm() called', { toolId, busy, informational });
     if (busy || informational) return;
     setBusy(true);
-    setLocalArmed((prev) => prev.includes(toolId) ? prev : [...prev, toolId]);
+    setLocalArmed((prev) => {
+      const next = prev.includes(toolId) ? prev : [...prev, toolId];
+      console.log('[ChipTray] optimistic setLocalArmed', { prev, next });
+      return next;
+    });
     setPickerOpen(false);
     socket?.emit('chat:tool-arm', { chatId, toolId }, (resp: any) => {
+      console.log('[ChipTray] arm ack received', resp);
       setBusy(false);
       if (resp?.error) {
         setLocalArmed((prev) => prev.filter(t => t !== toolId));
-        console.error('arm failed:', resp.error);
+        console.error('[ChipTray] arm failed:', resp.error);
         return;
       }
-      // Treat the ack as authoritative — it's delivered directly to this
-      // socket regardless of room membership, so it works even if the
-      // chat:armed-tools-changed broadcast doesn't reach us.
       if (Array.isArray(resp?.armedTools)) {
+        console.log('[ChipTray] setLocalArmed from ack', resp.armedTools);
         setLocalArmed(resp.armedTools);
+      } else {
+        console.warn('[ChipTray] arm ack had no armedTools array', resp);
       }
     });
   }

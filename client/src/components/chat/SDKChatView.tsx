@@ -192,11 +192,10 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
   // sdk:start so the agent picks up the change without a manual reload.
   useEffect(() => {
     if (!socket || !chatId) return;
-    function handleArmedChanged({ chatId: cid }: { chatId: string; armedTools: string[] }) {
-      if (cid !== chatId) return;
+    function handleArmedChanged(payload: { chatId: string; armedTools: string[] }) {
+      console.log('[SDKChatView] chat:armed-tools-changed received', payload);
+      if (payload.chatId !== chatId) return;
       refreshRef.current();
-      // Best-effort restart. If the session is still streaming, the server
-      // will end it; sdk:start is idempotent (initSession ends-then-creates).
       socket?.emit('sdk:start', { projectId, chatId });
     }
     socket.on('chat:armed-tools-changed', handleArmedChanged);

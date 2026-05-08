@@ -24,8 +24,10 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   // install if needed (lazy Chromium download), then re-inits the SDK session
   // with the browser MCP attached so the agent can use it next turn.
   socket.on('chat:tool-arm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] } | { error: string }) => void) => {
+    console.log('[browser:tool-arm] received', { chatId, toolId, socketId: socket.id });
     const projectId = projectIdFor(chatId);
     if (!projectId) {
+      console.log('[browser:tool-arm] chat not found', { chatId });
       ack?.({ error: 'chat not found' });
       return;
     }
@@ -35,6 +37,7 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
     // arm a tool in a fresh chat before sending their first message.
     socket.join(room);
     if (toolId === 'browser') {
+      console.log('[browser:tool-arm] arming browser', { chatId, projectId });
       // Tell clients we're starting (covers the inline progress card).
       io.to(room).emit('chat:tool-install-progress', {
         chatId, toolId, percent: null, status: 'starting',
@@ -50,10 +53,12 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
         // Persist the armed state regardless of whether Chromium is fully
         // up — actual launch happens lazily on first command.
         const armed = projectManager.armTool(chatId, 'browser');
+        console.log('[browser:tool-arm] persisted armed_tools', { chatId, armed });
         io.to(room).emit('chat:tool-install-progress', {
           chatId, toolId, percent: 100, status: 'ready',
         });
         io.to(room).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
+        console.log('[browser:tool-arm] sending ack', { armed });
         ack?.({ armedTools: armed });
         // Re-init the SDK session so the browser MCP mounts on the next turn.
         // Best-effort — silently no-op if this isn't an SDK session.
