@@ -215,6 +215,9 @@ async function ensureContext(ws: WorkspaceState): Promise<Browser> {
       ws.contextPromise = null;
       throw err;
     });
+    // Once Chromium is up, watch for new pages so we can retarget chat-tab
+    // screencasts to whichever page playwright-cli's daemon navigates.
+    startContextPageWatcher(ws);
   }
   return ws.contextPromise;
 }
@@ -261,7 +264,14 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
   if (entry && !entry.page.isClosed()) return entry;
 
   const context = await ensureContext(ws);
-  const page = await context.newPage();
+  // Reuse the most recent existing page if any — this matters because
+  // playwright-cli's daemon may have already opened a page in our context
+  // via CDP. Creating a fresh one would leave us screencasting a blank page
+  // while the agent navigates a different page.
+  const existingPages = context.pages().filter(p => !p.isClosed());
+  const page = existingPages.length > 0
+    ? existingPages[existingPages.length - 1]
+    : await context.newPage();
   // Per-chat tabs persist their viewport in the DB; the project-level tab
   // defaults to desktop and isn't tracked there.
   const viewport: BrowserViewportMode = tabId === PROJECT_TAB_ID
@@ -366,11 +376,10 @@ function cliEnvFor(ws: WorkspaceState, cdpEndpoint: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PLAYWRIGHT_CLI_SESSION: ws.cliSession,
-    // Tell playwright-cli to attach to OUR Chromium rather than launching its
-    // own. Variable name mirrors Microsoft's CDP-connect convention; if the
-    // CLI version we're on uses a different env key we'll surface it via the
-    // first invocation's stderr and adjust.
-    PLAYWRIGHT_CDP_ENDPOINT: cdpEndpoint,
+    // Tell playwright-cli's daemon to connect to OUR Chromium via CDP rather
+    // than launching its own. Found in playwright-core's mcp/config.js:
+    //   options.cdpEndpoint = envToString(e.PLAYWRIGHT_MCP_CDP_ENDPOINT)
+    PLAYWRIGHT_MCP_CDP_ENDPOINT: cdpEndpoint,
   };
 }
 
@@ -401,6 +410,67 @@ function runCli(
     });
     child.on('exit', (code) => resolve(code ?? 0));
   });
+}
+
+/**
+ * Watch the workspace context for newly-created pages. When the daemon adds
+ * a page (e.g. on `open <url>`), retarget the chat's screencast to the
+ * latest page so the user sees what the agent navigated to instead of the
+ * stale blank one we may have created first.
+ */
+function startContextPageWatcher(ws: WorkspaceState): void {
+  if (ws.contextPromise === null) return;
+  ws.contextPromise.then((context) => {
+    if (!context) return;
+    context.on('page', async (page) => {
+      console.log(`[playwright:${ws.projectId}] new page in context`);
+      // Adopt the page for any chat tab whose current page is closed/blank.
+      for (const [tabId, entry] of ws.tabs) {
+        if (tabId === PROJECT_TAB_ID) continue; // panel manages its own page
+        if (entry.page.isClosed() || entry.page.url() === 'about:blank') {
+          console.log(`[playwright:${ws.projectId}] retargeting tab ${tabId} to new page`);
+          await retargetTab(ws, tabId, page);
+          return;
+        }
+      }
+    });
+  }).catch(() => { /* ignore */ });
+}
+
+async function retargetTab(ws: WorkspaceState, tabId: string, newPage: Page): Promise<void> {
+  const old = ws.tabs.get(tabId);
+  // Stop the old screencast first (best-effort).
+  if (old) {
+    try { await old.cdp.detach(); } catch { /* ignore */ }
+  }
+  const context = await ensureContext(ws);
+  const cdp = await context.newCDPSession(newPage);
+  const viewport = old?.viewport || 'desktop';
+  const entry: PageEntry = { page: newPage, cdp, viewport, lastFrameAt: 0 };
+  ws.tabs.set(tabId, entry);
+  await cdp.send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: FRAME_QUALITY,
+    everyNthFrame: 1,
+  });
+  cdp.on('Page.screencastFrame', (params: any) => {
+    const now = Date.now();
+    const tab = ws.tabs.get(tabId);
+    if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
+      tab.lastFrameAt = now;
+      const room = `claude:${tabId}`;
+      io?.to(room).emit('chat:browser-frame', {
+        chatId: tabId,
+        frame: params.data,
+        width: params.metadata?.deviceWidth || VIEWPORTS[tab.viewport].width,
+        height: params.metadata?.deviceHeight || VIEWPORTS[tab.viewport].height,
+        ts: now,
+        viewportMode: tab.viewport,
+      });
+    }
+    cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+  });
+  newPage.on('close', () => { ws.tabs.delete(tabId); });
 }
 
 async function execOnWorkspace(
@@ -452,7 +522,10 @@ async function execOnWorkspace(
     }
 
     const env = cliEnvFor(ws, cdpEndpoint);
-    const cliArgs = ['-s', ws.cliSession, ...msg.argv];
+    // --persistent makes the daemon's `isolated` flag false, so it shares our
+    // browser context (browser.contexts()[0]) instead of creating a new
+    // isolated context that would be invisible to our screencast.
+    const cliArgs = ['-s', ws.cliSession, '--persistent', ...msg.argv];
     const code = await runCli(cliArgs, env, msg.cwd, conn);
     conn.write(JSON.stringify({ type: 'exit', code }) + '\n');
   } finally {
@@ -490,7 +563,7 @@ export async function execForChat(
     const cdpEndpoint = await resolveCdpEndpoint(ws);
 
     const env = cliEnvFor(ws, cdpEndpoint);
-    const cliArgs = ['-s', ws.cliSession, ...argv];
+    const cliArgs = ['-s', ws.cliSession, '--persistent', ...argv];
     return await new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
