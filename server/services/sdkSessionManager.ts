@@ -645,7 +645,10 @@ Switch viewports for device-specific testing or when the user asks. Same tab, ap
 The user may pause the browser to take over manually. If a \`run\` call returns "workspace paused — user has control", stop. Wait for the next user message; it will summarize what they did and you continue from there.
 
 === CAPTCHAS / HUMAN-VERIFICATION ===
-If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate: STOP. Do not click through, refresh, or try to bypass. Reply: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Bypassing them violates terms and rarely works anyway.`;
+If you encounter a CAPTCHA, "Verify you are human" challenge, image-selection puzzle, or any anti-bot gate: STOP. Do not click through, refresh, or try to bypass. Reply: "I hit a CAPTCHA on <URL> — please pause the browser, solve it manually, then resume me." Bypassing them violates terms and rarely works anyway.
+
+=== CLOSED TAB HANDLING ===
+The user can close your browser tab from the project's Browser popover. If a command suddenly shows you a blank page (about:blank when you expected a real URL) or returns a closed-page error, your tab was closed and replaced with a fresh one. Re-open with \`{ argv: ["open", "<url>"] }\` instead of clicking on a now-stale snapshot.`;
         return preamble + (officialSkill ? '\n\n=== OFFICIAL PLAYWRIGHT-CLI SKILL ===\n\n' + officialSkill : '') + addendum;
       })()
     : '';

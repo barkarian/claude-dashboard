@@ -8,7 +8,6 @@ import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
 import ToolInstallBanner from './ToolInstallBanner.tsx';
-import BrowserArtifact from './BrowserArtifact.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
@@ -16,7 +15,7 @@ import ModelPicker from './ModelPicker.tsx';
 import ActivityBar from './ActivityBar.tsx';
 import api from '../../utils/api.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
-import type { ChatArtifact, ChatBrowserSession } from '../../../../shared/types/models.ts';
+import type { ChatArtifact } from '../../../../shared/types/models.ts';
 
 interface SDKChatViewProps {
   projectId: string;
@@ -79,36 +78,9 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     return () => { socket.off('chat:artifact', handleArtifact); };
   }, [socket, chatId]);
 
-  // Browser session cards (claw_browser MCP — display_browser_session).
-  // Initial fetch + live append. Same pattern as artifacts.
-  const [browserSessions, setBrowserSessions] = useState<ChatBrowserSession[]>([]);
-
-  useEffect(() => {
-    if (!chatId) return;
-    let cancelled = false;
-    api.get<{ sessions: ChatBrowserSession[] }>(`/api/projects/${projectId}/chats/${chatId}/browser-sessions`)
-      .then((data) => {
-        if (!cancelled) setBrowserSessions(data.sessions || []);
-      })
-      .catch(() => {
-        // 404 / not yet wired — silently empty
-      });
-    return () => { cancelled = true; };
-  }, [projectId, chatId]);
-
-  useEffect(() => {
-    if (!socket || !chatId) return;
-    function handleBrowserSession({ chatId: cid, session }: { chatId: string; session: ChatBrowserSession }) {
-      if (cid !== chatId) return;
-      setBrowserSessions((prev) => prev.some(s => s.id === session.id) ? prev : [...prev, session]);
-    }
-    socket.on('chat:browser-session', handleBrowserSession);
-    return () => { socket.off('chat:browser-session', handleBrowserSession); };
-  }, [socket, chatId]);
-
-  // Browser sessions used to be grouped by message id and rendered inline;
-  // they now live in a persistent strip above the prompt. We just consume
-  // the flat browserSessions array directly in the JSX below.
+  // Browser sessions used to live as in-chat artifact cards / a strip; that
+  // surface is gone now — the project Browser popover (in the bottom navbar)
+  // is the single place where browsers are viewed.
 
   const { artifactsByMessageId, trailingArtifacts } = useMemo(() => {
     const byMsg: Record<string, ChatArtifact[]> = {};
@@ -352,20 +324,8 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             projectId={projectId}
           />
 
-          {/* Persistent browser strip — shows the latest browser session this
-              chat opened, with a live thumbnail and "agent driving" indicator.
-              Click to expand into the full canvas dialog. Stays visible while
-              browser is armed; doesn't pollute the message stream. */}
-          {browserSessions.length > 0 && (
-            <div className="flex-shrink-0 px-3 pt-2 space-y-2 border-t border-border bg-bg-surface">
-              {browserSessions
-                .filter(s => s.status !== 'closed')
-                .slice(-3) // cap visible strip at 3 most recent active sessions
-                .map(s => (
-                  <BrowserArtifact key={s.id} session={s} />
-                ))}
-            </div>
-          )}
+          {/* Browser sessions are now surfaced via the project Browser
+              popover in the bottom navbar — no in-chat strip. */}
 
           {/* Live "what is the agent doing" hint — replaces the old 3-dots
               streaming indicator with contextual labels (tool name, thinking,

@@ -468,13 +468,22 @@ export function useClaudeCode(
 
     // Re-attach when socket reconnects — server loses room membership on disconnect,
     // so without this the terminal freezes (no cc:output received) and status goes stale.
+    // If the server was restarted, the in-memory session is gone too — fall through
+    // to cc:start with the saved conversationId so Claude Code resumes the chat
+    // history rather than leaving the user staring at a blank terminal.
     const handleReconnect = () => {
       socket.emit('cc:check-session', { chatId }, (result: { exists: boolean; status?: string }) => {
         if (result.exists) {
           socket.emit('cc:attach', { chatId, cols: term.cols, rows: term.rows });
           setStatus(result.status === 'running' ? 'running' : 'exited');
         } else {
-          setStatus('exited');
+          socket.emit('cc:start', {
+            projectId,
+            chatId,
+            conversationId: conversationId || undefined,
+            cols: term.cols,
+            rows: term.rows,
+          });
         }
       });
       fitWhenReady();

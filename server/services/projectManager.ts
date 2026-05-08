@@ -1158,6 +1158,63 @@ function recordTakeoverEvent(
   };
 }
 
+// === Manual (user-owned) browser tabs ===
+
+interface ManualTabRow {
+  id: string;
+  projectId: string;
+  label: string | null;
+  currentUrl: string | null;
+  viewportMode: BrowserViewportMode;
+  createdAt: string;
+}
+
+function createManualTab(projectId: string, params: { label?: string | null }): ManualTabRow {
+  const id = `manual_${uuidv4()}`;
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO manual_browser_tabs (id, project_id, label, viewport_mode, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, projectId, params.label || null, 'desktop', now);
+  return { id, projectId, label: params.label || null, currentUrl: null, viewportMode: 'desktop', createdAt: now };
+}
+
+function listManualTabs(projectId: string): ManualTabRow[] {
+  const rows = db.prepare(
+    'SELECT id, project_id, label, current_url, viewport_mode, created_at FROM manual_browser_tabs WHERE project_id = ? ORDER BY created_at ASC'
+  ).all(projectId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    projectId: r.project_id,
+    label: r.label || null,
+    currentUrl: r.current_url || null,
+    viewportMode: (r.viewport_mode || 'desktop') as BrowserViewportMode,
+    createdAt: r.created_at,
+  }));
+}
+
+function updateManualTab(
+  tabId: string,
+  updates: { label?: string | null; currentUrl?: string | null; viewportMode?: BrowserViewportMode },
+): void {
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.label !== undefined) { fields.push('label = ?'); values.push(updates.label); }
+  if (updates.currentUrl !== undefined) { fields.push('current_url = ?'); values.push(updates.currentUrl); }
+  if (updates.viewportMode !== undefined) { fields.push('viewport_mode = ?'); values.push(updates.viewportMode); }
+  if (fields.length === 0) return;
+  values.push(tabId);
+  db.prepare(`UPDATE manual_browser_tabs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+function deleteManualTab(tabId: string): void {
+  db.prepare('DELETE FROM manual_browser_tabs WHERE id = ?').run(tabId);
+}
+
+function getManualTabProjectId(tabId: string): string | null {
+  const row = db.prepare('SELECT project_id FROM manual_browser_tabs WHERE id = ?').get(tabId) as { project_id: string } | undefined;
+  return row?.project_id ?? null;
+}
+
 function listTakeoverEvents(chatId: string, takeoverId: string): BrowserTakeoverEvent[] {
   const rows = db.prepare(
     'SELECT id, chat_id, takeover_id, event_type, description, raw, ts FROM browser_takeover_events WHERE chat_id = ? AND takeover_id = ? ORDER BY id ASC'
@@ -1317,6 +1374,12 @@ export default {
   listBrowserSessionsByChat,
   recordTakeoverEvent,
   listTakeoverEvents,
+  // Manual browser tabs
+  createManualTab,
+  listManualTabs,
+  updateManualTab,
+  deleteManualTab,
+  getManualTabProjectId,
   // Recordings
   saveRecording,
   listRecordings,

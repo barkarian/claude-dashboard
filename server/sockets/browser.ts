@@ -177,13 +177,13 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
     }
   });
 
-  // Client requests a fresh frame — used when the dialog opens on a static
-  // page where CDP screencast hasn't emitted anything yet.
+  // Legacy chat-room request kept for backward compat — some clients may
+  // still emit it. Routes to the unified per-tab handler.
   socket.on('chat:browser-refresh-frame', async ({ chatId }: { chatId: string }) => {
     const projectId = projectIdFor(chatId);
     if (!projectId) return;
-    socket.join(`claude:${chatId}`);
-    await playwrightSessionManager.refreshFrameForChat(projectId, chatId);
+    socket.join(`project:${projectId}`);
+    await playwrightSessionManager.refreshFrameForTab(projectId, chatId);
   });
 
   socket.on('chat:browser-viewport', async (payload: BrowserViewportRequestPayload) => {
@@ -196,53 +196,72 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
     }
   });
 
-  // --- Project-level browser panel ---------------------------------------
+  // --- Multi-tab browser surface ------------------------------------------
+  // The popover and tab dialogs both subscribe to `project:${projectId}` and
+  // route per tabId; tab management is per-tab via the events below.
 
-  // Client joins the project room when opening the panel; emits frames + url.
-  socket.on('project:browser-join', async ({ projectId }: { projectId: string }, ack?: (resp: { url: string } | { error: string }) => void) => {
-    if (!projectId) {
-      ack?.({ error: 'projectId required' });
-      return;
-    }
+  socket.on('project:browser-join', async ({ projectId }: { projectId: string }, ack?: (resp: { ok: true } | { error: string }) => void) => {
+    if (!projectId) { ack?.({ error: 'projectId required' }); return; }
     socket.join(`project:${projectId}`);
-    try {
-      const { url } = await playwrightSessionManager.openProjectBrowser(projectId);
-      ack?.({ url });
-    } catch (err: any) {
-      ack?.({ error: err?.message || String(err) });
-    }
+    ack?.({ ok: true });
   });
 
   socket.on('project:browser-leave', ({ projectId }: { projectId: string }) => {
     if (!projectId) return;
     socket.leave(`project:${projectId}`);
-    // Tab stays open in Chromium — closing the panel is a viewport-level
-    // action, not a Chromium-level one. Per the UX spec.
   });
 
-  socket.on('project:browser-navigate', async ({ projectId, url }: { projectId: string; url: string }, ack?: (resp: { url: string } | { error: string }) => void) => {
+  socket.on('project:browser-list-tabs', ({ projectId }: { projectId: string }, ack?: (resp: { tabs: any[] }) => void) => {
+    if (!projectId) { ack?.({ tabs: [] }); return; }
+    ack?.({ tabs: playwrightSessionManager.listTabs(projectId) });
+  });
+
+  socket.on('project:browser-create-tab', async ({ projectId, url, label }: { projectId: string; url?: string; label?: string }, ack?: (resp: { tabId: string; url: string } | { error: string }) => void) => {
     try {
-      const result = await playwrightSessionManager.openProjectBrowser(projectId, url);
+      const tab = projectManager.createManualTab(projectId, { label: label || null });
+      socket.join(`project:${projectId}`);
+      const { url: navigated } = await playwrightSessionManager.openTab(projectId, tab.id, url);
+      // Notify everyone in the project so popovers refresh.
+      io.to(`project:${projectId}`).emit('project:browser-tab-created', {
+        projectId, tabId: tab.id, label: label || null, url: navigated,
+      });
+      ack?.({ tabId: tab.id, url: navigated });
+    } catch (err: any) {
+      ack?.({ error: err?.message || String(err) });
+    }
+  });
+
+  socket.on('project:browser-close-tab', async ({ projectId, tabId }: { projectId: string; tabId: string }, ack?: (resp: { ok: true } | { error: string }) => void) => {
+    try {
+      await playwrightSessionManager.closeTab(projectId, tabId);
+      ack?.({ ok: true });
+    } catch (err: any) {
+      ack?.({ error: err?.message || String(err) });
+    }
+  });
+
+  socket.on('project:browser-navigate-tab', async ({ projectId, tabId, url }: { projectId: string; tabId: string; url: string }, ack?: (resp: { url: string } | { error: string }) => void) => {
+    try {
+      const result = await playwrightSessionManager.openTab(projectId, tabId, url);
       ack?.(result);
     } catch (err: any) {
       ack?.({ error: err?.message || String(err) });
     }
   });
 
-  socket.on('project:browser-viewport', async ({ projectId, mode }: { projectId: string; mode: 'desktop' | 'tablet' | 'mobile' }) => {
-    try {
-      await playwrightSessionManager.setProjectViewport(projectId, mode);
-    } catch (err) {
-      console.error('[project:browser-viewport] failed:', err);
-    }
+  socket.on('project:browser-viewport-tab', async ({ projectId, tabId, mode }: { projectId: string; tabId: string; mode: 'desktop' | 'tablet' | 'mobile' }) => {
+    try { await playwrightSessionManager.setTabViewport(projectId, tabId, mode); }
+    catch (err) { console.error('[project:browser-viewport-tab] failed:', err); }
   });
 
-  socket.on('project:browser-input', async (payload: { projectId: string } & Parameters<typeof playwrightSessionManager.dispatchProjectInput>[1]) => {
-    try {
-      await playwrightSessionManager.dispatchProjectInput(payload.projectId, payload);
-    } catch (err) {
-      console.error('[project:browser-input] failed:', err);
-    }
+  socket.on('project:browser-input-tab', async (payload: { projectId: string; tabId: string } & Parameters<typeof playwrightSessionManager.dispatchTabInput>[2]) => {
+    try { await playwrightSessionManager.dispatchTabInput(payload.projectId, payload.tabId, payload); }
+    catch (err) { console.error('[project:browser-input-tab] failed:', err); }
+  });
+
+  socket.on('project:browser-refresh-tab', async ({ projectId, tabId }: { projectId: string; tabId: string }) => {
+    socket.join(`project:${projectId}`);
+    await playwrightSessionManager.refreshFrameForTab(projectId, tabId);
   });
 
   socket.on('disconnect', () => {

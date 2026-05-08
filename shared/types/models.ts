@@ -135,6 +135,26 @@ export interface ChatArtifact {
 
 export type BrowserViewportMode = 'desktop' | 'tablet' | 'mobile';
 
+/** Unified browser tab descriptor — covers chat-bound and manual tabs both.
+ *  Chat tabs use the chatId as the tabId; manual tabs use a `manual_<uuid>`. */
+export interface BrowserTabDescriptor {
+  tabId: string;
+  projectId: string;
+  /** 'chat' if the tab is owned by a chat; 'manual' if user-created. */
+  kind: 'chat' | 'manual';
+  /** The owning chat id when kind === 'chat'. */
+  chatId?: string;
+  /** User-set or chat-derived label shown in the popover. */
+  label: string;
+  /** Current URL of the tab (best-effort, last-known). */
+  currentUrl: string | null;
+  viewportMode: BrowserViewportMode;
+  /** True if a screencast frame arrived in the last 1.5s. */
+  driving: boolean;
+  /** Whether the underlying Page is still alive. */
+  alive: boolean;
+}
+
 export interface ChatBrowserTab {
   chatId: string;
   projectId: string;

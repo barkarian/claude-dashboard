@@ -253,11 +253,16 @@ async function resolveCdpEndpoint(ws: WorkspaceState): Promise<string> {
 // --- Per-tab + screencast -------------------------------------------------
 
 /**
- * Reserved tab id for the project-level browser panel (the user's direct
- * entry point — Project navbar → Browser). Frames broadcast to the project
- * room rather than a chat room.
+ * Tabs are addressed by an opaque tabId string. Two flavours:
+ *   - Chat-bound tabs: tabId === chatId (legacy/back-compat).
+ *   - Manual (user-created) tabs: tabId starts with `manual_`.
+ *
+ * All frames broadcast to the unified `project:${projectId}` Socket.IO room,
+ * with `tabId` in the payload so the popover/dialog can route per-tab.
  */
-export const PROJECT_TAB_ID = '__project__';
+export function isManualTab(tabId: string): boolean {
+  return tabId.startsWith('manual_');
+}
 
 async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry> {
   let entry = ws.tabs.get(tabId);
@@ -274,10 +279,9 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
     : await context.newPage();
   // Per-chat tabs persist their viewport in the DB; the project-level tab
   // defaults to desktop and isn't tracked there.
-  const viewport: BrowserViewportMode = tabId === PROJECT_TAB_ID
-    ? 'desktop'
-    : (projectManager.listBrowserTabsByProject(ws.projectId)
-        .find(t => t.chatId === tabId)?.viewportMode) || 'desktop';
+  const viewport: BrowserViewportMode = isManualTab(tabId)
+    ? (projectManager.listManualTabs(ws.projectId).find(t => t.id === tabId)?.viewportMode) || 'desktop'
+    : (projectManager.listBrowserTabsByProject(ws.projectId).find(t => t.chatId === tabId)?.viewportMode) || 'desktop';
   await applyViewport(page, viewport);
 
   const cdp = await context.newCDPSession(page);
@@ -297,46 +301,40 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
     const tab = ws.tabs.get(tabId);
     if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
       tab.lastFrameAt = now;
-      // Project-level tab broadcasts on the project room so every client
-      // viewing the project's browser panel sees frames in lockstep.
-      const room = tabId === PROJECT_TAB_ID
-        ? `project:${ws.projectId}`
-        : `claude:${tabId}`;
-      const eventName = tabId === PROJECT_TAB_ID
-        ? 'project:browser-frame'
-        : 'chat:browser-frame';
-      const payload: any = {
+      // Single unified room per project — every browser viewer in the project
+      // (popover, tab dialogs, mobile peer clients) lives in this room and
+      // routes frames by tabId.
+      io?.to(`project:${ws.projectId}`).emit('project:browser-frame', {
+        projectId: ws.projectId,
+        tabId,
         frame: params.data,
         width: params.metadata?.deviceWidth || VIEWPORTS[tab.viewport].width,
         height: params.metadata?.deviceHeight || VIEWPORTS[tab.viewport].height,
         ts: now,
         viewportMode: tab.viewport,
-      };
-      if (tabId === PROJECT_TAB_ID) {
-        payload.projectId = ws.projectId;
-      } else {
-        payload.chatId = tabId;
-      }
-      io?.to(room).emit(eventName, payload);
+      });
     }
     // Ack regardless of broadcast — required by CDP protocol.
     cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
   });
 
-  // Track URL changes so a Chromium crash can recover state on next launch.
+  // Track URL changes — persist on the right table per kind, then push a
+  // unified url event to the project room so the popover updates labels.
   page.on('framenavigated', async (frame) => {
     if (frame === page.mainFrame()) {
       const url = frame.url();
-      if (tabId === PROJECT_TAB_ID) {
-        io?.to(`project:${ws.projectId}`).emit('project:browser-url', {
-          projectId: ws.projectId,
-          url,
-        });
-      } else {
-        try {
+      try {
+        if (isManualTab(tabId)) {
+          projectManager.updateManualTab(tabId, { currentUrl: url });
+        } else {
           projectManager.updateBrowserTab(tabId, { currentUrl: url });
-        } catch { /* ignore */ }
-      }
+        }
+      } catch { /* ignore */ }
+      io?.to(`project:${ws.projectId}`).emit('project:browser-url', {
+        projectId: ws.projectId,
+        tabId,
+        url,
+      });
     }
   });
 
@@ -426,7 +424,7 @@ function startContextPageWatcher(ws: WorkspaceState): void {
       console.log(`[playwright:${ws.projectId}] new page in context`);
       // Adopt the page for any chat tab whose current page is closed/blank.
       for (const [tabId, entry] of ws.tabs) {
-        if (tabId === PROJECT_TAB_ID) continue; // panel manages its own page
+        if (isManualTab(tabId)) continue; // manual tabs are user-driven; don't auto-retarget
         if (entry.page.isClosed() || entry.page.url() === 'about:blank') {
           console.log(`[playwright:${ws.projectId}] retargeting tab ${tabId} to new page`);
           await retargetTab(ws, tabId, page);
@@ -458,9 +456,9 @@ async function retargetTab(ws: WorkspaceState, tabId: string, newPage: Page): Pr
     const tab = ws.tabs.get(tabId);
     if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
       tab.lastFrameAt = now;
-      const room = `claude:${tabId}`;
-      io?.to(room).emit('chat:browser-frame', {
-        chatId: tabId,
+      io?.to(`project:${ws.projectId}`).emit('project:browser-frame', {
+        projectId: ws.projectId,
+        tabId,
         frame: params.data,
         width: params.metadata?.deviceWidth || VIEWPORTS[tab.viewport].width,
         height: params.metadata?.deviceHeight || VIEWPORTS[tab.viewport].height,
@@ -861,43 +859,50 @@ export function endTakeover(projectId: string, chatId: string): { takeoverId: st
 }
 
 /**
- * Open or focus the project-level browser tab. Lazily launches Chromium if
- * needed. Returns the current URL after the operation completes.
+ * Open or navigate any tab (manual or chat-bound). Lazily launches Chromium.
+ * Returns the current URL after the operation completes.
  */
-export async function openProjectBrowser(projectId: string, url?: string): Promise<{ url: string }> {
+export async function openTab(projectId: string, tabId: string, url?: string): Promise<{ url: string }> {
   if (!isBrowserEnabled) throw new Error('Browser disabled in this environment');
   const ws = getOrCreateWorkspace(projectId);
-  const entry = await ensurePage(ws, PROJECT_TAB_ID);
+  const entry = await ensurePage(ws, tabId);
   if (url) {
     try {
       await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
     } catch (err: any) {
-      // Don't throw — user can still see the failed-load state in the canvas.
-      console.warn(`[playwright:${projectId}] project goto failed: ${err?.message || err}`);
+      console.warn(`[playwright:${projectId}] tab ${tabId} goto failed: ${err?.message || err}`);
     }
   }
   return { url: entry.page.url() };
 }
 
-/** Set the viewport mode for the project-level tab. */
-export async function setProjectViewport(
+/** Set viewport mode for any tab. */
+export async function setTabViewport(
   projectId: string,
+  tabId: string,
   mode: BrowserViewportMode,
 ): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
-  const entry = await ensurePage(ws, PROJECT_TAB_ID);
+  const entry = await ensurePage(ws, tabId);
   await applyViewport(entry.page, mode);
   entry.viewport = mode;
+  try {
+    if (isManualTab(tabId)) {
+      projectManager.updateManualTab(tabId, { viewportMode: mode });
+    } else {
+      projectManager.updateBrowserTab(tabId, { viewportMode: mode });
+    }
+  } catch { /* ignore */ }
 }
 
-/** Dispatch user input to the project-level tab. No lock — only one user
- *  driving manually anyway. */
-export async function dispatchProjectInput(
+/** Dispatch user input to any tab. No lock — only one user driving manually anyway. */
+export async function dispatchTabInput(
   projectId: string,
+  tabId: string,
   ev: Parameters<typeof dispatchInput>[2],
 ): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
-  const entry = ws.tabs.get(PROJECT_TAB_ID);
+  const entry = ws.tabs.get(tabId);
   if (!entry) return;
   const { page } = entry;
   switch (ev.kind) {
@@ -930,6 +935,96 @@ export async function dispatchProjectInput(
       if (ev.text) await page.keyboard.type(ev.text);
       break;
   }
+}
+
+/** Capture and broadcast a single frame for the given tab on demand. */
+export async function refreshFrameForTab(projectId: string, tabId: string): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = ws.tabs.get(tabId);
+  if (!entry) return;
+  try {
+    const buf = await entry.page.screenshot({ type: 'jpeg', quality: FRAME_QUALITY });
+    const v = VIEWPORTS[entry.viewport];
+    io?.to(`project:${projectId}`).emit('project:browser-frame', {
+      projectId,
+      tabId,
+      frame: buf.toString('base64'),
+      width: v.width,
+      height: v.height,
+      ts: Date.now(),
+      viewportMode: entry.viewport,
+    });
+  } catch (err) {
+    console.error(`[playwright:${projectId}] refresh-frame for ${tabId} failed:`, err);
+  }
+}
+
+/** Close any tab. */
+export async function closeTab(projectId: string, tabId: string): Promise<void> {
+  const ws = getOrCreateWorkspace(projectId);
+  const entry = ws.tabs.get(tabId);
+  if (entry) {
+    try { await entry.cdp.detach(); } catch { /* ignore */ }
+    try { await entry.page.close(); } catch { /* ignore */ }
+    ws.tabs.delete(tabId);
+  }
+  if (isManualTab(tabId)) {
+    try { projectManager.deleteManualTab(tabId); } catch { /* ignore */ }
+  }
+  io?.to(`project:${projectId}`).emit('project:browser-tab-closed', { projectId, tabId });
+}
+
+/**
+ * Aggregated tab list for a project — chat-bound tabs from chat_browser_tabs
+ * plus manual tabs from manual_browser_tabs. Each entry is enriched with
+ * liveness + driving from in-memory state.
+ */
+export function listTabs(projectId: string): Array<{
+  tabId: string;
+  kind: 'chat' | 'manual';
+  chatId?: string;
+  label: string;
+  currentUrl: string | null;
+  viewportMode: BrowserViewportMode;
+  driving: boolean;
+  alive: boolean;
+}> {
+  const ws = getOrCreateWorkspace(projectId);
+  const now = Date.now();
+  const out: Array<any> = [];
+  // Chat-bound tabs.
+  for (const t of projectManager.listBrowserTabsByProject(projectId)) {
+    const entry = ws.tabs.get(t.chatId);
+    const chat = projectManager.getChat(t.chatId);
+    out.push({
+      tabId: t.chatId,
+      kind: 'chat' as const,
+      chatId: t.chatId,
+      label: chat?.label || 'Chat',
+      currentUrl: t.currentUrl,
+      viewportMode: t.viewportMode,
+      driving: !!entry && now - entry.lastFrameAt < 1500,
+      alive: !!entry && !entry.page.isClosed(),
+    });
+  }
+  // Manual tabs.
+  for (const t of projectManager.listManualTabs(projectId)) {
+    const entry = ws.tabs.get(t.id);
+    out.push({
+      tabId: t.id,
+      kind: 'manual' as const,
+      label: t.label || (t.currentUrl ? hostFromUrl(t.currentUrl) : 'New tab'),
+      currentUrl: t.currentUrl,
+      viewportMode: t.viewportMode,
+      driving: !!entry && now - entry.lastFrameAt < 1500,
+      alive: !!entry && !entry.page.isClosed(),
+    });
+  }
+  return out;
+}
+
+function hostFromUrl(u: string): string {
+  try { return new URL(u).host || u; } catch { return u.slice(0, 40); }
 }
 
 /**
@@ -1038,21 +1133,25 @@ export default {
   ensureWorkspaceServer,
   execForChat,
   refreshFrameForChat,
+  refreshFrameForTab,
   setPaused,
   isPaused,
   acquireLock,
   releaseLock,
   dispatchInput,
+  dispatchTabInput,
   beginTakeover,
   endTakeover,
   snapshotForChat,
   setViewportForChat,
-  openProjectBrowser,
-  setProjectViewport,
-  dispatchProjectInput,
+  setTabViewport,
+  openTab,
+  closeTab,
+  listTabs,
   resetProjectBrowser,
   onSocketDisconnect,
   attachIO,
   shutdown,
   userDataDirFor,
+  isManualTab,
 };

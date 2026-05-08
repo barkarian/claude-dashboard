@@ -15,7 +15,7 @@ import ScriptTerminal from '../components/scripts/ScriptTerminal.tsx';
 import ChatList from '../components/chat/ChatList.tsx';
 import ChatViewShell from '../components/chat/ChatViewShell.tsx';
 import FilesPage from '../components/files/FilesPage.tsx';
-import ProjectBrowserPanel from '../components/browser/ProjectBrowserPanel.tsx';
+import BrowserPopover from '../components/browser/BrowserPopover.tsx';
 import ProjectSettingsDialog from '../components/projects/ProjectSettingsDialog.tsx';
 import ProjectPathError from '../components/projects/ProjectPathError.tsx';
 import DesktopRecordingControls from '../components/chat/DesktopRecordingControls.tsx';
@@ -43,6 +43,9 @@ export default function ProjectDashboardPage() {
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [dirExists, setDirExists] = useState<boolean | null>(null);
   const [generatingTitle, setGeneratingTitle] = useState(false);
+  const [browserPopoverOpen, setBrowserPopoverOpen] = useState(false);
+  const [browserTabCount, setBrowserTabCount] = useState(0);
+  const [browserDrivingCount, setBrowserDrivingCount] = useState(0);
 
   useEffect(() => {
     loadProject(id!);
@@ -109,6 +112,33 @@ export default function ProjectDashboardPage() {
     socket.on('claude:chat-renamed', handleChatRenamed);
     return () => { socket.off('claude:chat-renamed', handleChatRenamed); };
   }, [socket, refreshProject]);
+
+  // Browser tab counts for the nav badge — polled lightly while we're on
+  // the project page so the Browser button appears/disappears when tabs
+  // open/close and the badge tracks driving activity.
+  useEffect(() => {
+    if (!socket || !id) return;
+    socket.emit('project:browser-join', { projectId: id });
+    function refresh() {
+      socket?.emit('project:browser-list-tabs', { projectId: id }, (resp: { tabs: any[] }) => {
+        const tabs = resp?.tabs || [];
+        setBrowserTabCount(tabs.length);
+        setBrowserDrivingCount(tabs.filter((t) => t.driving && t.alive).length);
+      });
+    }
+    refresh();
+    function handleCreated() { refresh(); }
+    function handleClosed() { refresh(); }
+    socket.on('project:browser-tab-created', handleCreated);
+    socket.on('project:browser-tab-closed', handleClosed);
+    const interval = setInterval(refresh, 1500);
+    return () => {
+      socket?.off('project:browser-tab-created', handleCreated);
+      socket?.off('project:browser-tab-closed', handleClosed);
+      socket?.emit('project:browser-leave', { projectId: id });
+      clearInterval(interval);
+    };
+  }, [socket, id]);
 
   // Compute status display from unified session state
   const activeSessionState = activeChatId ? sessionStates[activeChatId] : undefined;
@@ -334,20 +364,30 @@ export default function ProjectDashboardPage() {
               <FilesPage projectId={id!} repos={repos} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} onRepoRefresh={refreshRepos} />
             </div>
           } />
-          <Route path="browser" element={<ProjectBrowserPanel projectId={id!} />} />
         </Routes>
       )}
 
       {/* Mobile bottom nav — hidden when keyboard is open or directory missing */}
       {!keyboard.visible && dirExists !== false && (
-        <MobileNav
-          projectId={id}
-          currentTab={currentTab}
-          scriptCount={scriptCount}
-          changeCount={totalChangeCount}
-          processesWithPorts={processesWithPorts}
-          mode={project?.mode}
-        />
+        <div className="relative">
+          <BrowserPopover
+            projectId={id!}
+            open={browserPopoverOpen}
+            onClose={() => setBrowserPopoverOpen(false)}
+          />
+          <MobileNav
+            projectId={id}
+            currentTab={currentTab}
+            scriptCount={scriptCount}
+            changeCount={totalChangeCount}
+            processesWithPorts={processesWithPorts}
+            mode={project?.mode}
+            browserTabCount={browserTabCount}
+            browserDrivingCount={browserDrivingCount}
+            onBrowserClick={() => setBrowserPopoverOpen((o) => !o)}
+            browserPopoverOpen={browserPopoverOpen}
+          />
+        </div>
       )}
     </div>
   );

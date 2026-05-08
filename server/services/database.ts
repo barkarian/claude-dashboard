@@ -622,6 +622,33 @@ try {
   console.error('tab_order backfill migration failed:', err);
 }
 
+// Manual (user-owned) browser tabs — distinct from chat-bound tabs which are
+// keyed in chat_browser_tabs by chat id. Manual tabs live under the project
+// browser surface (popover) and are created / closed by the user directly.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS manual_browser_tabs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    label TEXT,
+    current_url TEXT,
+    viewport_mode TEXT NOT NULL DEFAULT 'desktop',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_manual_browser_tabs_project ON manual_browser_tabs(project_id, created_at);
+`);
+
+// Stale browser sessions cleanup — every active chat_browser_sessions row
+// references a Chromium that died with the server. On boot, mark them
+// closed so old artifact strips don't appear in chats whose underlying
+// browser is gone.
+try {
+  db.prepare(
+    "UPDATE chat_browser_sessions SET status = 'closed', closed_at = ? WHERE status = 'active'"
+  ).run(new Date().toISOString());
+} catch {
+  // Table didn't exist on first boot — fine.
+}
+
 // Per-chat armed tools — JSON array of tool ids the user has armed for this
 // chat (e.g. ["browser"]). NULL / "[]" = no tools armed. Drives whether MCP
 // servers + system-prompt blocks for those tools mount when the SDK session
