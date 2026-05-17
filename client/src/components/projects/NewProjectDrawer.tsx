@@ -57,6 +57,11 @@ export default function NewProjectDrawer() {
   // Power-user options (collapsed by default — non-technical users never see them)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [devWorkspace, setDevWorkspace] = useState(false);
+  // Per-project Browser tool toggle. When checked at creation, the
+  // dashboard installs the playwright-cli skill into .claude/skills/
+  // and adds Bash(playwright-cli:*) to the project's settings.json.
+  // Off by default — opt-in to avoid writing skill files unexpectedly.
+  const [browserEnabled, setBrowserEnabled] = useState(false);
 
   function reset() {
     setTab('existing');
@@ -75,6 +80,7 @@ export default function NewProjectDrawer() {
     setSuccess(false);
     setShowAdvanced(false);
     setDevWorkspace(false);
+    setBrowserEnabled(false);
   }
 
   function handleOpenChange(open: boolean) {
@@ -140,6 +146,7 @@ export default function NewProjectDrawer() {
         path: projectPath,
         defaultAdapter,
         mode: devWorkspace ? 'dev' : 'simple',
+        browserEnabled,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -169,6 +176,7 @@ export default function NewProjectDrawer() {
         repoUrl,
         defaultAdapter,
         mode: devWorkspace ? 'dev' : 'simple',
+        browserEnabled,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -200,6 +208,7 @@ export default function NewProjectDrawer() {
         repoUrl: null,
         defaultAdapter,
         mode: devWorkspace ? 'dev' : 'simple',
+        browserEnabled,
       });
       setCreatedProjectId(data.project.id);
       setSuccess(true);
@@ -435,18 +444,35 @@ export default function NewProjectDrawer() {
                   Power user options
                 </button>
                 {showAdvanced && (
-                  <div className="mt-2 pl-4 flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-text">Dev workspace</p>
-                      <p className="text-xs text-text-muted mt-0.5">
-                        Show the Scripts tab, file path breadcrumb, and adapter choice.
-                      </p>
+                  <div className="mt-2 pl-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-text">Dev workspace</p>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Show the Scripts tab, file path breadcrumb, and adapter choice. You can change this later.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={devWorkspace}
+                        onCheckedChange={setDevWorkspace}
+                        className="mt-1 flex-shrink-0"
+                      />
                     </div>
-                    <Switch
-                      checked={devWorkspace}
-                      onCheckedChange={setDevWorkspace}
-                      className="mt-1 flex-shrink-0"
-                    />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-text">Browser tool</p>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Install the Playwright skill into <code>.claude/skills/</code>.
+                          Lets agents drive a real Chromium with a persistent profile.
+                          You can change this later.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={browserEnabled}
+                        onCheckedChange={setBrowserEnabled}
+                        className="mt-1 flex-shrink-0"
+                      />
+                    </div>
                   </div>
                 )}
               </div>
