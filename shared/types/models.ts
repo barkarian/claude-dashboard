@@ -113,6 +113,10 @@ export interface Project {
   mode: ProjectMode;
   pinned: boolean;
   pinnedAt: string | null;
+  /** Whether the Playwright browser tool is enabled for this project.
+   *  When true, the playwright-cli skill is installed under .claude/skills/
+   *  and the agent (CC or SDK) has Bash access to playwright-cli. */
+  browserEnabled: boolean;
   scripts: Script[];
   chats: Chat[];
   categories: ChatCategory[];

@@ -100,7 +100,7 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath, repoUrl, defaultAdapter, mode } = req.body;
+    const { name, path: projectPath, repoUrl, defaultAdapter, mode, browserEnabled } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
@@ -114,6 +114,16 @@ router.post('/', async (req: Request, res: Response) => {
     if ((mode === 'simple' || mode === 'dev') && result.project) {
       projectManager.updateProject(result.project.id, { mode });
       result.project.mode = mode;
+    }
+    // Enable Browser if requested during creation. Install skill + permissions
+    // on disk; flip the column.
+    if (browserEnabled === true && result.project) {
+      const { installBrowserSkill } = await import('../services/browserSkillInstaller.ts');
+      try { installBrowserSkill(result.project.path); } catch (err) {
+        console.warn('Browser skill install failed during project creation:', err);
+      }
+      projectManager.updateProject(result.project.id, { browserEnabled: true });
+      result.project.browserEnabled = true;
     }
     // Sidebar live-sync — broadcast the new workspace to every connected
     // client (other tabs, mobile + desktop) so they all show it immediately.
@@ -131,7 +141,7 @@ router.post('/', async (req: Request, res: Response) => {
 // Register an existing directory as a project
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, path: projectPath, defaultAdapter, mode } = req.body;
+    const { name, path: projectPath, defaultAdapter, mode, browserEnabled } = req.body;
     if (!name || !projectPath) {
       return res.status(400).json({ error: 'Name and path are required' });
     }
@@ -147,6 +157,14 @@ router.post('/register', async (req: Request, res: Response) => {
     if (mode === 'simple' || mode === 'dev') {
       projectManager.updateProject(project.id, { mode });
       project.mode = mode;
+    }
+    if (browserEnabled === true) {
+      const { installBrowserSkill } = await import('../services/browserSkillInstaller.ts');
+      try { installBrowserSkill(project.path); } catch (err) {
+        console.warn('Browser skill install failed during project register:', err);
+      }
+      projectManager.updateProject(project.id, { browserEnabled: true });
+      project.browserEnabled = true;
     }
     const summary = projectManager.getProjectSummary(project.id);
     if (summary) sidebarSync.projectCreated({ project: summary });
@@ -167,6 +185,17 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
     }
     if (req.body.mode !== undefined && req.body.mode !== 'simple' && req.body.mode !== 'dev') {
       return res.status(400).json({ error: "mode must be 'simple' or 'dev'" });
+    }
+    // When the browser toggle is flipped, install or remove the skill files
+    // from the project's .claude/skills/ before the DB write so the on-disk
+    // state matches what we'll persist.
+    if (typeof req.body.browserEnabled === 'boolean') {
+      const current = projectManager.getProject(req.params.id);
+      if (current) {
+        const { installBrowserSkill, uninstallBrowserSkill } = await import('../services/browserSkillInstaller.ts');
+        if (req.body.browserEnabled) installBrowserSkill(current.path);
+        else uninstallBrowserSkill(current.path);
+      }
     }
     const project = projectManager.updateProject(req.params.id, req.body);
     // Sidebar live-sync: only the pinned toggle changes the sidebar's view of

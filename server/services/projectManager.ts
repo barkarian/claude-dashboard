@@ -238,6 +238,7 @@ function getProject(projectId: string): Project | null {
     mode: (row.mode as ProjectMode) || 'simple',
     pinned: !!row.pinned,
     pinnedAt: row.pinned_at || null,
+    browserEnabled: !!row.browser_enabled,
     scripts,
     chats,
     categories,
@@ -326,7 +327,7 @@ function registerProject(name: string, projectPath: string): Project {
   };
 }
 
-function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; adapterOrder?: ChatAdapter[] | null; aiNamingEnabled?: 'none' | 'on'; mode?: ProjectMode; pinned?: boolean }): Project | null {
+function updateProject(projectId: string, updates: { name?: string; path?: string; shellOverride?: string | null; defaultAdapter?: ChatAdapter; adapterOrder?: ChatAdapter[] | null; aiNamingEnabled?: 'none' | 'on'; mode?: ProjectMode; pinned?: boolean; browserEnabled?: boolean }): Project | null {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -365,6 +366,9 @@ function updateProject(projectId: string, updates: { name?: string; path?: strin
     } else {
       db.prepare('UPDATE projects SET pinned = 0, pinned_at = NULL WHERE id = ?').run(projectId);
     }
+  }
+  if (updates.browserEnabled !== undefined) {
+    db.prepare('UPDATE projects SET browser_enabled = ? WHERE id = ?').run(updates.browserEnabled ? 1 : 0, projectId);
   }
 
   return getProject(projectId);

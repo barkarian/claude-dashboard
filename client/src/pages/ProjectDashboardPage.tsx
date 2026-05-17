@@ -317,6 +317,7 @@ export default function ProjectDashboardPage() {
           aiNamingEnabled={project.aiNamingEnabled || 'none'}
           pinned={project.pinned ?? false}
           mode={project.mode ?? 'simple'}
+          browserEnabled={project.browserEnabled ?? false}
           onShellChanged={refreshProject}
           onAdapterChanged={refreshProject}
           onAiNamingChanged={refreshProject}

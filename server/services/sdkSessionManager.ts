@@ -46,7 +46,6 @@ const INTERACTIVE_TOOLS = new Set([
 // renders a dedicated affordance for them (artifact cards in this case).
 const HIDDEN_TOOLS = new Set([
   'mcp__claw_artifacts__display_artifact',
-  'mcp__claw_browser__display_browser_session',
 ]);
 
 // Union of unsupported + interactive + hidden — used to filter these tool blocks from the chat stream
@@ -279,63 +278,10 @@ function loadBrowserSkillContent(): string {
   return _cachedBrowserSkill;
 }
 
-/**
- * Per-session MCP server exposing the Playwright browser. Two tools:
- *   - `run`: forwards an argv array to playwright-cli scoped to this chat's
- *     workspace + tab. Returns stdout/stderr/exit code as text content.
- *   - `display_browser_session`: emits a chat:browser-session event so the UI
- *     can render a live browser artifact card. The agent should call this
- *     once per browser session to surface the live view to the user.
- */
-function buildBrowserMcpServer(session: SDKSession) {
-  return createSdkMcpServer({
-    name: 'claw_browser',
-    version: '1.0.0',
-    tools: [
-      tool(
-        'run',
-        'Run a Playwright agent CLI command against this chat\'s browser tab. Pass the command and args as you would on the command line — the dashboard scopes execution to this chat\'s workspace and tab automatically. Common: open <url> | snapshot | click <ref> | fill <ref> <text> | type <text> | viewport <desktop|tablet|mobile> | screenshot | back | reload. Always re-snapshot after navigation; refs (e5, e10) are invalidated by page changes.',
-        {
-          argv: z.array(z.string()).min(1).describe('Argv passed to playwright-cli (e.g. ["open", "https://example.com"]).'),
-        },
-        async (args: { argv: string[] }) => {
-          const result = await playwrightSessionManager.execForChat(
-            session.projectId,
-            session.chatId,
-            args.argv,
-            session.projectPath,
-          );
-          // Build a single-text-block result the agent can read. Include exit
-          // code only when non-zero so happy-path output stays clean.
-          let text = result.stdout;
-          if (result.stderr) text += (text ? '\n' : '') + result.stderr;
-          if (result.code !== 0) text += `\n[exit ${result.code}]`;
-          if (result.paused) text += '\nThe browser is paused — wait for the user to resume before issuing more commands.';
-          if (!text) text = `[exit ${result.code}]`;
-          return { content: [{ type: 'text' as const, text }] };
-        },
-      ),
-      tool(
-        'display_browser_session',
-        'Surface a live browser session card to the user in this chat. Call this ONCE the first time you start a browser task, so the user can see what the browser is doing. Subsequent commands automatically update the same artifact — no need to call this again per command.',
-        {
-          label: z.string().optional().describe('Optional title shown on the card. Defaults to "Browser session".'),
-        },
-        async (args: { label?: string }) => {
-          const record = projectManager.createBrowserSession(session.chatId, {
-            label: args.label || null,
-            messageId: session.currentAssistantMsgId || null,
-          });
-          session.io.to(`claude:${session.chatId}`).emit('chat:browser-session', {
-            chatId: session.chatId,
-            session: record,
-          });
-          return { content: [{ type: 'text' as const, text: `Browser session card displayed (${record.id}).` }] };
-        },
-      ),
-    ],
-  });
-}
+// (The old `buildBrowserMcpServer` lived here. We dropped it when we moved
+// SDK chats off the MCP wrapper onto skill + Bash. SDK now uses the same
+// playwright-cli shim as CC, with a canUseTool rewrite injecting --chat-id
+// and --project-id per call so the shim can attribute correctly.)
 
 function initSession(
   chatId: string,
@@ -426,6 +372,28 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
     toolInput: Record<string, unknown>,
     _options: { signal: AbortSignal },
   ) => {
+    // Browser scoping for SDK chats. The SDK shares process.env across all
+    // chats in the dashboard, so per-chat env doesn't work. Instead we
+    // rewrite the Bash command to inject --chat-id and --project-id flags
+    // that our playwright-cli shim parses out before running. The agent
+    // never sees these flags; its surface stays the documented CLI. We
+    // also auto-allow these calls (consent is at the project-level Browser
+    // toggle — per-command confirmation would be unworkable when the agent
+    // fires many commands per turn).
+    if (toolName === 'Bash' && session.withBrowser && typeof toolInput.command === 'string') {
+      const cmd = toolInput.command as string;
+      if (/\bplaywright-cli\b/.test(cmd) && !/--chat-id=/.test(cmd)) {
+        const rewritten = cmd.replace(
+          /\bplaywright-cli\b/,
+          `playwright-cli --chat-id=${session.chatId} --project-id=${session.projectId}`,
+        );
+        return {
+          behavior: 'allow' as const,
+          updatedInput: { ...toolInput, command: rewritten },
+        };
+      }
+    }
+
     // Handle AskUserQuestion interactively — show UI to the user
     if (toolName === 'AskUserQuestion' && INTERACTIVE_TOOLS.has(toolName)) {
       const questions = (toolInput as any).questions;
@@ -520,17 +488,16 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
   // Each session gets its own instance so the closure can resolve paths against
   // its own workspace and emit on the right room.
   const artifactsMcp = session.withArtifacts ? buildArtifactsMcpServer(session) : null;
-  const browserMcp = session.withBrowser ? buildBrowserMcpServer(session) : null;
-  if (browserMcp) {
-    // Lazy-start the per-workspace IPC socket (used by CC chats) so the same
-    // workspace state machine handles both. Cheap if already running.
+  if (session.withBrowser) {
+    // Lazy-start the per-workspace IPC socket so the playwright-cli shim
+    // (invoked via Bash by either CC or SDK agents) has a listener to talk
+    // to. Cheap if already running.
     playwrightSessionManager.ensureWorkspaceServer(session.projectId);
   }
 
   const allowedToolNames = [
     'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch',
     ...(artifactsMcp ? ['mcp__claw_artifacts__display_artifact'] : []),
-    ...(browserMcp ? ['mcp__claw_browser__run', 'mcp__claw_browser__display_browser_session'] : []),
   ];
 
   const artifactsSystemPrompt = artifactsMcp
@@ -552,22 +519,22 @@ DO NOT call display_artifact for:
 NEVER respond with "I can't send files" or "the chat is text-only" — you can. If the user asks for a file and it doesn't exist yet, create it (using Write or Bash), then call display_artifact with its path.`
     : '';
 
-  const browserSystemPrompt = browserMcp
+  const browserSystemPrompt = session.withBrowser
     ? (() => {
         const officialSkill = loadBrowserSkillContent();
         const preamble = `
 
 === PLAYWRIGHT BROWSER ===
-You have a real Chromium with a persistent profile. The command surface is Microsoft's official playwright-cli — same flags, same semantics — and the full skill is reproduced verbatim below.
+You have a real Chromium with a persistent project profile. The command surface is Microsoft's official playwright-cli — same flags, same semantics — and the full skill is reproduced verbatim below.
 
 HOW TO INVOKE THESE COMMANDS
-You drive the browser through \`mcp__claw_browser__run\` with an \`argv\` array. The argv is exactly the playwright-cli argument vector — what you'd type after \`playwright-cli\` at a shell. So \`playwright-cli click e7\` becomes \`{ argv: ["click", "e7"] }\`. That is the only translation; everything below is literal CLI syntax. Ignore "Installation" and any \`-s=<session>\` flags you may see in the upstream docs — the dashboard handles session/launch automatically.
+You drive the browser by running \`playwright-cli\` directly via the \`Bash\` tool. Example: \`playwright-cli click e7\`. Ignore "Installation" and any \`-s=<session>\` flags you may see in the upstream docs — the dashboard handles session/launch automatically.
 
 WORKSPACE PROFILE
 The browser's persistent profile may already be signed into the user's real GitHub, Gmail, Linear, etc. Be careful with destructive actions (delete, send, pay, post) — ask before anything irreversible in the user's accounts.
 
-ARTIFACT
-The very first time you open the browser in this chat, call \`mcp__claw_browser__display_browser_session\` ONCE so the user sees the live view. Don't call it again — the same view updates with subsequent commands.
+LIVE VIEW
+You don't need to surface anything explicitly — the dashboard's project Browser popover automatically lists every tab you open, with a chat-name label and live thumbnail. Just run commands and the user sees them.
 `;
         const addendum = `
 
@@ -679,7 +646,6 @@ The user can close your browser tab from the project's Browser popover. If a com
 
     const mcpServers: Record<string, any> = {};
     if (artifactsMcp) mcpServers.claw_artifacts = artifactsMcp;
-    if (browserMcp) mcpServers.claw_browser = browserMcp;
     if (Object.keys(mcpServers).length > 0) {
       queryOptions.mcpServers = mcpServers;
     }

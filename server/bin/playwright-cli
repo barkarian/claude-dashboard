@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+// playwright-cli — agent-facing shim that hijacks the real Playwright CLI.
+//
+// Lives in server/bin/, which is prepended to PATH ahead of node_modules/.bin/.
+// So when an agent (CC or SDK) runs `playwright-cli`, this script runs first.
+// It identifies which project + chat the caller belongs to, then IPCs to the
+// dashboard's playwrightSessionManager so the real CLI runs with the right
+// CDP endpoint and tab attribution.
+//
+// Identification, in priority order:
+//   1. --chat-id=<id>     argv flag (SDK canUseTool injects this).
+//   2. --project-id=<id>  argv flag (SDK canUseTool injects this).
+//   3. CLAW_CHAT_ID       env var (CC PTY sets this per-spawn).
+//   4. CLAW_PROJECT_ID    env var (CC PTY sets this per-spawn).
+//   5. process.cwd()      fallback — resolve project by workspace path.
+//
+// The flags (1,2) are stripped from argv before forwarding, so the agent's
+// command surface stays exactly what Microsoft's official skill documents.
+
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+
+function extractFlag(argv, name) {
+  const prefix = `--${name}=`;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith(prefix)) {
+      const value = argv[i].slice(prefix.length);
+      argv.splice(i, 1);
+      return value;
+    }
+    if (argv[i] === `--${name}` && i + 1 < argv.length) {
+      const value = argv[i + 1];
+      argv.splice(i, 2);
+      return value;
+    }
+  }
+  return null;
+}
+
+const args = process.argv.slice(2);
+const chatId = extractFlag(args, 'chat-id') || process.env.CLAW_CHAT_ID || null;
+let projectId = extractFlag(args, 'project-id') || process.env.CLAW_PROJECT_ID || null;
+
+// Fallback: resolve project by cwd. The dashboard listens on per-project
+// sockets named by projectId; we only ever spawn from inside a workspace,
+// so cwd-based lookup is reliable. Skipped if we already have ids.
+if (!projectId) {
+  // We don't have a cheap synchronous lookup yet — emit a clearer error
+  // than the cryptic ENOENT below.
+  process.stderr.write(
+    'playwright-cli (shim): cannot resolve project id. ' +
+    'Run from a dashboard-spawned agent shell, or pass --project-id=<id>.\n',
+  );
+  process.exit(2);
+}
+
+const socketPath = path.join(os.tmpdir(), `claw-browser-${projectId}.sock`);
+
+const payload = JSON.stringify({
+  type: 'exec',
+  projectId,
+  chatId,
+  tabId: chatId ? `chat_${chatId}` : null,
+  argv: args,
+  cwd: process.cwd(),
+});
+
+const conn = net.createConnection(socketPath);
+let buf = '';
+let exitCode = 1;
+
+conn.on('connect', () => { conn.write(payload + '\n'); });
+
+conn.on('data', (chunk) => {
+  buf += chunk.toString('utf8');
+  let idx;
+  while ((idx = buf.indexOf('\n')) !== -1) {
+    const line = buf.slice(0, idx);
+    buf = buf.slice(idx + 1);
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.type === 'stdout') process.stdout.write(msg.data);
+    else if (msg.type === 'stderr') process.stderr.write(msg.data);
+    else if (msg.type === 'exit') {
+      exitCode = typeof msg.code === 'number' ? msg.code : 1;
+      conn.end();
+    }
+    else if (msg.type === 'error') {
+      process.stderr.write(`playwright-cli (shim): ${msg.message}\n`);
+      exitCode = msg.code ?? 1;
+      conn.end();
+    }
+  }
+});
+
+conn.on('error', (err) => {
+  process.stderr.write(
+    `playwright-cli (shim): cannot reach dashboard browser service (${err.code || err.message}).\n` +
+    'Is the dashboard running and is Browser enabled for this project?\n',
+  );
+  process.exit(3);
+});
+
+conn.on('close', () => { process.exit(exitCode); });

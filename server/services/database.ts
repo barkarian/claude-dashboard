@@ -665,6 +665,16 @@ try {
   // Column already exists — ignore
 }
 
+// Per-project Browser toggle. Replaces the per-chat chip-tray model: the
+// project either has the browser tool installed (skill + permissions on
+// disk) or doesn't. Defaults to 0 (off) — opt-in to avoid writing files
+// into a user's repo without consent.
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN browser_enabled INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — ignore
+}
+
 export function getAdapterSetting(adapterId: string, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM adapter_settings WHERE adapter_id = ? AND key = ?').get(adapterId, key) as { value: string } | undefined;
   return row?.value;

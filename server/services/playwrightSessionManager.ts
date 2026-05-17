@@ -129,6 +129,15 @@ let io: SocketIOServer | null = null;
 const FRAME_INTERVAL_MS = 100;
 const FRAME_QUALITY = 60; // JPEG 0-100
 
+// Absolute path to the real playwright-cli binary. We resolve it once at
+// module load so our spawn calls never go through PATH — server/bin/ on
+// PATH contains our own playwright-cli shim, which would otherwise loop
+// back into this manager and deadlock.
+const REAL_PLAYWRIGHT_CLI = (() => {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  return path.join(here, '..', 'node_modules', '.bin', 'playwright-cli');
+})();
+
 // --- Filesystem layout ----------------------------------------------------
 
 function getDataRoot(): string {
@@ -400,7 +409,7 @@ function runCli(
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawn('playwright-cli', args, { cwd, env });
+      child = spawn(REAL_PLAYWRIGHT_CLI, args, { cwd, env });
     } catch (err: any) {
       conn.write(JSON.stringify({ type: 'error', message: `spawn failed: ${err?.message || err}`, code: 127 }) + '\n');
       resolve(127);
@@ -593,7 +602,7 @@ export async function execForChat(
         let stderr = '';
         let child: ChildProcess;
         try {
-          child = spawn('playwright-cli', cliArgs, { cwd, env });
+          child = spawn(REAL_PLAYWRIGHT_CLI, cliArgs, { cwd, env });
         } catch (err: any) {
           resolve({ stdout: '', stderr: `spawn failed: ${err?.message || err}\n`, code: 127 });
           return;

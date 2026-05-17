@@ -5,7 +5,6 @@ import FilePicker from './FilePicker.tsx';
 import RecordingBadgeBar, { extractRecordingIds } from './RecordingBadgeBar.tsx';
 import RecordingContentModal from './RecordingContentModal.tsx';
 import PreviousMessagePicker from './PreviousMessagePicker.tsx';
-import ChipTray from './ChipTray.tsx';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording.ts';
 import { haptics } from '../../utils/haptics.ts';
 import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
@@ -13,9 +12,6 @@ import type { SDKSessionStatus } from '../../../../shared/types/sdk.ts';
 interface SDKPromptInputProps {
   projectId: string;
   chatId?: string;
-  armedTools?: string[];
-  /** True for Claude Code chats — chips render as informational pills only. */
-  toolsInformational?: boolean;
   status: SDKSessionStatus | 'disconnected';
   onSend: (prompt: string) => void;
   onInterrupt: () => void;
@@ -25,7 +21,7 @@ interface SDKPromptInputProps {
   onClearDraft?: () => void;
 }
 
-export default function SDKPromptInput({ projectId, chatId, armedTools, toolsInformational, status, onSend, onInterrupt, autoFocus, initialDraft, onDraftChange, onClearDraft }: SDKPromptInputProps) {
+export default function SDKPromptInput({ projectId, chatId, status, onSend, onInterrupt, autoFocus, initialDraft, onDraftChange, onClearDraft }: SDKPromptInputProps) {
   const location = useLocation();
   const [value, setValue] = useState(initialDraft || '');
   const [showFilePicker, setShowFilePicker] = useState(false);
@@ -154,14 +150,9 @@ export default function SDKPromptInput({ projectId, chatId, armedTools, toolsInf
         </div>
       )}
 
-      {/* Per-chat armed-tools chip tray (browser, future tools) */}
-      {chatId && (
-        <ChipTray
-          chatId={chatId}
-          armedTools={armedTools || []}
-          informational={toolsInformational}
-        />
-      )}
+      {/* Browser tool is now a project-level toggle in Project Settings,
+          not a per-chat chip. The dashboard's project navbar surfaces all
+          browser tabs across chats via the popover; nothing needed here. */}
 
       {/* Badge bar for recording tokens */}
       <RecordingBadgeBar

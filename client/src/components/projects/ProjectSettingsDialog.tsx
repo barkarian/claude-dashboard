@@ -37,6 +37,8 @@ interface ProjectSettingsDialogProps {
   aiNamingEnabled: 'none' | 'on';
   pinned: boolean;
   mode: 'simple' | 'dev';
+  /** Whether the Playwright browser tool is enabled for this project. */
+  browserEnabled?: boolean;
   onShellChanged?: () => void;
   onAdapterChanged?: () => void;
   onAiNamingChanged?: () => void;
@@ -61,6 +63,7 @@ export default function ProjectSettingsDialog({
   aiNamingEnabled,
   pinned,
   mode,
+  browserEnabled: browserEnabledProp,
   onShellChanged,
   onAdapterChanged,
   onAiNamingChanged,
@@ -121,6 +124,9 @@ export default function ProjectSettingsDialog({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showResetBrowserConfirm, setShowResetBrowserConfirm] = useState(false);
   const [resettingBrowser, setResettingBrowser] = useState(false);
+  const [browserEnabled, setBrowserEnabled] = useState<boolean>(!!browserEnabledProp);
+  const [togglingBrowser, setTogglingBrowser] = useState(false);
+  useEffect(() => { setBrowserEnabled(!!browserEnabledProp); }, [browserEnabledProp]);
   const [deleteFolder, setDeleteFolder] = useState(false);
   const [dirExists, setDirExists] = useState<boolean | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -420,16 +426,49 @@ export default function ProjectSettingsDialog({
               )}
             </div>
 
-            {/* Reset browser — destructive but recoverable, less heavy than delete */}
+            {/* Browser tool — enable/disable the Playwright skill for this project */}
             <div className="border-t border-border pt-3">
-              <label className="text-xs font-medium text-text uppercase tracking-wider">Reset browser state</label>
-              <p className="text-xs text-text-muted mt-0.5 mb-2">
-                Close this project's browser, clear all cookies, localStorage, history,
-                and signed-in sessions. Affects every chat in this project.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => setShowResetBrowserConfirm(true)}>
-                Reset browser
-              </Button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-medium text-text uppercase tracking-wider">Browser tool</label>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Install Playwright skill in <code>.claude/skills/</code>. Lets agents drive a
+                    real Chromium with a persistent profile. You can change this later.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={togglingBrowser ? undefined : async () => {
+                    setTogglingBrowser(true);
+                    try {
+                      const next = !browserEnabled;
+                      const res = await api.patch<{ project: any }>(`/api/projects/${projectId}`, { browserEnabled: next });
+                      setBrowserEnabled(!!res?.project?.browserEnabled);
+                    } catch (err) {
+                      console.error('Browser toggle failed:', err);
+                    } finally {
+                      setTogglingBrowser(false);
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                    browserEnabled ? 'bg-primary' : 'bg-bg-hover'
+                  } ${togglingBrowser ? 'opacity-50' : ''}`}
+                  role="switch"
+                  aria-checked={browserEnabled}
+                  aria-label="Browser tool"
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform mt-0.5 ${
+                      browserEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              {browserEnabled && (
+                <Button variant="outline" size="sm" className="mt-2" onClick={() => setShowResetBrowserConfirm(true)}>
+                  Reset browser state
+                </Button>
+              )}
             </div>
 
             {/* Danger zone */}

@@ -10,7 +10,6 @@ import type {
   BrowserLockRequestPayload,
   BrowserInputPayload,
   BrowserViewportRequestPayload,
-  ChatToolArmPayload,
 } from '../../shared/types/socket-events.ts';
 
 /** Resolve the workspace id for a chat. Returns null if the chat isn't found.
@@ -22,78 +21,8 @@ function projectIdFor(chatId: string): string | null {
 
 export default function registerBrowserEvents(socket: Socket, io: SocketIOServer): void {
   // Arm a tool for this chat. For browser specifically: triggers a one-time
-  // install if needed (lazy Chromium download), then re-inits the SDK session
-  // with the browser MCP attached so the agent can use it next turn.
-  socket.on('chat:tool-arm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] } | { error: string }) => void) => {
-    console.log('[browser:tool-arm] received', { chatId, toolId, socketId: socket.id });
-    const projectId = projectIdFor(chatId);
-    if (!projectId) {
-      console.log('[browser:tool-arm] chat not found', { chatId });
-      ack?.({ error: 'chat not found' });
-      return;
-    }
-    const room = `claude:${chatId}`;
-    // Make sure the requesting client is in the chat room before we emit to it.
-    // The room is normally joined on sdk:start / sdk:attach, but a user may
-    // arm a tool in a fresh chat before sending their first message.
-    socket.join(room);
-    if (toolId === 'browser') {
-      console.log('[browser:tool-arm] arming browser', { chatId, projectId });
-      // Tell clients we're starting (covers the inline progress card).
-      io.to(room).emit('chat:tool-install-progress', {
-        chatId, toolId, percent: null, status: 'starting',
-      });
-      try {
-        // Trigger lazy Chromium launch + ensure CDP endpoint resolves.
-        // playwright-cli internally downloads Chromium on first launch if
-        // needed; we surface that as the install step.
-        io.to(room).emit('chat:tool-install-progress', {
-          chatId, toolId, percent: null, status: 'downloading', message: 'Preparing Chromium…',
-        });
-        playwrightSessionManager.ensureWorkspaceServer(projectId);
-        // Persist the armed state regardless of whether Chromium is fully
-        // up — actual launch happens lazily on first command.
-        const armed = projectManager.armTool(chatId, 'browser');
-        console.log('[browser:tool-arm] persisted armed_tools', { chatId, armed });
-        io.to(room).emit('chat:tool-install-progress', {
-          chatId, toolId, percent: 100, status: 'ready',
-        });
-        io.to(room).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
-        console.log('[browser:tool-arm] sending ack', { armed });
-        ack?.({ armedTools: armed });
-        // Re-init the SDK session so the browser MCP mounts on the next turn.
-        // Best-effort — silently no-op if this isn't an SDK session.
-        try {
-          const session = sdkSessionManager.getSession(chatId);
-          if (session) {
-            sdkSessionManager.endSession(chatId);
-            // The session will re-init on the next sdk:start / chat:start.
-          }
-        } catch { /* not an SDK session — fine */ }
-      } catch (err: any) {
-        io.to(room).emit('chat:tool-install-progress', {
-          chatId, toolId, percent: null, status: 'failed', message: err?.message || String(err),
-        });
-        ack?.({ error: err?.message || String(err) });
-      }
-      return;
-    }
-    ack?.({ error: `unknown tool: ${toolId}` });
-  });
-
-  socket.on('chat:tool-disarm', async ({ chatId, toolId }: ChatToolArmPayload, ack?: (resp: { armedTools: string[] }) => void) => {
-    socket.join(`claude:${chatId}`);
-    const armed = projectManager.disarmTool(chatId, toolId);
-    io.to(`claude:${chatId}`).emit('chat:armed-tools-changed', { chatId, armedTools: armed });
-    ack?.({ armedTools: armed });
-    // Mirror the arm flow: end the SDK session so the next turn starts
-    // without the disarmed tool's MCP attached.
-    try {
-      const session = sdkSessionManager.getSession(chatId);
-      if (session) sdkSessionManager.endSession(chatId);
-    } catch { /* ignore */ }
-  });
-
+  // (The chat:tool-arm / chat:tool-disarm handlers lived here. Browser is
+  // now a project-level toggle in Project Settings — no per-chat arming.)
 
   socket.on('chat:browser-pause', ({ chatId }: BrowserPauseRequestPayload) => {
     const projectId = projectIdFor(chatId);

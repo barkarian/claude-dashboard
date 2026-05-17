@@ -7,8 +7,6 @@ import { useSDKMessages } from '../../hooks/useSDKMessages.ts';
 import { useDraft } from '../../hooks/useDraft.ts';
 import MessageList from './MessageList.tsx';
 import SDKPromptInput from './SDKPromptInput.tsx';
-import ToolInstallBanner from './ToolInstallBanner.tsx';
-import ChatBrowserStrip from '../browser/ChatBrowserStrip.tsx';
 import PermissionPrompt from './PermissionPrompt.tsx';
 import QuestionPrompt from './QuestionPrompt.tsx';
 import CostBadge from './CostBadge.tsx';
@@ -150,21 +148,9 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
     };
   }, [socket, chatId]);
 
-  // When the user arms/disarms a tool, the server ends the SDK session so the
-  // next session re-inits with the new MCP set. Refresh the project context
-  // (so chat.armedTools reflects the persisted state) and trigger a fresh
-  // sdk:start so the agent picks up the change without a manual reload.
-  useEffect(() => {
-    if (!socket || !chatId) return;
-    function handleArmedChanged(payload: { chatId: string; armedTools: string[] }) {
-      console.log('[SDKChatView] chat:armed-tools-changed received', payload);
-      if (payload.chatId !== chatId) return;
-      refreshRef.current();
-      socket?.emit('sdk:start', { projectId, chatId });
-    }
-    socket.on('chat:armed-tools-changed', handleArmedChanged);
-    return () => { socket.off('chat:armed-tools-changed', handleArmedChanged); };
-  }, [socket, chatId, projectId]);
+  // The per-chat chip-tray arm/disarm flow is gone — Browser is now a
+  // project-level toggle in Project Settings. No client-side listener
+  // needed here.
 
   // Refresh project data when result arrives (history saved)
   useEffect(() => {
@@ -325,12 +311,6 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             projectId={projectId}
           />
 
-          {/* Per-chat browser strip — small live tab card above the prompt
-              for SDK chats only. Click to open the canvas dialog; × closes
-              the tab. The project-level popover (in the bottom navbar) is
-              the broader multi-tab view. */}
-          {chatId && <ChatBrowserStrip projectId={projectId} chatId={chatId} />}
-
           {/* Live "what is the agent doing" hint — replaces the old 3-dots
               streaming indicator with contextual labels (tool name, thinking,
               retry, awaiting permission). */}
@@ -368,15 +348,11 @@ export default function SDKChatView({ projectId }: SDKChatViewProps) {
             </div>
           )}
 
-          {/* Tool install progress (browser first-arm Chromium download) */}
-          {chatId && <ToolInstallBanner chatId={chatId} />}
-
           {/* Input */}
           <SDKPromptInput
             key={chatId}
             projectId={projectId}
             chatId={chatId}
-            armedTools={chat?.armedTools || []}
             status={status}
             onSend={sendPrompt}
             onInterrupt={interrupt}
