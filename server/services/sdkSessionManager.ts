@@ -347,6 +347,15 @@ async function sendPrompt(chatId: string, prompt: string): Promise<{ error?: str
     return { error: 'Session not active' };
   }
 
+  // Refresh per-project tool flags every turn — the Browser toggle is
+  // project-level and may have been flipped after this session started.
+  // Without this, an in-flight session keeps its stale `withBrowser` until
+  // restart and the agent ignores the new tool. Cheap DB read.
+  try {
+    const project = projectManager.getProject(session.projectId);
+    session.withBrowser = !!project?.browserEnabled && isBrowserEnabled;
+  } catch { /* ignore — leave session.withBrowser as-is */ }
+
   touchActivity(session);
 
   // Add user message
