@@ -43,6 +43,19 @@ const args = process.argv.slice(2);
 const chatId = extractFlag(args, 'chat-id') || process.env.CLAW_CHAT_ID || null;
 let projectId = extractFlag(args, 'project-id') || process.env.CLAW_PROJECT_ID || null;
 
+// Strip any agent-supplied -s/--session flag. The dashboard always runs
+// under its own project-scoped session name; a second -s would get
+// comma-joined into something like "workspace_X,agentsession" and the
+// daemon can't address it, so every subsequent command then fails.
+for (let i = args.length - 1; i >= 0; i--) {
+  const a = args[i];
+  if (a === '-s' || a === '--session') {
+    args.splice(i, 2); // drop flag + its value
+  } else if (a.startsWith('-s=') || a.startsWith('--session=')) {
+    args.splice(i, 1);
+  }
+}
+
 // Project-destructive commands the agent should never call directly.
 // Chromium is owned by the dashboard; closing it nukes tabs across every chat
 // in the project. To close just the agent's tab, use `tab-close`. To wipe

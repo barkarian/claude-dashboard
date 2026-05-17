@@ -94,6 +94,10 @@ interface PageEntry {
   viewport: BrowserViewportMode;
   /** Throttle: timestamp of last broadcast frame (ms). */
   lastFrameAt: number;
+  /** Last time an agent CLI command landed on this tab (ms epoch).
+   *  Used to keep the popover's "driving" indicator green between
+   *  commands even when the page is static and emits no frames. */
+  lastCommandAt: number;
 }
 
 interface WorkspaceState {
@@ -304,7 +308,7 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
   await applyViewport(page, viewport);
 
   const cdp = await context.newCDPSession(page);
-  entry = { page, cdp, viewport, lastFrameAt: 0 };
+  entry = { page, cdp, viewport, lastFrameAt: 0, lastCommandAt: 0 };
   ws.tabs.set(tabId, entry);
 
   // Start a CDP screencast — frames arrive as Page.screencastFrame events,
@@ -400,6 +404,45 @@ function cliEnvFor(ws: WorkspaceState, cdpEndpoint: string): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * playwright-cli's daemon listens on a unix socket under the system tmpdir.
+ * When the daemon crashes / is killed without cleanup, the socket file
+ * lingers and the next launch fails with EADDRINUSE. Sweep stale sockets
+ * for our session name before each spawn so the agent doesn't have to dig
+ * through /var/folders. We probe each candidate socket with a quick
+ * non-blocking connect; if nothing answers, the file is orphaned and we
+ * unlink it.
+ */
+async function sweepStaleDaemonSockets(sessionName: string): Promise<void> {
+  // Daemon paths live at /var/folders/.../T/pw-*/cli/*-<session>.sock on macOS,
+  // or $TMPDIR/pw-*/cli/*-<session>.sock more generically.
+  const tmp = os.tmpdir();
+  let pwDirs: string[] = [];
+  try {
+    pwDirs = fs.readdirSync(tmp).filter(d => d.startsWith('pw-')).map(d => path.join(tmp, d, 'cli'));
+  } catch { return; }
+  for (const dir of pwDirs) {
+    let entries: string[] = [];
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      // Match sockets for OUR session name. The hash prefix changes per
+      // tmp dir; the suffix is the session name.
+      if (!name.endsWith(`-${sessionName}.sock`) && !name.endsWith(`-${sessionName}`)) continue;
+      const full = path.join(dir, name);
+      // Probe — if a daemon answers, leave it alone.
+      const alive = await new Promise<boolean>((resolve) => {
+        const c = net.createConnection({ path: full });
+        const t = setTimeout(() => { c.destroy(); resolve(false); }, 100);
+        c.once('connect', () => { clearTimeout(t); c.destroy(); resolve(true); });
+        c.once('error', () => { clearTimeout(t); resolve(false); });
+      });
+      if (!alive) {
+        try { fs.unlinkSync(full); } catch { /* ignore */ }
+      }
+    }
+  }
+}
+
 function runCli(
   args: string[],
   env: NodeJS.ProcessEnv,
@@ -472,7 +515,7 @@ async function retargetTab(ws: WorkspaceState, tabId: string, newPage: Page): Pr
   const context = await ensureContext(ws);
   const cdp = await context.newCDPSession(newPage);
   const viewport = old?.viewport || 'desktop';
-  const entry: PageEntry = { page: newPage, cdp, viewport, lastFrameAt: 0 };
+  const entry: PageEntry = { page: newPage, cdp, viewport, lastFrameAt: 0, lastCommandAt: 0 };
   ws.tabs.set(tabId, entry);
   await cdp.send('Page.startScreencast', {
     format: 'jpeg',
@@ -551,8 +594,12 @@ async function execOnWorkspace(
     const wantsPersistent = msg.argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...msg.argv];
     ws.activeTabId = msg.chatId;
+    const entryForStamp = ws.tabs.get(msg.chatId);
+    if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
     let code: number;
     try {
+      // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
+      await sweepStaleDaemonSockets(ws.cliSession);
       code = await runCli(cliArgs, env, msg.cwd, conn);
     } finally {
       ws.activeTabId = null;
@@ -596,6 +643,10 @@ export async function execForChat(
     const wantsPersistent = argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...argv];
     ws.activeTabId = chatId;
+    const entryForStamp = ws.tabs.get(chatId);
+    if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
+    // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
+    await sweepStaleDaemonSockets(ws.cliSession);
     try {
       return await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
         let stdout = '';
@@ -1038,6 +1089,14 @@ export function listTabs(projectId: string): Array<{
   const ws = getOrCreateWorkspace(projectId);
   const now = Date.now();
   const out: Array<any> = [];
+  // Use the longer of {recent frame, recent command} as the "driving"
+  // signal. Frames cover live visual changes; command activity covers
+  // periods where the agent is interacting but the page is static and
+  // emits no frames (lots of clicks/typing on a quiet page).
+  const drivingFor = (entry?: PageEntry) => {
+    if (!entry) return false;
+    return now - entry.lastFrameAt < 1500 || now - entry.lastCommandAt < 6000;
+  };
   // Chat-bound tabs.
   for (const t of projectManager.listBrowserTabsByProject(projectId)) {
     const entry = ws.tabs.get(t.chatId);
@@ -1049,7 +1108,7 @@ export function listTabs(projectId: string): Array<{
       label: chat?.label || 'Chat',
       currentUrl: t.currentUrl,
       viewportMode: t.viewportMode,
-      driving: !!entry && now - entry.lastFrameAt < 1500,
+      driving: drivingFor(entry),
       alive: !!entry && !entry.page.isClosed(),
     });
   }
@@ -1062,7 +1121,7 @@ export function listTabs(projectId: string): Array<{
       label: t.label || (t.currentUrl ? hostFromUrl(t.currentUrl) : 'New tab'),
       currentUrl: t.currentUrl,
       viewportMode: t.viewportMode,
-      driving: !!entry && now - entry.lastFrameAt < 1500,
+      driving: drivingFor(entry),
       alive: !!entry && !entry.page.isClosed(),
     });
   }
