@@ -43,6 +43,22 @@ const args = process.argv.slice(2);
 const chatId = extractFlag(args, 'chat-id') || process.env.CLAW_CHAT_ID || null;
 let projectId = extractFlag(args, 'project-id') || process.env.CLAW_PROJECT_ID || null;
 
+// Project-destructive commands the agent should never call directly.
+// Chromium is owned by the dashboard; closing it nukes tabs across every chat
+// in the project. To close just the agent's tab, use `tab-close`. To wipe
+// state, the user uses Project Settings → Reset Browser.
+const FORBIDDEN_COMMANDS = new Set(['close', 'close-all', 'kill-all', 'delete-data']);
+// Find the first non-flag arg — that's the subcommand.
+const subcommand = args.find((a) => !a.startsWith('-'));
+if (subcommand && FORBIDDEN_COMMANDS.has(subcommand)) {
+  process.stderr.write(
+    `playwright-cli: \`${subcommand}\` is reserved — it would close the project's Chromium ` +
+    `and kill every chat's tab. Use \`tab-close\` to close just your tab, or stop running ` +
+    `commands and leave the tab open for the user.\n`,
+  );
+  process.exit(64); // EX_USAGE
+}
+
 // Fallback: resolve project by cwd. The dashboard listens on per-project
 // sockets named by projectId; we only ever spawn from inside a workspace,
 // so cwd-based lookup is reliable. Skipped if we already have ids.

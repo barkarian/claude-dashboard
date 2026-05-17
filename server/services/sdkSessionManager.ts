@@ -610,6 +610,21 @@ If the snapshot you just took contains the elements you need to interact with, t
 loaded ENOUGH. Don't second-guess based on visual animations, micro-skeleton transitions, or
 "it feels slow." If your target element is in the snapshot, click/fill it and move on.
 
+=== TAB LIFECYCLE (dashboard-specific) ===
+Chromium is owned by the dashboard, not by you. Important rules:
+
+- Each chat owns one tab. The user sees every tab in the project's Browser
+  popover. They expect tabs to **stay open** until they close them themselves.
+- When you're "done", just stop running commands. DON'T close the tab.
+- **NEVER use \`close\`, \`close-all\`, \`kill-all\`, \`delete-data\`** — those
+  kill Chromium project-wide and wipe every chat's tab. The dashboard rejects
+  them and will return an error.
+- For a brand-new URL unrelated to the current page: prefer \`tab-new <url>\`
+  over re-using \`open <url>\` (which reloads in the existing tab).
+- For navigating in the same tab (clicking a link, going to a sub-page):
+  \`goto <url>\` or \`click <ref>\` as usual.
+- To close just your own tab (rare): \`tab-close\`.
+
 === VIEWPORT MODES (dashboard-specific) ===
 This dashboard exposes three viewport presets via \`viewport <mode>\`:
 - \`viewport desktop\` (1440×900, no touch)
