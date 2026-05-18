@@ -107,6 +107,7 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
           currentUrl: resp.url || null, viewportMode: 'desktop',
           driving: false, alive: true,
         };
+        dialogOpenedAt.current = Date.now();
         setOpenedTab(t);
       }
     });
@@ -149,7 +150,7 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
               {tabs.map((t) => (
                 <button
                   key={t.tabId}
-                  onClick={() => setOpenedTab(t)}
+                  onClick={() => { dialogOpenedAt.current = Date.now(); setOpenedTab(t); }}
                   className="w-full px-3 py-2 border-b border-border/50 last:border-b-0 flex items-center gap-2 hover:bg-bg-hover text-left"
                 >
                   <span className="relative inline-block h-2 w-2 flex-shrink-0" aria-hidden>
@@ -196,7 +197,9 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
       <Dialog
         open={!!openedTab}
         onOpenChange={(o) => {
-          if (o) dialogOpenedAt.current = Date.now();
+          // NOTE: Radix only calls onOpenChange(true) when it opens itself
+          // (via Trigger). For externally controlled `open`, opening doesn't
+          // fire this — so we set dialogOpenedAt at the click site instead.
           if (!o) setOpenedTab(null);
         }}
       >
