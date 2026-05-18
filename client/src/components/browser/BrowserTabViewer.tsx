@@ -19,6 +19,13 @@ interface BrowserTabViewerProps {
   onGoToChat?: () => void;
 }
 
+/** Manual (user-created) tabs are user-owned end-to-end — no agent will ever
+ *  drive them, so input is always live and there's no Take Over button.
+ *  Chat-bound tabs (tabId === chatId) default to view-only with a button. */
+function isManualTab(tabId: string): boolean {
+  return tabId.startsWith('manual_');
+}
+
 interface FrameState {
   width: number;
   height: number;
@@ -40,6 +47,15 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
   const [hasFrame, setHasFrame] = useState(false);
   const [url, setUrl] = useState(initialUrl || '');
   const [urlInput, setUrlInput] = useState(initialUrl && initialUrl !== 'about:blank' ? initialUrl : '');
+
+  // Takeover state — only meaningful for chat-bound tabs. Manual tabs are
+  // always user-controlled (no agent contesting), so we treat them as "in
+  // control" immediately. Chat tabs default to view-only and require an
+  // explicit Take Over click to start dispatching input.
+  const tabIsManual = isManualTab(tabId);
+  const [paused, setPaused] = useState(false);
+  const [lockedBy, setLockedBy] = useState<string | null>(null);
+  const inControl = tabIsManual || (!!socket && lockedBy === socket.id);
 
   // Subscribe to frames + url updates filtered by tabId.
   useEffect(() => {
@@ -66,13 +82,29 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
         setUrlInput(p.url === 'about:blank' ? '' : p.url);
       }
     }
+    function handleState(p: { projectId: string; chatId: string; paused: boolean; lockedBy: string | null }) {
+      if (p.projectId !== projectId || p.chatId !== tabId) return;
+      setPaused(p.paused);
+      setLockedBy(p.lockedBy);
+    }
     socket.on('project:browser-frame', handleFrame);
     socket.on('project:browser-url', handleUrl);
+    socket.on('chat:browser-state', handleState);
     return () => {
       socket.off('project:browser-frame', handleFrame);
       socket.off('project:browser-url', handleUrl);
+      socket.off('chat:browser-state', handleState);
     };
   }, [socket, projectId, tabId]);
+
+  function takeOver() {
+    if (tabIsManual) return;
+    socket?.emit('chat:browser-pause', { chatId: tabId });
+  }
+  function releaseControl() {
+    if (tabIsManual) return;
+    socket?.emit('chat:browser-resume', { chatId: tabId });
+  }
 
   function navigateUrl(target: string) {
     if (!socket) return;
@@ -124,6 +156,27 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
           <button type="submit" className="rounded border border-border px-3 py-1 text-sm hover:bg-bg-hover">Go</button>
         </form>
         <ViewportSelector value={frameState.viewportMode} onChange={setViewport} />
+        {!tabIsManual && (
+          inControl ? (
+            <button
+              type="button"
+              onClick={releaseControl}
+              className="rounded border border-green-500 bg-green-500/10 px-3 py-1 text-sm hover:bg-green-500/20"
+              title="Release the tab back to the agent"
+            >
+              Release control
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={takeOver}
+              className="rounded border border-primary bg-primary/10 px-3 py-1 text-sm hover:bg-primary/20"
+              title="Pause the agent on this tab and take over input"
+            >
+              Take over
+            </button>
+          )
+        )}
         {onGoToChat && (
           <button
             type="button"
@@ -136,6 +189,24 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
         )}
       </div>
 
+      {/* Banner reflects current control state on chat-bound tabs. Manual
+          tabs are always user-controlled — no banner needed. */}
+      {!tabIsManual && (
+        <div className={`flex-shrink-0 px-3 py-1.5 text-xs text-center border-b border-border ${
+          inControl
+            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+            : paused && lockedBy
+              ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
+              : 'bg-bg-surface text-text-dim'
+        }`}>
+          {inControl
+            ? 'You have control — agent is paused on this tab. Click Release control when done.'
+            : paused && lockedBy
+              ? 'Another viewer has control of this tab — agent paused.'
+              : 'View only — agent is driving. Click Take over to interact.'}
+        </div>
+      )}
+
       <div className="flex-1 flex items-center justify-center bg-bg-surface overflow-auto p-2">
         <div className={frameState.viewportMode === 'mobile' ? 'rounded-[40px] border-[14px] border-black p-0 bg-black' : ''}>
           <canvas
@@ -145,28 +216,28 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
             className="block max-w-full max-h-[70vh]"
             style={{
               aspectRatio: `${frameState.width} / ${frameState.height}`,
-              cursor: 'crosshair',
+              cursor: inControl ? 'crosshair' : 'not-allowed',
               background: hasFrame ? 'transparent' : '#000',
             }}
-            onMouseMove={(e) => emitInput({ kind: 'mouse-move', ...toFramePoint(e) })}
-            onMouseDown={(e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-down', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); }}
-            onMouseUp={(e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-up', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); }}
-            onWheel={(e) => emitInput({ kind: 'mouse-wheel', deltaX: e.deltaX, deltaY: e.deltaY })}
-            onKeyDown={(e) => {
+            onMouseMove={inControl ? (e) => emitInput({ kind: 'mouse-move', ...toFramePoint(e) }) : undefined}
+            onMouseDown={inControl ? (e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-down', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); } : undefined}
+            onMouseUp={inControl ? (e) => { const p = toFramePoint(e); emitInput({ kind: 'mouse-up', ...p, button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left' }); } : undefined}
+            onWheel={inControl ? (e) => emitInput({ kind: 'mouse-wheel', deltaX: e.deltaX, deltaY: e.deltaY }) : undefined}
+            onKeyDown={inControl ? (e) => {
               e.preventDefault();
               if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 emitInput({ kind: 'type', text: e.key });
               } else {
                 emitInput({ kind: 'key-down', key: mapKey(e.key) });
               }
-            }}
-            onKeyUp={(e) => {
+            } : undefined}
+            onKeyUp={inControl ? (e) => {
               e.preventDefault();
               if (!(e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)) {
                 emitInput({ kind: 'key-up', key: mapKey(e.key) });
               }
-            }}
-            tabIndex={0}
+            } : undefined}
+            tabIndex={inControl ? 0 : -1}
           />
         </div>
       </div>

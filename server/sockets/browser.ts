@@ -27,21 +27,22 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   socket.on('chat:browser-pause', ({ chatId }: BrowserPauseRequestPayload) => {
     const projectId = projectIdFor(chatId);
     if (!projectId) return;
-    // Abort any in-flight SDK turn so the agent stops issuing tools while the
-    // user takes over. CC chats are paused at the shim layer (paused flag).
-    try { sdkSessionManager.interrupt(chatId); } catch { /* not an SDK chat */ }
-    playwrightSessionManager.setPaused(projectId, true);
+    socket.join(`project:${projectId}`);
+    // Per-chat pause: the agent for THIS chat sees "paused" on its next
+    // browser command (and stops); other chats in the same project keep
+    // working normally. We don't interrupt the SDK turn — the agent reads
+    // the paused message and stops on its own. Less destructive.
+    playwrightSessionManager.setChatPaused(projectId, chatId, true);
     playwrightSessionManager.beginTakeover(projectId, chatId);
-    // Pause grants the requesting client the input lock.
-    playwrightSessionManager.acquireLock(projectId, socket.id);
+    playwrightSessionManager.acquireChatLock(projectId, chatId, socket.id);
   });
 
   socket.on('chat:browser-resume', async ({ chatId }: BrowserPauseRequestPayload) => {
     const projectId = projectIdFor(chatId);
     if (!projectId) return;
     const { descriptions } = playwrightSessionManager.endTakeover(projectId, chatId);
-    playwrightSessionManager.releaseLock(projectId, socket.id);
-    playwrightSessionManager.setPaused(projectId, false);
+    playwrightSessionManager.releaseChatLock(projectId, chatId, socket.id);
+    playwrightSessionManager.setChatPaused(projectId, chatId, false);
 
     // Inject a synthetic user message into the SDK chat summarizing the
     // takeover + a fresh snapshot, so the agent can continue from current state.
@@ -80,11 +81,12 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
       ack?.({ acquired: false, lockedBy: null });
       return;
     }
+    socket.join(`project:${projectId}`);
     if (payload.acquire) {
-      const result = playwrightSessionManager.acquireLock(projectId, socket.id);
+      const result = playwrightSessionManager.acquireChatLock(projectId, payload.chatId, socket.id);
       ack?.(result);
     } else {
-      playwrightSessionManager.releaseLock(projectId, socket.id);
+      playwrightSessionManager.releaseChatLock(projectId, payload.chatId, socket.id);
       ack?.({ acquired: false, lockedBy: null });
     }
   });
@@ -92,13 +94,12 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   socket.on('chat:browser-input', async (payload: BrowserInputPayload) => {
     const projectId = projectIdFor(payload.chatId);
     if (!projectId) return;
-    // Only the lock holder may dispatch input. Silent drop otherwise.
-    const ws = (playwrightSessionManager as any);
-    if (typeof ws.acquireLock === 'function') {
-      // Soft-check via the lock's current state without acquiring:
-      const probe = playwrightSessionManager.acquireLock(projectId, socket.id);
-      if (!probe.acquired) return;
-    }
+    // Only the lock holder for this chat's tab may dispatch input.
+    // acquireChatLock returns acquired:true if either no one holds it or
+    // we already hold it — either way safe. acquired:false means someone
+    // else is in control; silently drop.
+    const probe = playwrightSessionManager.acquireChatLock(projectId, payload.chatId, socket.id);
+    if (!probe.acquired) return;
     try {
       await playwrightSessionManager.dispatchInput(projectId, payload.chatId, payload);
     } catch (err) {

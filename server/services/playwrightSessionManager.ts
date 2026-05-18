@@ -109,9 +109,13 @@ interface WorkspaceState {
   cdpPort: number | null;
   /** Cached promise for the CDP endpoint URL (resolved from /json/version). */
   cdpEndpointPromise: Promise<string> | null;
-  paused: boolean;
-  /** Socket id holding the input lock; null = no one. */
-  lockedBy: string | null;
+  /** Chats whose tab is currently in user-takeover. While in this set, the
+   *  shim's exec path returns "paused" and the agent stops issuing browser
+   *  commands for that chat. Other chats in the same workspace are unaffected. */
+  pausedChats: Set<string>;
+  /** Per-chat input lock holder (socket id). Used when more than one client
+   *  is viewing a chat's tab — only the lock holder's mouse/keys dispatch. */
+  lockHolders: Map<string, string>;
   /** Per-chat tab state. */
   tabs: Map<string, PageEntry>;
   /** Per-chat active takeover id (set on pause, cleared on resume). */
@@ -172,8 +176,8 @@ function getOrCreateWorkspace(projectId: string): WorkspaceState {
       contextPromise: null,
       cdpPort: null,
       cdpEndpointPromise: null,
-      paused: false,
-      lockedBy: null,
+      pausedChats: new Set<string>(),
+      lockHolders: new Map<string, string>(),
       tabs: new Map(),
       takeovers: new Map(),
       activeTabId: null,
@@ -574,10 +578,10 @@ async function execOnWorkspace(
   ws.active = true;
 
   try {
-    if (ws.paused) {
+    if (msg.chatId && ws.pausedChats.has(msg.chatId)) {
       conn.write(JSON.stringify({
         type: 'stderr',
-        data: 'claw-browser: workspace paused — user has control.\n',
+        data: 'playwright-cli: paused — the user has taken over this tab. Stop issuing browser commands for this chat until you receive a takeover summary message.\n',
       }) + '\n');
       conn.write(JSON.stringify({ type: 'exit', code: 4 }) + '\n');
       return;
@@ -650,8 +654,13 @@ export async function execForChat(
   if (ws.active) await new Promise<void>((r) => ws.queue.push(r));
   ws.active = true;
   try {
-    if (ws.paused) {
-      return { stdout: '', stderr: 'claw-browser: workspace paused — user has control.\n', code: 4, paused: true };
+    if (ws.pausedChats.has(chatId)) {
+      return {
+        stdout: '',
+        stderr: 'playwright-cli: paused — the user has taken over this tab. Stop issuing browser commands for this chat until you receive a takeover summary message.\n',
+        code: 4,
+        paused: true,
+      };
     }
 
     if (argv[0] === 'viewport' && (argv[1] === 'desktop' || argv[1] === 'tablet' || argv[1] === 'mobile')) {
@@ -702,46 +711,49 @@ export async function execForChat(
 
 // --- Pause + lock + state broadcast --------------------------------------
 
-function emitState(ws: WorkspaceState, chatId?: string): void {
+/** Push the takeover state for a specific chat to every connected client in
+ *  the project. Broadcasts on `project:${projectId}` (the unified browser
+ *  room) so the BrowserTabViewer can update its banner + button regardless
+ *  of which client triggered the change. */
+function emitChatState(ws: WorkspaceState, chatId: string): void {
   if (!io) return;
-  // We broadcast per-chat because the artifact UI listens at the chat level.
-  const targets = chatId ? [chatId] : Array.from(ws.tabs.keys());
-  for (const cid of targets) {
-    io.to(`claude:${cid}`).emit('chat:browser-state', {
-      chatId: cid,
-      paused: ws.paused,
-      lockedBy: ws.lockedBy,
-    });
-  }
+  io.to(`project:${ws.projectId}`).emit('chat:browser-state', {
+    projectId: ws.projectId,
+    chatId,
+    paused: ws.pausedChats.has(chatId),
+    lockedBy: ws.lockHolders.get(chatId) ?? null,
+  });
 }
 
-export function setPaused(projectId: string, paused: boolean): void {
+export function setChatPaused(projectId: string, chatId: string, paused: boolean): void {
   const ws = getOrCreateWorkspace(projectId);
-  if (ws.paused === paused) return;
-  ws.paused = paused;
-  emitState(ws);
+  const was = ws.pausedChats.has(chatId);
+  if (was === paused) return;
+  if (paused) ws.pausedChats.add(chatId); else ws.pausedChats.delete(chatId);
+  emitChatState(ws, chatId);
 }
 
-export function isPaused(projectId: string): boolean {
-  return !!workspaces.get(projectId)?.paused;
+export function isChatPaused(projectId: string, chatId: string): boolean {
+  return !!workspaces.get(projectId)?.pausedChats.has(chatId);
 }
 
-/** Try to acquire the input lock. Returns the lock holder after the call. */
-export function acquireLock(projectId: string, socketId: string): { lockedBy: string | null; acquired: boolean } {
+/** Try to acquire the input lock for a chat's tab. Returns the holder after. */
+export function acquireChatLock(projectId: string, chatId: string, socketId: string): { lockedBy: string | null; acquired: boolean } {
   const ws = getOrCreateWorkspace(projectId);
-  if (ws.lockedBy && ws.lockedBy !== socketId) {
-    return { lockedBy: ws.lockedBy, acquired: false };
+  const current = ws.lockHolders.get(chatId);
+  if (current && current !== socketId) {
+    return { lockedBy: current, acquired: false };
   }
-  ws.lockedBy = socketId;
-  emitState(ws);
+  ws.lockHolders.set(chatId, socketId);
+  emitChatState(ws, chatId);
   return { lockedBy: socketId, acquired: true };
 }
 
-export function releaseLock(projectId: string, socketId: string): void {
+export function releaseChatLock(projectId: string, chatId: string, socketId: string): void {
   const ws = getOrCreateWorkspace(projectId);
-  if (ws.lockedBy === socketId) {
-    ws.lockedBy = null;
-    emitState(ws);
+  if (ws.lockHolders.get(chatId) === socketId) {
+    ws.lockHolders.delete(chatId);
+    emitChatState(ws, chatId);
   }
 }
 
@@ -1166,8 +1178,8 @@ export async function resetProjectBrowser(projectId: string): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
   // Cancel any queued execs by clearing the queue (active one finishes naturally).
   ws.queue = [];
-  ws.paused = false;
-  ws.lockedBy = null;
+  ws.pausedChats.clear();
+  ws.lockHolders.clear();
   ws.takeovers.clear();
 
   if (ws.contextPromise) {
@@ -1231,12 +1243,15 @@ export async function snapshotForChat(projectId: string, chatId: string): Promis
   return result.stdout || '(empty snapshot)';
 }
 
-/** Disconnect-cleanup: drop input lock if it was held by this socket. */
+/** Disconnect-cleanup: release every per-chat lock held by this socket so a
+ *  disconnected viewer doesn't leave another client unable to take over. */
 export function onSocketDisconnect(socketId: string): void {
   for (const ws of workspaces.values()) {
-    if (ws.lockedBy === socketId) {
-      ws.lockedBy = null;
-      emitState(ws);
+    for (const [chatId, holder] of ws.lockHolders) {
+      if (holder === socketId) {
+        ws.lockHolders.delete(chatId);
+        emitChatState(ws, chatId);
+      }
     }
   }
 }
@@ -1264,10 +1279,10 @@ export default {
   execForChat,
   refreshFrameForChat,
   refreshFrameForTab,
-  setPaused,
-  isPaused,
-  acquireLock,
-  releaseLock,
+  setChatPaused,
+  isChatPaused,
+  acquireChatLock,
+  releaseChatLock,
   dispatchInput,
   dispatchTabInput,
   beginTakeover,
