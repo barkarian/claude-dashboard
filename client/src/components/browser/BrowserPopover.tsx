@@ -40,12 +40,6 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
   const [tabs, setTabs] = useState<TabRow[]>([]);
   const [openedTab, setOpenedTab] = useState<TabRow | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  // Timestamp when the dialog was last opened. On mobile webviews the touch
-  // that opens the dialog can register as an "outside touch" on the freshly-
-  // mounted Radix overlay and close it instantly — Radix's
-  // onPointerDownOutside / onInteractOutside fires for that stale event. We
-  // suppress closure within a short window after opening.
-  const dialogOpenedAt = useRef<number>(0);
   // Per-tab live frame data URL for the thumbnail strip.
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [busyClose, setBusyClose] = useState<Record<string, boolean>>({});
@@ -107,7 +101,6 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
           currentUrl: resp.url || null, viewportMode: 'desktop',
           driving: false, alive: true,
         };
-        dialogOpenedAt.current = Date.now();
         setOpenedTab(t);
       }
     });
@@ -150,7 +143,7 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
               {tabs.map((t) => (
                 <button
                   key={t.tabId}
-                  onClick={() => { dialogOpenedAt.current = Date.now(); setOpenedTab(t); }}
+                  onClick={() => setOpenedTab(t)}
                   className="w-full px-3 py-2 border-b border-border/50 last:border-b-0 flex items-center gap-2 hover:bg-bg-hover text-left"
                 >
                   <span className="relative inline-block h-2 w-2 flex-shrink-0" aria-hidden>
@@ -197,25 +190,19 @@ export default function BrowserPopover({ projectId, open, onClose }: BrowserPopo
       <Dialog
         open={!!openedTab}
         onOpenChange={(o) => {
-          // NOTE: Radix only calls onOpenChange(true) when it opens itself
-          // (via Trigger). For externally controlled `open`, opening doesn't
-          // fire this — so we set dialogOpenedAt at the click site instead.
           if (!o) setOpenedTab(null);
         }}
       >
         <DialogContent
           className="max-w-5xl"
-          // Block the "stale touch" close on mobile: the touchend that
-          // opened the dialog can hit the overlay the instant it mounts,
-          // which Radix interprets as outside-click and closes the dialog
-          // again — visible as a flicker. Reject any outside event within
-          // 400 ms of open.
-          onPointerDownOutside={(e) => {
-            if (Date.now() - dialogOpenedAt.current < 400) e.preventDefault();
-          }}
-          onInteractOutside={(e) => {
-            if (Date.now() - dialogOpenedAt.current < 400) e.preventDefault();
-          }}
+          // Mobile WebView quirk: the touch that opens the dialog can register
+          // as an "outside" pointerdown the instant the overlay mounts under
+          // the finger, which closes the dialog mid-open (visible as a
+          // flicker). Hard-disable outside dismissal — the user closes via the
+          // X button (rendered by DialogContent) or the back gesture.
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader>
             <DialogTitle>{openedTab?.label || 'Browser'}</DialogTitle>
