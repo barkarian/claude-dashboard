@@ -98,6 +98,14 @@ interface PageEntry {
    *  Used to keep the popover's "driving" indicator green between
    *  commands even when the page is static and emits no frames. */
   lastCommandAt: number;
+  /** Owning chat for chat-bound tabs; undefined for manual tabs. A chat
+   *  can own multiple entries (multi-tab-per-chat). */
+  chatId?: string;
+  /** Order within the chat's tabs (1-based). Used to build the tabId and
+   *  to display "Tab #N" in the popover. Undefined for manual tabs. */
+  sequence?: number;
+  /** Optional human-readable label (manual tabs only). */
+  label?: string;
 }
 
 interface WorkspaceState {
@@ -120,10 +128,10 @@ interface WorkspaceState {
   tabs: Map<string, PageEntry>;
   /** Per-chat active takeover id (set on pause, cleared on resume). */
   takeovers: Map<string, string>;
-  /** Tab whose CLI command is currently mid-flight. The page-watcher uses
-   *  this to attribute newly-created daemon pages to the right tab —
+  /** Chat whose CLI command is currently mid-flight. The page-watcher uses
+   *  this to attribute newly-created daemon pages to the right chat —
    *  otherwise concurrent chats would race for the same new page. */
-  activeTabId: string | null;
+  activeChatId: string | null;
   /** Single-flight queue: only one playwright-cli child runs at a time per workspace. */
   queue: Array<() => void>;
   active: boolean;
@@ -180,7 +188,7 @@ function getOrCreateWorkspace(projectId: string): WorkspaceState {
       lockHolders: new Map<string, string>(),
       tabs: new Map(),
       takeovers: new Map(),
-      activeTabId: null,
+      activeChatId: null,
       queue: [],
       active: false,
     };
@@ -309,51 +317,40 @@ export function isManualTab(tabId: string): boolean {
   return tabId.startsWith('manual_');
 }
 
-async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry> {
-  let entry = ws.tabs.get(tabId);
-  if (entry && !entry.page.isClosed()) return entry;
-
+/** Wire up CDP screencast + URL/close event handlers for a Page that's
+ *  now owned by `tabId`. Used both by initial-tab creation and by the
+ *  page-watcher when the daemon spawns additional tabs. */
+async function attachTabEntry(
+  ws: WorkspaceState,
+  tabId: string,
+  page: Page,
+  meta: { chatId?: string; sequence?: number; label?: string; viewport?: BrowserViewportMode },
+): Promise<PageEntry> {
   const context = await ensureContext(ws);
-  // Each tab owns its own Page — never adopt a page that another tab in
-  // ws.tabs already references, otherwise both tabs end up screencasting
-  // the same Page and mirror each other.
-  const ownedPages = new Set<unknown>();
-  for (const e of ws.tabs.values()) ownedPages.add(e.page);
-  const orphanPages = context.pages().filter(p => !p.isClosed() && !ownedPages.has(p));
-  // If there's exactly one orphan page (e.g. the daemon just created one
-  // in response to our `open` and we haven't claimed it yet), adopt it
-  // for this tab. Otherwise create a fresh page so each chat tab gets
-  // its own Chromium tab.
-  const page = orphanPages.length === 1
-    ? orphanPages[0]
-    : await context.newPage();
-  // Per-chat tabs persist their viewport in the DB; the project-level tab
-  // defaults to desktop and isn't tracked there.
-  const viewport: BrowserViewportMode = isManualTab(tabId)
-    ? (projectManager.listManualTabs(ws.projectId).find(t => t.id === tabId)?.viewportMode) || 'desktop'
-    : (projectManager.listBrowserTabsByProject(ws.projectId).find(t => t.chatId === tabId)?.viewportMode) || 'desktop';
+  const viewport = meta.viewport ?? 'desktop';
   await applyViewport(page, viewport);
 
   const cdp = await context.newCDPSession(page);
-  entry = { page, cdp, viewport, lastFrameAt: 0, lastCommandAt: 0 };
+  const entry: PageEntry = {
+    page, cdp, viewport,
+    lastFrameAt: 0,
+    lastCommandAt: 0,
+    chatId: meta.chatId,
+    sequence: meta.sequence,
+    label: meta.label,
+  };
   ws.tabs.set(tabId, entry);
 
-  // Start a CDP screencast — frames arrive as Page.screencastFrame events,
-  // each must be acked or Chromium stops sending more.
   await cdp.send('Page.startScreencast', {
     format: 'jpeg',
     quality: FRAME_QUALITY,
     everyNthFrame: 1,
   });
   cdp.on('Page.screencastFrame', (params: any) => {
-    // Throttle: enforce a server-side floor on broadcast rate.
     const now = Date.now();
     const tab = ws.tabs.get(tabId);
     if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
       tab.lastFrameAt = now;
-      // Single unified room per project — every browser viewer in the project
-      // (popover, tab dialogs, mobile peer clients) lives in this room and
-      // routes frames by tabId.
       io?.to(`project:${ws.projectId}`).emit('project:browser-frame', {
         projectId: ws.projectId,
         tabId,
@@ -364,22 +361,12 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
         viewportMode: tab.viewport,
       });
     }
-    // Ack regardless of broadcast — required by CDP protocol.
     cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
   });
 
-  // Track URL changes — persist on the right table per kind, then push a
-  // unified url event to the project room so the popover updates labels.
   page.on('framenavigated', async (frame) => {
     if (frame === page.mainFrame()) {
       const url = frame.url();
-      try {
-        if (isManualTab(tabId)) {
-          projectManager.updateManualTab(tabId, { currentUrl: url });
-        } else {
-          projectManager.updateBrowserTab(tabId, { currentUrl: url });
-        }
-      } catch { /* ignore */ }
       io?.to(`project:${ws.projectId}`).emit('project:browser-url', {
         projectId: ws.projectId,
         tabId,
@@ -390,9 +377,54 @@ async function ensurePage(ws: WorkspaceState, tabId: string): Promise<PageEntry>
 
   page.on('close', () => {
     ws.tabs.delete(tabId);
+    io?.to(`project:${ws.projectId}`).emit('project:browser-tab-closed', {
+      projectId: ws.projectId,
+      tabId,
+    });
   });
 
   return entry;
+}
+
+/** Highest existing sequence number for a chat's tabs. Returns 0 if none. */
+function maxSequenceForChat(ws: WorkspaceState, chatId: string): number {
+  let max = 0;
+  for (const e of ws.tabs.values()) {
+    if (e.chatId === chatId && (e.sequence ?? 0) > max) max = e.sequence ?? 0;
+  }
+  return max;
+}
+
+/** Ensure a chat has at least one tab. Idempotent: returns the chat's
+ *  most recent tab if any exist. Adopts orphan pages from the context
+ *  if present (the daemon may have created one before we got here),
+ *  otherwise creates a fresh blank page. */
+async function ensureChatHasFirstTab(ws: WorkspaceState, chatId: string): Promise<PageEntry> {
+  // Already has a live tab?
+  for (const e of ws.tabs.values()) {
+    if (e.chatId === chatId && !e.page.isClosed()) return e;
+  }
+  const context = await ensureContext(ws);
+  // Adopt orphan page if any (daemon created one before we attached).
+  const owned = new Set<unknown>();
+  for (const e of ws.tabs.values()) owned.add(e.page);
+  const orphans = context.pages().filter(p => !p.isClosed() && !owned.has(p));
+  const page = orphans.length === 1 ? orphans[0] : await context.newPage();
+  const sequence = 1;
+  const tabId = `chat_${chatId}_${sequence}`;
+  return attachTabEntry(ws, tabId, page, { chatId, sequence });
+}
+
+/** Ensure a manual (user-created) tab is wired up. Idempotent. */
+async function ensureManualTab(ws: WorkspaceState, tabId: string, label?: string): Promise<PageEntry> {
+  const existing = ws.tabs.get(tabId);
+  if (existing && !existing.page.isClosed()) return existing;
+  const context = await ensureContext(ws);
+  const owned = new Set<unknown>();
+  for (const e of ws.tabs.values()) owned.add(e.page);
+  const orphans = context.pages().filter(p => !p.isClosed() && !owned.has(p));
+  const page = orphans.length === 1 ? orphans[0] : await context.newPage();
+  return attachTabEntry(ws, tabId, page, { label });
 }
 
 async function applyViewport(page: Page, mode: BrowserViewportMode): Promise<void> {
@@ -412,10 +444,18 @@ export async function setViewportForChat(
   mode: BrowserViewportMode,
 ): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
-  const entry = await ensurePage(ws, chatId);
-  await applyViewport(entry.page, mode);
-  entry.viewport = mode;
-  try { projectManager.updateBrowserTab(chatId, { viewportMode: mode }); } catch { /* ignore */ }
+  // Apply viewport to EVERY live tab owned by this chat — the agent's
+  // command targets the daemon's "current" tab which we can't introspect
+  // cheaply, so we set it on all of the chat's tabs.
+  const entries = [...ws.tabs.values()].filter(e => e.chatId === chatId && !e.page.isClosed());
+  if (entries.length === 0) {
+    const first = await ensureChatHasFirstTab(ws, chatId);
+    entries.push(first);
+  }
+  for (const e of entries) {
+    await applyViewport(e.page, mode);
+    e.viewport = mode;
+  }
 }
 
 // --- CLI exec (agent commands) -------------------------------------------
@@ -511,62 +551,54 @@ function startContextPageWatcher(ws: WorkspaceState): void {
     if (!context) return;
     context.on('page', async (page) => {
       console.log(`[playwright:${ws.projectId}] new page in context`);
-      // Attribute the new page to the tab whose CLI is currently running.
-      // The queue in execOnWorkspace / execForChat ensures only one tab is
-      // active at a time, so the activeTabId is unambiguous.
-      const targetTabId = ws.activeTabId;
-      if (!targetTabId) {
-        // No CLI in-flight — leave the page floating; ensurePage will adopt
-        // it as an orphan on its next call if needed.
+      const activeChat = ws.activeChatId;
+      if (!activeChat) {
+        // No CLI in-flight — leave the page floating; ensureManualTab will
+        // adopt it as an orphan on its next call if needed.
         return;
       }
-      const entry = ws.tabs.get(targetTabId);
-      if (!entry) return;
-      // Only retarget if our existing page is blank/dead. If we already
-      // own a non-blank page for this tab, the daemon's new page is a
-      // duplicate — don't switch.
-      if (entry.page.isClosed() || entry.page.url() === 'about:blank') {
-        console.log(`[playwright:${ws.projectId}] retargeting tab ${targetTabId} to new page`);
-        await retargetTab(ws, targetTabId, page);
+      // Find this chat's existing tabs.
+      const chatEntries = [...ws.tabs.entries()].filter(([, e]) => e.chatId === activeChat);
+      // If the chat has a placeholder (blank or dead) tab, retarget it —
+      // this is the initial-open case where we pre-created a blank page
+      // and the daemon now has the real one.
+      const placeholder = chatEntries.find(([, e]) => e.page.isClosed() || e.page.url() === 'about:blank');
+      if (placeholder) {
+        console.log(`[playwright:${ws.projectId}] retargeting ${placeholder[0]} to new page`);
+        await retargetTab(ws, placeholder[0], page);
+        return;
       }
+      // Otherwise this is a tab-new (or `open` while chat already has live
+      // tabs) — add a fresh tab entry for the chat.
+      const sequence = maxSequenceForChat(ws, activeChat) + 1;
+      const tabId = `chat_${activeChat}_${sequence}`;
+      console.log(`[playwright:${ws.projectId}] adding tab ${tabId}`);
+      await attachTabEntry(ws, tabId, page, { chatId: activeChat, sequence });
+      io?.to(`project:${ws.projectId}`).emit('project:browser-tab-created', {
+        projectId: ws.projectId,
+        tabId,
+        label: null,
+        url: page.url(),
+      });
     });
   }).catch(() => { /* ignore */ });
 }
 
+/** Replace the Page object for an existing tab. Used by the page-watcher
+ *  when a chat's initial placeholder tab needs to be swapped for the
+ *  daemon's real page on the first `open`. */
 async function retargetTab(ws: WorkspaceState, tabId: string, newPage: Page): Promise<void> {
   const old = ws.tabs.get(tabId);
-  // Stop the old screencast first (best-effort).
   if (old) {
     try { await old.cdp.detach(); } catch { /* ignore */ }
   }
-  const context = await ensureContext(ws);
-  const cdp = await context.newCDPSession(newPage);
-  const viewport = old?.viewport || 'desktop';
-  const entry: PageEntry = { page: newPage, cdp, viewport, lastFrameAt: 0, lastCommandAt: 0 };
-  ws.tabs.set(tabId, entry);
-  await cdp.send('Page.startScreencast', {
-    format: 'jpeg',
-    quality: FRAME_QUALITY,
-    everyNthFrame: 1,
+  ws.tabs.delete(tabId);
+  await attachTabEntry(ws, tabId, newPage, {
+    chatId: old?.chatId,
+    sequence: old?.sequence,
+    label: old?.label,
+    viewport: old?.viewport,
   });
-  cdp.on('Page.screencastFrame', (params: any) => {
-    const now = Date.now();
-    const tab = ws.tabs.get(tabId);
-    if (tab && now - tab.lastFrameAt >= FRAME_INTERVAL_MS) {
-      tab.lastFrameAt = now;
-      io?.to(`project:${ws.projectId}`).emit('project:browser-frame', {
-        projectId: ws.projectId,
-        tabId,
-        frame: params.data,
-        width: params.metadata?.deviceWidth || VIEWPORTS[tab.viewport].width,
-        height: params.metadata?.deviceHeight || VIEWPORTS[tab.viewport].height,
-        ts: now,
-        viewportMode: tab.viewport,
-      });
-    }
-    cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
-  });
-  newPage.on('close', () => { ws.tabs.delete(tabId); });
 }
 
 async function execOnWorkspace(
@@ -600,19 +632,14 @@ async function execOnWorkspace(
       return;
     }
 
-    if (msg.chatId) {
-      projectManager.getOrCreateBrowserTab(msg.chatId, ws.projectId);
-    }
-
-    // Make sure we have a Page (and screencast) for this chat before forwarding
-    // commands — the CLI will operate on whatever tab is active in CDP, so the
-    // page we created becomes that tab.
+    // Make sure the chat has at least one tab; the page-watcher adds more
+    // as the daemon does `tab-new`.
     let cdpEndpoint: string;
     try {
-      await ensurePage(ws, msg.chatId);
+      if (msg.chatId) await ensureChatHasFirstTab(ws, msg.chatId);
       cdpEndpoint = await resolveCdpEndpoint(ws);
     } catch (err: any) {
-      conn.write(JSON.stringify({ type: 'stderr', data: `claw-browser: cannot start Chromium: ${err?.message || err}\n` }) + '\n');
+      conn.write(JSON.stringify({ type: 'stderr', data: `playwright-cli: cannot start Chromium: ${err?.message || err}\n` }) + '\n');
       conn.write(JSON.stringify({ type: 'exit', code: 1 }) + '\n');
       return;
     }
@@ -620,17 +647,21 @@ async function execOnWorkspace(
     const env = cliEnvFor(ws, cdpEndpoint);
     const wantsPersistent = msg.argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...msg.argv];
-    ws.activeTabId = msg.chatId;
-    const entryForStamp = ws.tabs.get(msg.chatId);
-    if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
+    ws.activeChatId = msg.chatId;
+    // Stamp every live tab of this chat so the "driving" indicator stays
+    // green during command bursts — we don't know which specific tab the
+    // daemon will target without round-tripping `tab-list`.
+    const now = Date.now();
+    for (const e of ws.tabs.values()) {
+      if (e.chatId === msg.chatId) e.lastCommandAt = now;
+    }
     ensurePlaywrightCliGitignore(msg.cwd);
     let code: number;
     try {
-      // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
       await sweepStaleDaemonSockets(ws.cliSession);
       code = await runCli(cliArgs, env, msg.cwd, conn);
     } finally {
-      ws.activeTabId = null;
+      ws.activeChatId = null;
     }
     conn.write(JSON.stringify({ type: 'exit', code }) + '\n');
   } finally {
@@ -668,18 +699,18 @@ export async function execForChat(
       return { stdout: `viewport set to ${argv[1]}\n`, stderr: '', code: 0 };
     }
 
-    projectManager.getOrCreateBrowserTab(chatId, projectId);
-    await ensurePage(ws, chatId);
+    await ensureChatHasFirstTab(ws, chatId);
     const cdpEndpoint = await resolveCdpEndpoint(ws);
 
     const env = cliEnvFor(ws, cdpEndpoint);
     const wantsPersistent = argv[0] === 'open';
     const cliArgs = ['-s', ws.cliSession, ...(wantsPersistent ? ['--persistent'] : []), ...argv];
-    ws.activeTabId = chatId;
-    const entryForStamp = ws.tabs.get(chatId);
-    if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
+    ws.activeChatId = chatId;
+    const now = Date.now();
+    for (const e of ws.tabs.values()) {
+      if (e.chatId === chatId) e.lastCommandAt = now;
+    }
     ensurePlaywrightCliGitignore(cwd);
-    // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
     await sweepStaleDaemonSockets(ws.cliSession);
     try {
       return await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
@@ -700,7 +731,7 @@ export async function execForChat(
         child.on('exit', (code) => resolve({ stdout, stderr, code: code ?? 0 }));
       });
     } finally {
-      ws.activeTabId = null;
+      ws.activeChatId = null;
     }
   } finally {
     ws.active = false;
@@ -711,17 +742,27 @@ export async function execForChat(
 
 // --- Pause + lock + state broadcast --------------------------------------
 
-/** Push the takeover state for a specific chat to every connected client in
- *  the project. Broadcasts on `project:${projectId}` (the unified browser
- *  room) so the BrowserTabViewer can update its banner + button regardless
- *  of which client triggered the change. */
-function emitChatState(ws: WorkspaceState, chatId: string): void {
+/** Resolve the chat owner for a given tab id. Returns null for manual tabs
+ *  (no owner) or unknown tabs. Used by socket handlers to derive the chat
+ *  scope from a tabId the viewer holds. */
+export function chatOwnerOfTab(projectId: string, tabId: string): string | null {
+  const ws = workspaces.get(projectId);
+  return ws?.tabs.get(tabId)?.chatId ?? null;
+}
+
+/** Push the state for a specific tab to every project viewer. Carries both
+ *  tabId (the lock/UI scope) and chatId (the pause scope, when applicable).
+ *  Broadcasts on `project:${projectId}` — the unified browser room. */
+function emitTabState(ws: WorkspaceState, tabId: string): void {
   if (!io) return;
+  const entry = ws.tabs.get(tabId);
+  const chatId = entry?.chatId;
   io.to(`project:${ws.projectId}`).emit('chat:browser-state', {
     projectId: ws.projectId,
-    chatId,
-    paused: ws.pausedChats.has(chatId),
-    lockedBy: ws.lockHolders.get(chatId) ?? null,
+    tabId,
+    chatId: chatId ?? null,
+    paused: chatId ? ws.pausedChats.has(chatId) : false,
+    lockedBy: ws.lockHolders.get(tabId) ?? null,
   });
 }
 
@@ -730,30 +771,35 @@ export function setChatPaused(projectId: string, chatId: string, paused: boolean
   const was = ws.pausedChats.has(chatId);
   if (was === paused) return;
   if (paused) ws.pausedChats.add(chatId); else ws.pausedChats.delete(chatId);
-  emitChatState(ws, chatId);
+  // Broadcast state for every tab of this chat so each open viewer
+  // updates its banner.
+  for (const [tabId, entry] of ws.tabs) {
+    if (entry.chatId === chatId) emitTabState(ws, tabId);
+  }
 }
 
 export function isChatPaused(projectId: string, chatId: string): boolean {
   return !!workspaces.get(projectId)?.pausedChats.has(chatId);
 }
 
-/** Try to acquire the input lock for a chat's tab. Returns the holder after. */
-export function acquireChatLock(projectId: string, chatId: string, socketId: string): { lockedBy: string | null; acquired: boolean } {
+/** Per-tab input lock. Keyed by tabId (chat-bound or manual), independent
+ *  of chat-level pause. */
+export function acquireChatLock(projectId: string, tabId: string, socketId: string): { lockedBy: string | null; acquired: boolean } {
   const ws = getOrCreateWorkspace(projectId);
-  const current = ws.lockHolders.get(chatId);
+  const current = ws.lockHolders.get(tabId);
   if (current && current !== socketId) {
     return { lockedBy: current, acquired: false };
   }
-  ws.lockHolders.set(chatId, socketId);
-  emitChatState(ws, chatId);
+  ws.lockHolders.set(tabId, socketId);
+  emitTabState(ws, tabId);
   return { lockedBy: socketId, acquired: true };
 }
 
-export function releaseChatLock(projectId: string, chatId: string, socketId: string): void {
+export function releaseChatLock(projectId: string, tabId: string, socketId: string): void {
   const ws = getOrCreateWorkspace(projectId);
-  if (ws.lockHolders.get(chatId) === socketId) {
-    ws.lockHolders.delete(chatId);
-    emitChatState(ws, chatId);
+  if (ws.lockHolders.get(tabId) === socketId) {
+    ws.lockHolders.delete(tabId);
+    emitTabState(ws, tabId);
   }
 }
 
@@ -863,80 +909,6 @@ function describeInput(ev: {
   }
 }
 
-/** Dispatch a user input event to the chat's tab. Caller must hold the lock. */
-export async function dispatchInput(
-  projectId: string,
-  chatId: string,
-  ev: {
-    kind: 'mouse-move' | 'mouse-down' | 'mouse-up' | 'mouse-click' | 'mouse-wheel' | 'key-down' | 'key-up' | 'type';
-    x?: number;
-    y?: number;
-    button?: 'left' | 'middle' | 'right';
-    deltaX?: number;
-    deltaY?: number;
-    key?: string;
-    text?: string;
-  },
-): Promise<void> {
-  const ws = getOrCreateWorkspace(projectId);
-  const entry = ws.tabs.get(chatId);
-  if (!entry) return; // No tab yet — nothing to dispatch to.
-  const { page } = entry;
-  switch (ev.kind) {
-    case 'mouse-move':
-      if (typeof ev.x === 'number' && typeof ev.y === 'number') {
-        await page.mouse.move(ev.x, ev.y);
-      }
-      break;
-    case 'mouse-down':
-      if (typeof ev.x === 'number' && typeof ev.y === 'number') {
-        await page.mouse.move(ev.x, ev.y);
-      }
-      await page.mouse.down({ button: ev.button || 'left' });
-      break;
-    case 'mouse-up':
-      if (typeof ev.x === 'number' && typeof ev.y === 'number') {
-        await page.mouse.move(ev.x, ev.y);
-      }
-      await page.mouse.up({ button: ev.button || 'left' });
-      break;
-    case 'mouse-click':
-      if (typeof ev.x === 'number' && typeof ev.y === 'number') {
-        await page.mouse.click(ev.x, ev.y, { button: ev.button || 'left' });
-      }
-      break;
-    case 'mouse-wheel':
-      await page.mouse.wheel(ev.deltaX || 0, ev.deltaY || 0);
-      break;
-    case 'key-down':
-      if (ev.key) await page.keyboard.down(ev.key);
-      break;
-    case 'key-up':
-      if (ev.key) await page.keyboard.up(ev.key);
-      break;
-    case 'type':
-      if (ev.text) await page.keyboard.type(ev.text);
-      break;
-  }
-
-  // If the workspace is paused (i.e. the user is in takeover), append this
-  // event to the takeover log so we can summarize on resume. Skip noisy
-  // events whose description is empty (mouse-move, raw down/up, key-up).
-  const takeoverId = ws.takeovers.get(chatId);
-  if (takeoverId) {
-    let label = '';
-    if (ev.kind === 'mouse-click' && typeof ev.x === 'number' && typeof ev.y === 'number') {
-      label = await describeElementAt(page, ev.x, ev.y);
-    }
-    const desc = describeInput(ev, label);
-    if (desc) {
-      try {
-        projectManager.recordTakeoverEvent(chatId, takeoverId, ev.kind, desc);
-      } catch { /* ignore */ }
-    }
-  }
-}
-
 /** Begin a takeover for a chat — call when the user clicks Pause. */
 export function beginTakeover(projectId: string, chatId: string): string {
   const ws = getOrCreateWorkspace(projectId);
@@ -982,52 +954,52 @@ export function endTakeover(projectId: string, chatId: string): { takeoverId: st
 }
 
 /**
- * Open or navigate any tab (manual or chat-bound). Lazily launches Chromium.
- * Returns the current URL after the operation completes.
+ * Open or navigate a manual (user-created) tab. Lazily launches Chromium.
+ * Chat-bound tabs are managed by the agent via playwright-cli; this path
+ * is only for tabs the user creates from the popover's "+ Add tab".
  */
 export async function openTab(projectId: string, tabId: string, url?: string): Promise<{ url: string }> {
   if (!isBrowserEnabled) throw new Error('Browser disabled in this environment');
+  if (!isManualTab(tabId)) throw new Error('openTab only supports manual tabs');
   const ws = getOrCreateWorkspace(projectId);
-  ws.activeTabId = tabId;
-  try {
-    const entry = await ensurePage(ws, tabId);
-    if (url) {
-      try {
-        await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
-      } catch (err: any) {
-        console.warn(`[playwright:${projectId}] tab ${tabId} goto failed: ${err?.message || err}`);
-      }
+  const entry = await ensureManualTab(ws, tabId);
+  if (url) {
+    try {
+      await entry.page.goto(url, { waitUntil: 'domcontentloaded' });
+    } catch (err: any) {
+      console.warn(`[playwright:${projectId}] tab ${tabId} goto failed: ${err?.message || err}`);
     }
-    return { url: entry.page.url() };
-  } finally {
-    ws.activeTabId = null;
   }
+  return { url: entry.page.url() };
 }
 
-/** Set viewport mode for any tab. */
+/** Set viewport mode for any specific tab (manual or chat-bound). */
 export async function setTabViewport(
   projectId: string,
   tabId: string,
   mode: BrowserViewportMode,
 ): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
-  const entry = await ensurePage(ws, tabId);
+  const entry = ws.tabs.get(tabId);
+  if (!entry) return;
   await applyViewport(entry.page, mode);
   entry.viewport = mode;
-  try {
-    if (isManualTab(tabId)) {
-      projectManager.updateManualTab(tabId, { viewportMode: mode });
-    } else {
-      projectManager.updateBrowserTab(tabId, { viewportMode: mode });
-    }
-  } catch { /* ignore */ }
 }
 
 /** Dispatch user input to any tab. No lock — only one user driving manually anyway. */
 export async function dispatchTabInput(
   projectId: string,
   tabId: string,
-  ev: Parameters<typeof dispatchInput>[2],
+  ev: {
+    kind: 'mouse-move' | 'mouse-down' | 'mouse-up' | 'mouse-click' | 'mouse-wheel' | 'key-down' | 'key-up' | 'type';
+    x?: number;
+    y?: number;
+    button?: 'left' | 'middle' | 'right';
+    deltaX?: number;
+    deltaY?: number;
+    key?: string;
+    text?: string;
+  },
 ): Promise<void> {
   const ws = getOrCreateWorkspace(projectId);
   const entry = ws.tabs.get(tabId);
@@ -1063,6 +1035,25 @@ export async function dispatchTabInput(
       if (ev.text) await page.keyboard.type(ev.text);
       break;
   }
+
+  // Takeover logging — if this tab belongs to a chat that's currently in
+  // takeover, record the user's action so the resume-summary can describe
+  // it. Skipped for noisy events (mouse-move / raw mouse-down/up / key-up).
+  if (entry.chatId) {
+    const takeoverId = ws.takeovers.get(entry.chatId);
+    if (takeoverId) {
+      let label = '';
+      if (ev.kind === 'mouse-click' && typeof ev.x === 'number' && typeof ev.y === 'number') {
+        label = await describeElementAt(page, ev.x, ev.y);
+      }
+      const desc = describeInput(ev, label);
+      if (desc) {
+        try {
+          projectManager.recordTakeoverEvent(entry.chatId, takeoverId, ev.kind, desc);
+        } catch { /* ignore */ }
+      }
+    }
+  }
 }
 
 /** Capture and broadcast a single frame for the given tab on demand. */
@@ -1096,27 +1087,23 @@ export async function closeTab(projectId: string, tabId: string): Promise<void> 
     try { await entry.page.close(); } catch { /* ignore */ }
     ws.tabs.delete(tabId);
   }
-  // Clean up the persistent row so the tab doesn't reappear in the popover
-  // — it's gone, not "closed". A new one will be created lazily next time.
-  try {
-    if (isManualTab(tabId)) {
-      projectManager.deleteManualTab(tabId);
-    } else {
-      projectManager.deleteBrowserTab(tabId);
-    }
-  } catch { /* ignore */ }
+  // Also release any per-tab lock so a stuck disconnect doesn't leave a
+  // ghost holder.
+  ws.lockHolders.delete(tabId);
   io?.to(`project:${projectId}`).emit('project:browser-tab-closed', { projectId, tabId });
 }
 
 /**
- * Aggregated tab list for a project — chat-bound tabs from chat_browser_tabs
- * plus manual tabs from manual_browser_tabs. Each entry is enriched with
- * liveness + driving from in-memory state.
+ * Aggregated tab list for a project. ws.tabs is the single source of truth
+ * now — tabs are pure runtime state, never persisted in the DB. The popover
+ * groups by chat using the kind + chatId fields.
  */
 export function listTabs(projectId: string): Array<{
   tabId: string;
   kind: 'chat' | 'manual';
   chatId?: string;
+  /** Sequence within the owning chat (1, 2, …). Used to render "Tab #N". */
+  sequence?: number;
   label: string;
   currentUrl: string | null;
   viewportMode: BrowserViewportMode;
@@ -1125,44 +1112,48 @@ export function listTabs(projectId: string): Array<{
 }> {
   const ws = getOrCreateWorkspace(projectId);
   const now = Date.now();
+  const drivingFor = (entry: PageEntry) =>
+    now - entry.lastFrameAt < 1500 || now - entry.lastCommandAt < 6000;
+
   const out: Array<any> = [];
-  // Use the longer of {recent frame, recent command} as the "driving"
-  // signal. Frames cover live visual changes; command activity covers
-  // periods where the agent is interacting but the page is static and
-  // emits no frames (lots of clicks/typing on a quiet page).
-  const drivingFor = (entry?: PageEntry) => {
-    if (!entry) return false;
-    return now - entry.lastFrameAt < 1500 || now - entry.lastCommandAt < 6000;
-  };
-  // Chat-bound tabs.
-  for (const t of projectManager.listBrowserTabsByProject(projectId)) {
-    const entry = ws.tabs.get(t.chatId);
-    const chat = projectManager.getChat(t.chatId);
-    out.push({
-      tabId: t.chatId,
-      kind: 'chat' as const,
-      chatId: t.chatId,
-      label: chat?.label || 'Chat',
-      currentUrl: t.currentUrl,
-      viewportMode: t.viewportMode,
-      driving: drivingFor(entry),
-      alive: !!entry && !entry.page.isClosed(),
-    });
-  }
-  // Manual tabs.
-  for (const t of projectManager.listManualTabs(projectId)) {
-    const entry = ws.tabs.get(t.id);
-    out.push({
-      tabId: t.id,
-      kind: 'manual' as const,
-      label: t.label || (t.currentUrl ? hostFromUrl(t.currentUrl) : 'New tab'),
-      currentUrl: t.currentUrl,
-      viewportMode: t.viewportMode,
-      driving: drivingFor(entry),
-      alive: !!entry && !entry.page.isClosed(),
-    });
+  for (const [tabId, entry] of ws.tabs) {
+    if (entry.chatId) {
+      const chat = projectManager.getChat(entry.chatId);
+      const chatLabel = chat?.label || 'Chat';
+      const seqSuffix = (entry.sequence ?? 0) > 1 ? ` · tab ${entry.sequence}` : '';
+      out.push({
+        tabId,
+        kind: 'chat' as const,
+        chatId: entry.chatId,
+        sequence: entry.sequence,
+        label: chatLabel + seqSuffix,
+        currentUrl: safeUrl(entry.page),
+        viewportMode: entry.viewport,
+        driving: drivingFor(entry),
+        alive: !entry.page.isClosed(),
+      });
+    } else {
+      const url = safeUrl(entry.page);
+      out.push({
+        tabId,
+        kind: 'manual' as const,
+        label: entry.label || (url && url !== 'about:blank' ? hostFromUrl(url) : 'New tab'),
+        currentUrl: url,
+        viewportMode: entry.viewport,
+        driving: drivingFor(entry),
+        alive: !entry.page.isClosed(),
+      });
+    }
   }
   return out;
+}
+
+function safeUrl(page: Page): string | null {
+  try {
+    if (page.isClosed()) return null;
+    const u = page.url();
+    return u || null;
+  } catch { return null; }
 }
 
 function hostFromUrl(u: string): string {
@@ -1243,14 +1234,14 @@ export async function snapshotForChat(projectId: string, chatId: string): Promis
   return result.stdout || '(empty snapshot)';
 }
 
-/** Disconnect-cleanup: release every per-chat lock held by this socket so a
+/** Disconnect-cleanup: release every per-tab lock held by this socket so a
  *  disconnected viewer doesn't leave another client unable to take over. */
 export function onSocketDisconnect(socketId: string): void {
   for (const ws of workspaces.values()) {
-    for (const [chatId, holder] of ws.lockHolders) {
+    for (const [tabId, holder] of ws.lockHolders) {
       if (holder === socketId) {
-        ws.lockHolders.delete(chatId);
-        emitChatState(ws, chatId);
+        ws.lockHolders.delete(tabId);
+        emitTabState(ws, tabId);
       }
     }
   }
@@ -1283,7 +1274,7 @@ export default {
   isChatPaused,
   acquireChatLock,
   releaseChatLock,
-  dispatchInput,
+  chatOwnerOfTab,
   dispatchTabInput,
   beginTakeover,
   endTakeover,

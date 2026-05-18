@@ -8,7 +8,6 @@ import sdkSessionManager from '../services/sdkSessionManager.ts';
 import type {
   BrowserPauseRequestPayload,
   BrowserLockRequestPayload,
-  BrowserInputPayload,
   BrowserViewportRequestPayload,
 } from '../../shared/types/socket-events.ts';
 
@@ -24,25 +23,30 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   // (The chat:tool-arm / chat:tool-disarm handlers lived here. Browser is
   // now a project-level toggle in Project Settings — no per-chat arming.)
 
-  socket.on('chat:browser-pause', ({ chatId }: BrowserPauseRequestPayload) => {
-    const projectId = projectIdFor(chatId);
-    if (!projectId) return;
+  socket.on('chat:browser-pause', ({ projectId, tabId }: { projectId: string; tabId: string }) => {
+    if (!projectId || !tabId) return;
     socket.join(`project:${projectId}`);
-    // Per-chat pause: the agent for THIS chat sees "paused" on its next
-    // browser command (and stops); other chats in the same project keep
-    // working normally. We don't interrupt the SDK turn — the agent reads
-    // the paused message and stops on its own. Less destructive.
-    playwrightSessionManager.setChatPaused(projectId, chatId, true);
-    playwrightSessionManager.beginTakeover(projectId, chatId);
-    playwrightSessionManager.acquireChatLock(projectId, chatId, socket.id);
+    // Resolve owning chat from the tab's in-memory metadata. With multi-tab
+    // per chat, the viewer knows tabId; chat ownership is derived server-side
+    // so the client never has to thread two ids.
+    const owner = playwrightSessionManager.chatOwnerOfTab(projectId, tabId);
+    if (!owner) return;
+    // Pause the CHAT (every tab of that chat blocks agent commands), but
+    // grant the input lock per-TAB so different viewers can control
+    // different tabs without colliding.
+    playwrightSessionManager.setChatPaused(projectId, owner, true);
+    playwrightSessionManager.beginTakeover(projectId, owner);
+    playwrightSessionManager.acquireChatLock(projectId, tabId, socket.id);
   });
 
-  socket.on('chat:browser-resume', async ({ chatId }: BrowserPauseRequestPayload) => {
-    const projectId = projectIdFor(chatId);
-    if (!projectId) return;
-    const { descriptions } = playwrightSessionManager.endTakeover(projectId, chatId);
-    playwrightSessionManager.releaseChatLock(projectId, chatId, socket.id);
-    playwrightSessionManager.setChatPaused(projectId, chatId, false);
+  socket.on('chat:browser-resume', async ({ projectId, tabId }: { projectId: string; tabId: string }) => {
+    if (!projectId || !tabId) return;
+    const owner = playwrightSessionManager.chatOwnerOfTab(projectId, tabId);
+    if (!owner) return;
+    const { descriptions } = playwrightSessionManager.endTakeover(projectId, owner);
+    playwrightSessionManager.releaseChatLock(projectId, tabId, socket.id);
+    playwrightSessionManager.setChatPaused(projectId, owner, false);
+    const chatId = owner;
 
     // Inject a synthetic user message into the SDK chat summarizing the
     // takeover + a fresh snapshot, so the agent can continue from current state.
@@ -75,37 +79,25 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
     // could write it to the PTY input.
   });
 
-  socket.on('chat:browser-lock', (payload: BrowserLockRequestPayload, ack?: (resp: { acquired: boolean; lockedBy: string | null }) => void) => {
-    const projectId = projectIdFor(payload.chatId);
-    if (!projectId) {
+  socket.on('chat:browser-lock', (payload: { projectId: string; tabId: string; acquire: boolean }, ack?: (resp: { acquired: boolean; lockedBy: string | null }) => void) => {
+    const { projectId, tabId, acquire } = payload;
+    if (!projectId || !tabId) {
       ack?.({ acquired: false, lockedBy: null });
       return;
     }
     socket.join(`project:${projectId}`);
-    if (payload.acquire) {
-      const result = playwrightSessionManager.acquireChatLock(projectId, payload.chatId, socket.id);
+    if (acquire) {
+      const result = playwrightSessionManager.acquireChatLock(projectId, tabId, socket.id);
       ack?.(result);
     } else {
-      playwrightSessionManager.releaseChatLock(projectId, payload.chatId, socket.id);
+      playwrightSessionManager.releaseChatLock(projectId, tabId, socket.id);
       ack?.({ acquired: false, lockedBy: null });
     }
   });
 
-  socket.on('chat:browser-input', async (payload: BrowserInputPayload) => {
-    const projectId = projectIdFor(payload.chatId);
-    if (!projectId) return;
-    // Only the lock holder for this chat's tab may dispatch input.
-    // acquireChatLock returns acquired:true if either no one holds it or
-    // we already hold it — either way safe. acquired:false means someone
-    // else is in control; silently drop.
-    const probe = playwrightSessionManager.acquireChatLock(projectId, payload.chatId, socket.id);
-    if (!probe.acquired) return;
-    try {
-      await playwrightSessionManager.dispatchInput(projectId, payload.chatId, payload);
-    } catch (err) {
-      console.error('[browser:input] dispatch failed:', err);
-    }
-  });
+  // (chat:browser-input was the old per-chat input dispatch. With multi-tab,
+  // the BrowserTabViewer emits project:browser-input-tab keyed by tabId
+  // instead — see further down. This handler is gone.)
 
   // Legacy chat-room request kept for backward compat — some clients may
   // still emit it. Routes to the unified per-tab handler.
@@ -148,14 +140,14 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
 
   socket.on('project:browser-create-tab', async ({ projectId, url, label }: { projectId: string; url?: string; label?: string }, ack?: (resp: { tabId: string; url: string } | { error: string }) => void) => {
     try {
-      const tab = projectManager.createManualTab(projectId, { label: label || null });
       socket.join(`project:${projectId}`);
-      const { url: navigated } = await playwrightSessionManager.openTab(projectId, tab.id, url);
-      // Notify everyone in the project so popovers refresh.
+      // Generate a manual tab id and let openTab create it lazily.
+      const tabId = `manual_${Math.random().toString(36).slice(2, 10)}`;
+      const { url: navigated } = await playwrightSessionManager.openTab(projectId, tabId, url);
       io.to(`project:${projectId}`).emit('project:browser-tab-created', {
-        projectId, tabId: tab.id, label: label || null, url: navigated,
+        projectId, tabId, label: label || null, url: navigated,
       });
-      ack?.({ tabId: tab.id, url: navigated });
+      ack?.({ tabId, url: navigated });
     } catch (err: any) {
       ack?.({ error: err?.message || String(err) });
     }
@@ -185,6 +177,13 @@ export default function registerBrowserEvents(socket: Socket, io: SocketIOServer
   });
 
   socket.on('project:browser-input-tab', async (payload: { projectId: string; tabId: string } & Parameters<typeof playwrightSessionManager.dispatchTabInput>[2]) => {
+    // Per-tab lock check: only the socket holding the lock for THIS tab
+    // may dispatch input. For manual tabs there's no lock; we attempt to
+    // acquire (no-op if nobody holds it) and proceed. For chat tabs the
+    // BrowserTabViewer's Take Over button is what calls chat:browser-lock,
+    // so by the time input comes in, the lock is already held.
+    const probe = playwrightSessionManager.acquireChatLock(payload.projectId, payload.tabId, socket.id);
+    if (!probe.acquired) return;
     try { await playwrightSessionManager.dispatchTabInput(payload.projectId, payload.tabId, payload); }
     catch (err) { console.error('[project:browser-input-tab] failed:', err); }
   });

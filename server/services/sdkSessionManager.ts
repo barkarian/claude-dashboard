@@ -613,17 +613,21 @@ loaded ENOUGH. Don't second-guess based on visual animations, micro-skeleton tra
 === TAB LIFECYCLE (dashboard-specific) ===
 Chromium is owned by the dashboard, not by you. Important rules:
 
-- Each chat owns one tab. The user sees every tab in the project's Browser
-  popover. They expect tabs to **stay open** until they close them themselves.
+- Your chat can own multiple tabs. The user sees every tab — yours, other
+  chats', and any manual tabs they opened — in the project's Browser
+  popover, grouped by owner. Tabs **stay open** until the user closes them.
 - When you're "done", just stop running commands. DON'T close the tab.
 - **NEVER use \`close\`, \`close-all\`, \`kill-all\`, \`delete-data\`** — those
   kill Chromium project-wide and wipe every chat's tab. The dashboard rejects
   them and will return an error.
-- For a brand-new URL unrelated to the current page: prefer \`tab-new <url>\`
-  over re-using \`open <url>\` (which reloads in the existing tab).
+- For a brand-new URL unrelated to the current page: use \`tab-new <url>\`.
+  This opens a fresh tab and leaves your previous one untouched, which is
+  ideal for parallel scenarios (e.g. compare site A and site B).
 - For navigating in the same tab (clicking a link, going to a sub-page):
   \`goto <url>\` or \`click <ref>\` as usual.
-- To close just your own tab (rare): \`tab-close\`.
+- To switch which tab your subsequent commands operate on, use
+  \`tab-select <index>\`. \`tab-list\` shows all tabs in your session.
+- To close just one of your tabs (rare): \`tab-close [index]\`.
 
 === VIEWPORT MODES (dashboard-specific) ===
 This dashboard exposes three viewport presets via \`viewport <mode>\`:

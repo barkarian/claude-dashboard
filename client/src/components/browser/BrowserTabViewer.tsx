@@ -82,8 +82,8 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
         setUrlInput(p.url === 'about:blank' ? '' : p.url);
       }
     }
-    function handleState(p: { projectId: string; chatId: string; paused: boolean; lockedBy: string | null }) {
-      if (p.projectId !== projectId || p.chatId !== tabId) return;
+    function handleState(p: { projectId: string; tabId: string; chatId: string | null; paused: boolean; lockedBy: string | null }) {
+      if (p.projectId !== projectId || p.tabId !== tabId) return;
       setPaused(p.paused);
       setLockedBy(p.lockedBy);
     }
@@ -99,11 +99,11 @@ export default function BrowserTabViewer({ projectId, tabId, initialUrl, onGoToC
 
   function takeOver() {
     if (tabIsManual) return;
-    socket?.emit('chat:browser-pause', { chatId: tabId });
+    socket?.emit('chat:browser-pause', { projectId, tabId });
   }
   function releaseControl() {
     if (tabIsManual) return;
-    socket?.emit('chat:browser-resume', { chatId: tabId });
+    socket?.emit('chat:browser-resume', { projectId, tabId });
   }
 
   function navigateUrl(target: string) {
