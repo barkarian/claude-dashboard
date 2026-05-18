@@ -66,6 +66,23 @@ function copyDirRecursive(src: string, dest: string): void {
   }
 }
 
+/**
+ * Drop a `.gitignore` *inside* the directory that ignores everything except
+ * itself. Lets us keep machine-local / runtime contents out of git without
+ * touching the user's root `.gitignore`. The .gitignore itself is committed
+ * once (so the directory survives `git clean -fd`); everything else stays
+ * invisible.
+ */
+function writeNestedGitignore(dir: string, headerComment: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const body =
+    `${headerComment}\n` +
+    `# Ignore everything in this directory except this file itself.\n` +
+    `*\n` +
+    `!.gitignore\n`;
+  fs.writeFileSync(path.join(dir, '.gitignore'), body);
+}
+
 export interface InstallResult {
   installed: boolean;
   skillDir: string;
@@ -84,6 +101,22 @@ export function installBrowserSkill(projectPath: string): InstallResult {
   const destDir = path.join(projectPath, '.claude', 'skills', 'playwright-cli');
   copyDirRecursive(sourceDir, destDir);
   ensurePermission(projectPath, 'Bash(playwright-cli:*)');
+
+  // Drop nested .gitignore files so the skill content + the CLI's runtime
+  // artifacts don't pollute the user's git status. Skill files are
+  // machine-local (managed by the dashboard toggle); .playwright-cli/ holds
+  // ephemeral snapshots, screenshots, and logs the agent writes per turn.
+  writeNestedGitignore(
+    destDir,
+    '# Playwright skill installed by the dashboard Browser toggle.\n' +
+    '# Machine-local — re-installed automatically when the toggle is on.',
+  );
+  writeNestedGitignore(
+    path.join(projectPath, '.playwright-cli'),
+    '# Runtime artifacts written by playwright-cli (snapshots, screenshots,\n' +
+    '# console logs, videos). Never commit these.',
+  );
+
   return { installed: true, skillDir: destDir };
 }
 

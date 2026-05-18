@@ -227,6 +227,29 @@ async function launchContext(ws: WorkspaceState): Promise<Browser> {
   return context;
 }
 
+/**
+ * Idempotently ensure that .playwright-cli/.gitignore exists in the project,
+ * so the runtime artifacts the CLI writes (snapshots, screenshots, logs)
+ * don't appear in `git status` even for projects whose Browser toggle was
+ * flipped on before we shipped nested gitignores. Cheap & safe to call on
+ * every exec.
+ */
+function ensurePlaywrightCliGitignore(projectPath: string): void {
+  const dir = path.join(projectPath, '.playwright-cli');
+  const file = path.join(dir, '.gitignore');
+  try {
+    if (fs.existsSync(file)) return;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      file,
+      '# Runtime artifacts written by playwright-cli (snapshots, screenshots,\n' +
+      '# console logs, videos). Never commit these.\n' +
+      '# Ignore everything in this directory except this file itself.\n' +
+      '*\n!.gitignore\n',
+    );
+  } catch { /* ignore — best effort */ }
+}
+
 async function ensureContext(ws: WorkspaceState): Promise<Browser> {
   if (!ws.contextPromise) {
     ws.contextPromise = launchContext(ws).catch((err) => {
@@ -596,6 +619,7 @@ async function execOnWorkspace(
     ws.activeTabId = msg.chatId;
     const entryForStamp = ws.tabs.get(msg.chatId);
     if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
+    ensurePlaywrightCliGitignore(msg.cwd);
     let code: number;
     try {
       // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
@@ -645,6 +669,7 @@ export async function execForChat(
     ws.activeTabId = chatId;
     const entryForStamp = ws.tabs.get(chatId);
     if (entryForStamp) entryForStamp.lastCommandAt = Date.now();
+    ensurePlaywrightCliGitignore(cwd);
     // Sweep stale daemon sockets so EADDRINUSE doesn't bubble up to the agent.
     await sweepStaleDaemonSockets(ws.cliSession);
     try {
