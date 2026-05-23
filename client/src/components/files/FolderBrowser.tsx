@@ -1,7 +1,9 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Tree } from 'react-arborist';
+import { toast } from 'sonner';
 import { useProjectFiles } from '../../hooks/useProjectFiles.ts';
 import { useUiState } from '../../hooks/useUiState.ts';
+import { useProject } from '../../context/ProjectContext.tsx';
 import { buildFileTree, type TreeNode } from '../../utils/buildFileTree.ts';
 import { getFileIcon } from '../../utils/fileIcons.ts';
 import { useIsMobile } from '../../hooks/use-mobile.tsx';
@@ -32,6 +34,7 @@ function triggerDownload(projectId: string, filePath: string) {
 
 export default function FolderBrowser({ projectId }: FolderBrowserProps) {
   const { files, loading } = useProjectFiles(projectId);
+  const { project } = useProject();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
   const [changedFiles, setChangedFiles] = useState<Map<string, FileStatus>>(new Map());
@@ -173,6 +176,22 @@ export default function FolderBrowser({ projectId }: FolderBrowserProps) {
         onClose={() => setCtxMenu(prev => ({ ...prev, open: false }))}
         position={ctxMenu.position}
         items={[
+          {
+            label: 'Copy path',
+            icon: (
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+            ),
+            onAction: () => {
+              const absolute = project?.path
+                ? `${project.path.replace(/\/$/, '')}/${ctxMenu.filePath}`
+                : ctxMenu.filePath;
+              navigator.clipboard.writeText(absolute)
+                .then(() => toast.success('Path copied'))
+                .catch(() => toast.error('Failed to copy path'));
+            },
+          },
           {
             label: 'Download',
             icon: (

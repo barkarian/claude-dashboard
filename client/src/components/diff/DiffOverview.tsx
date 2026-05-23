@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toast } from 'sonner';
 import { Card } from '../ui/card.tsx';
 import { Badge } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
@@ -298,6 +299,7 @@ export default function DiffOverview({ projectId, mode = 'dev', repoPath, onRepo
           file={file}
           mode={mode}
           projectId={projectId}
+          repoPath={repoPath}
           onSelect={() => setSelectedFile(file.path)}
           onRevert={() => handleRevert(file.path)}
         />
@@ -410,12 +412,14 @@ function FileChangeCard({
   file,
   mode,
   projectId,
+  repoPath,
   onSelect,
   onRevert,
 }: {
   file: DiffFile;
   mode: ProjectMode;
   projectId: string;
+  repoPath?: string;
   onSelect: () => void;
   onRevert: () => void;
 }) {
@@ -475,6 +479,21 @@ function FileChangeCard({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 View
+              </button>
+              <button
+                onClick={() => {
+                  close();
+                  const absolute = repoPath ? `${repoPath.replace(/\/$/, '')}/${file.path}` : file.path;
+                  navigator.clipboard.writeText(absolute)
+                    .then(() => toast.success('Path copied'))
+                    .catch(() => toast.error('Failed to copy path'));
+                }}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-bg-hover transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                Copy path
               </button>
               <button
                 onClick={() => { close(); onRevert(); }}

@@ -525,6 +525,11 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   // see idle chats too with "Show more".
   const [chatsByProject, setChatsByProject] = useState<Record<string, { chats: Chat[]; total: number }>>({});
   const [chatsLoadingProject, setChatsLoadingProject] = useState<Set<string>>(new Set());
+  // Ref mirror so async handlers (sidebar:chat-meta-changed, socket reconnect)
+  // can read the latest cache without subscribing to its identity and forcing
+  // a re-bind on every fetch.
+  const chatsByProjectRef = useRef(chatsByProject);
+  useEffect(() => { chatsByProjectRef.current = chatsByProject; }, [chatsByProject]);
 
   const fetchProjectChats = useCallback(async (projectId: string, more: boolean, coverActivityAt?: string) => {
     setChatsLoadingProject(prev => {
@@ -904,6 +909,31 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
     loadInitial();
   }, []);
 
+  // Refetch sidebar state on every socket reconnect. Mobile backgrounding,
+  // network blips, or laptop sleep drop the socket; any sidebar:* events
+  // fired by the server during the gap are lost (Socket.IO has no replay).
+  // Without this, the sidebar shows stale tabs/titles until the user manually
+  // reloads. Skip the first 'connect' (mount-time loadInitial already covers
+  // it) so we don't double-fetch on cold start.
+  const firstConnectSkippedRef = useRef(false);
+  useEffect(() => {
+    if (!socket) return;
+    const onReconnect = () => {
+      if (!firstConnectSkippedRef.current) {
+        firstConnectSkippedRef.current = true;
+        return;
+      }
+      loadInitial();
+      // Refresh already-expanded projects too — loadInitial only pulls the
+      // project summaries, not their per-project tab lists.
+      for (const projectId of Object.keys(chatsByProjectRef.current)) {
+        fetchProjectChats(projectId, false);
+      }
+    };
+    socket.on('connect', onReconnect);
+    return () => { socket.off('connect', onReconnect); };
+  }, [socket, fetchProjectChats]);
+
   // Auto-close mobile drawer on navigation + clear search + close popovers
   useEffect(() => {
     setOpenMobile(false);
@@ -982,21 +1012,43 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
   }, []);
 
   const onChatMetaChanged = useCallback((e: SidebarChatMetaChanged) => {
+    // Newly-opened tab signals: a chat was promoted to the sidebar elsewhere
+    // (auto-promote on user message, or open from another device). The chat
+    // may not exist in the local cache yet — fetch the project's tabs so it
+    // appears immediately instead of waiting for a manual refresh.
+    const tabNewlyOpened = typeof e.tabOpenedAt === 'string';
+    if (tabNewlyOpened) {
+      const entry = chatsByProjectRef.current[e.projectId];
+      const cached = entry?.chats.some(c => c.id === e.chatId) ?? false;
+      if (!cached) {
+        fetchProjectChats(e.projectId, false);
+        // Bump openTabsCount so the auto-expand effect picks the project up
+        // when this was the first tab opened on it.
+        const bump = (p: ProjectSummary): ProjectSummary =>
+          p.id === e.projectId ? { ...p, openTabsCount: (p.openTabsCount ?? 0) + 1 } : p;
+        setPinnedProjects(prev => prev.map(bump));
+        setProjects(prev => prev.map(bump));
+      }
+    }
     setChatsByProject(prev => {
       const entry = prev[e.projectId];
       // Tab opened by another client on a project we haven't lazy-fetched
-      // yet → no local entry to update; the next expand will load fresh.
+      // yet → no local entry to update; the fetch above (or the next expand)
+      // will load fresh.
       if (!entry) return prev;
       // Tab closed elsewhere → drop the row from this project's cache.
       if (e.tabOpenedAt === null) {
         const filtered = entry.chats.filter(c => c.id !== e.chatId);
         if (filtered.length === entry.chats.length) return prev;
+        const dec = (p: ProjectSummary): ProjectSummary =>
+          p.id === e.projectId ? { ...p, openTabsCount: Math.max(0, (p.openTabsCount ?? 1) - 1) } : p;
+        setPinnedProjects(pp => pp.map(dec));
+        setProjects(pp => pp.map(dec));
         return { ...prev, [e.projectId]: { chats: filtered, total: Math.max(0, entry.total - 1) } };
       }
       const exists = entry.chats.some(c => c.id === e.chatId);
-      // Tab opened elsewhere for a chat we don't have cached yet → can't
-      // synthesise a full Chat object from a meta event; rely on the next
-      // expand to fetch it. (Chat-create events still carry the full chat.)
+      // Tab opened elsewhere for a chat we don't have cached yet → the fetch
+      // above will pull it in; nothing to mutate here.
       if (!exists) return prev;
       let changed = false;
       const chats = entry.chats.map(c => {
@@ -1020,7 +1072,7 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
       if (!changed) return prev;
       return { ...prev, [e.projectId]: { chats, total: entry.total } };
     });
-  }, []);
+  }, [fetchProjectChats]);
 
   // Another client (or another tab) reordered this project's chat tabs —
   // mirror the new order locally by writing tab_order onto each cached
@@ -1943,6 +1995,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
               onAction: () => { pinProject(projectMenu.project, 0); },
             },
           ]),
+          {
+            label: 'Copy path',
+            icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>,
+            onAction: () => {
+              navigator.clipboard.writeText(projectMenu.project.path)
+                .then(() => toast.success('Path copied'))
+                .catch(() => toast.error('Failed to copy path'));
+            },
+          },
           ...(isDesktop ? [
             {
               label: 'Open Folder',
@@ -1970,6 +2031,15 @@ const AppSidebar = forwardRef<SidebarHandle>(function AppSidebar(_props, ref) {
           onClose={() => setIdeMenu(null)}
           position={{ x: ideMenu?.x || 0, y: ideMenu?.y || 0 }}
           items={ideMenu ? [
+            {
+              label: 'Copy path',
+              icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>,
+              onAction: () => {
+                navigator.clipboard.writeText(ideMenu.projectPath)
+                  .then(() => toast.success('Path copied'))
+                  .catch(() => toast.error('Failed to copy path'));
+              },
+            },
             {
               label: 'Open Folder',
               icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>,
